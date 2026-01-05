@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.6.1-blue)
+  ![Version](https://img.shields.io/badge/version-0.0.2-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -230,7 +230,7 @@ aimd/
 │       └── url.py          # Video URL processing with yt-dlp
 ├── tests/
 ├── pyproject.toml
-└── CLAUDE.md
+└── AGENTS.md
 ```
 
 ## Architecture
@@ -273,4 +273,4 @@ MIT License - see LICENSE file for details.
 ## Support
 
 - **Issues**: Report bugs and request features on GitHub
-- **Documentation**: See CLAUDE.md for detailed architecture information
+- **Documentation**: See AGENTS.md for detailed architecture information

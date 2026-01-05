@@ -102,6 +102,12 @@ def process(
         "-l",
         help="Language locale for transcription (e.g., zh_CN, en_US). Used for audio/video.",
     ),
+    save_original: Optional[Path] = typer.Option(
+        None,
+        "--save-original",
+        "-s",
+        help="Save the original downloaded audio/video file to specified path or directory.",
+    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -136,7 +142,7 @@ def process(
         try:
             if task_type == "transcript":
                 await _process_transcript(
-                    input_source, output_file, transcribe_engine, locale
+                    input_source, output_file, transcribe_engine, locale, save_original
                 )
             else:
                 await _process_convert(input_source, output_file)
@@ -154,11 +160,14 @@ async def _process_transcript(
     output_file: Optional[Path],
     engine: str,
     locale: str | None,
+    save_original: Optional[Path] = None,
 ):
     """Process audio/video transcription."""
     if is_url(input_source):
         logger.info(f"Getting transcript from URL: {input_source}")
-        text_context = await get_text_from_url(input_source, engine, locale)
+        text_context = await get_text_from_url(
+            input_source, engine, locale, save_original
+        )
     else:
         file_path = Path(input_source)
         logger.info(f"Getting transcript from: {file_path}")

@@ -81,6 +81,7 @@ async def get_text_from_url(
     url: str,
     transcribe_engine: str = "auto",
     locale: str | None = None,
+    save_original_path: Path | None = None,
 ) -> TextContext:
     """Extract text content from video URLs using yt-dlp.
 
@@ -91,6 +92,10 @@ async def get_text_from_url(
         url: Video URL from any supported platform
         transcribe_engine: Transcription engine for audio fallback
         locale: Language locale for audio transcription
+        save_original_path: Path to save the original downloaded audio file.
+            If a directory, the audio will be saved there with auto-generated name.
+            If a file path, the audio will be saved to that exact path.
+            If None, the audio is stored in a temporary directory and deleted after processing.
 
     Returns:
         TextContext with title and content
@@ -124,7 +129,7 @@ async def get_text_from_url(
         # Fallback: extract content from audio
         logger.info("No subtitles available, extracting content from audio")
         audio_content = await _extract_content_from_audio(
-            info_dict, url, transcribe_engine, locale
+            info_dict, url, transcribe_engine, locale, save_original_path
         )
 
         if audio_content and audio_content.strip():
@@ -347,6 +352,7 @@ async def _extract_content_from_audio(
     url: str,
     transcribe_engine: str,
     locale: str | None,
+    save_original_path: Path | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it.
 
@@ -355,19 +361,20 @@ async def _extract_content_from_audio(
         url: Original video URL
         transcribe_engine: Transcription engine to use
         locale: Language locale for transcription
+        save_original_path: Path to save the original audio file (directory or file path)
 
     Returns:
         Transcribed text if successful, None otherwise
     """
     logger.info("Attempting to extract content from audio")
 
-    # Create temporary directory for audio file
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-
+    async def _process_audio(download_path: Path) -> str | None:
+        """Process audio download and transcription."""
         try:
             # Download audio using yt-dlp
-            audio_file_path = await _download_audio(info_dict, url, temp_path)
+            audio_file_path = await _download_audio(
+                info_dict, url, download_path, save_original_path
+            )
 
             if not audio_file_path or not audio_file_path.exists():
                 logger.warning("Failed to download audio file")
@@ -397,23 +404,62 @@ async def _extract_content_from_audio(
             logger.error(f"Failed to extract content from audio: {e}")
             return None
 
+    # If save_original_path is specified, use it (or its parent) as download directory
+    if save_original_path is not None:
+        # Determine the download directory
+        if save_original_path.is_dir() or (
+            not save_original_path.exists() and save_original_path.suffix == ""
+        ):
+            # It's a directory path
+            download_dir = save_original_path
+        else:
+            # It's a file path, use its parent directory
+            download_dir = save_original_path.parent
+
+        download_dir.mkdir(parents=True, exist_ok=True)
+        return await _process_audio(download_dir)
+    else:
+        # Use temporary directory (deleted after processing)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            return await _process_audio(temp_path)
+
 
 async def _download_audio(
-    info_dict: dict[str, Any], url: str, temp_path: Path
+    info_dict: dict[str, Any],
+    url: str,
+    download_path: Path,
+    save_original_path: Path | None = None,
 ) -> Path | None:
     """Download audio from video using yt-dlp.
 
     Args:
         info_dict: Video information from yt-dlp
         url: Original video URL
-        temp_path: Temporary directory path
+        download_path: Directory path to download audio to
+        save_original_path: If specified as a file path, use this exact filename.
+            If None or a directory, auto-generate filename.
 
     Returns:
         Path to downloaded audio file, None if failed
     """
     try:
-        # Generate audio filename
-        audio_filename = f"audio_{info_dict.get('id', 'unknown')}"
+        # Determine output filename
+        if save_original_path is not None and save_original_path.suffix != "":
+            # save_original_path is a file path, use the stem as filename
+            audio_filename = save_original_path.stem
+        else:
+            # Auto-generate filename from video title or ID
+            video_title = info_dict.get("title", "")
+            video_id = info_dict.get("id", "unknown")
+            if video_title:
+                # Sanitize title for filename
+                safe_title = "".join(
+                    c if c.isalnum() or c in " -_" else "_" for c in video_title
+                )[:100]
+                audio_filename = safe_title.strip() or f"audio_{video_id}"
+            else:
+                audio_filename = f"audio_{video_id}"
 
         def _download():
             # Create a separate YoutubeDL instance for audio download with specific options
@@ -422,7 +468,7 @@ async def _download_audio(
                 "quiet": True,
                 "no_warnings": True,
                 "format": "bestaudio/best",  # Select best audio format
-                "outtmpl": str(temp_path / audio_filename),
+                "outtmpl": str(download_path / audio_filename),
                 "postprocessors": [
                     {
                         "key": "FFmpegExtractAudio",
@@ -466,11 +512,18 @@ async def _download_audio(
         await loop.run_in_executor(None, _download)
 
         # Find the actual downloaded file (yt-dlp might change extension)
-        audio_files = list(temp_path.glob("audio_*.*"))
+        # Search for files matching the audio_filename pattern
+        audio_files = list(download_path.glob(f"{audio_filename}.*"))
+        if not audio_files:
+            # Fallback: try finding any audio file starting with audio_
+            audio_files = list(download_path.glob("audio_*.*"))
         logger.info(f"Audio files: {audio_files}")
 
         if audio_files:
-            return audio_files[0]
+            saved_file = audio_files[0]
+            if save_original_path is not None:
+                logger.info(f"Original audio saved to: {saved_file}")
+            return saved_file
         else:
             logger.error("No audio file found after download")
             return None

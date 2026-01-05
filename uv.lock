@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "aimd"
-version = "0.6.1"
+version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
