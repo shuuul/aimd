@@ -431,7 +431,13 @@ async def _download_audio(
     download_path: Path,
     save_original_path: Path | None = None,
 ) -> Path | None:
-    """Download audio from video using yt-dlp.
+    """Download audio from video using yt-dlp with format fallbacks.
+
+    Tries multiple format strategies in order:
+    1. Best audio-only format with m4a extraction
+    2. Best audio-only format with mp3 extraction
+    3. Best combined format (video+audio) with audio extraction
+    4. Any available format with audio extraction
 
     Args:
         info_dict: Video information from yt-dlp
@@ -443,94 +449,158 @@ async def _download_audio(
     Returns:
         Path to downloaded audio file, None if failed
     """
-    try:
-        # Determine output filename
-        if save_original_path is not None and save_original_path.suffix != "":
-            # save_original_path is a file path, use the stem as filename
-            audio_filename = save_original_path.stem
+    # Determine output filename
+    if save_original_path is not None and save_original_path.suffix != "":
+        # save_original_path is a file path, use the stem as filename
+        audio_filename = save_original_path.stem
+    else:
+        # Auto-generate filename from video title or ID
+        video_title = info_dict.get("title", "")
+        video_id = info_dict.get("id", "unknown")
+        if video_title:
+            # Sanitize title for filename
+            safe_title = "".join(
+                c if c.isalnum() or c in " -_" else "_" for c in video_title
+            )[:100]
+            audio_filename = safe_title.strip() or f"audio_{video_id}"
         else:
-            # Auto-generate filename from video title or ID
-            video_title = info_dict.get("title", "")
-            video_id = info_dict.get("id", "unknown")
-            if video_title:
-                # Sanitize title for filename
-                safe_title = "".join(
-                    c if c.isalnum() or c in " -_" else "_" for c in video_title
-                )[:100]
-                audio_filename = safe_title.strip() or f"audio_{video_id}"
-            else:
-                audio_filename = f"audio_{video_id}"
+            audio_filename = f"audio_{video_id}"
 
-        def _download():
-            # Create a separate YoutubeDL instance for audio download with specific options
-            # Following deepwiki recommendations for audio-only downloads
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "format": "bestaudio/best",  # Select best audio format
-                "outtmpl": str(download_path / audio_filename),
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "m4a",
-                        "preferredquality": "192",
-                    }
-                ],
-            }
+    # Define format strategies to try in order
+    # Each strategy is a tuple of (format_selector, preferred_codec, description)
+    format_strategies = [
+        ("bestaudio/best", "m4a", "best audio with m4a extraction"),
+        ("bestaudio/best", "mp3", "best audio with mp3 extraction"),
+        (
+            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=webm]/bestaudio/best",
+            "best",
+            "any audio format",
+        ),
+        ("best[acodec!=none]", "m4a", "best format with audio track"),
+        ("best", "mp3", "best combined format"),
+        ("worstaudio/worst", "mp3", "worst quality fallback"),
+    ]
 
-            # Detect platform for audio download
-            platform = _detect_platform(url)
+    platform = _detect_platform(url)
+    last_error = None
 
-            # Add browser impersonation for better compatibility (if available)
-            if platform == "youtube":
-                try:
-                    # Test if impersonation is available
-                    test_opts = {"quiet": True, "impersonate": "chrome"}
-                    test_ydl = yt_dlp.YoutubeDL(test_opts)
-                    test_ydl.close()  # Clean up test instance
-                    ydl_opts["impersonate"] = "chrome"
-                    logger.debug(
-                        "Browser impersonation enabled for YouTube audio download"
-                    )
-                except Exception as e:
-                    logger.debug(
-                        f"Browser impersonation not available for audio download: {e}"
-                    )
-                    # Continue without impersonation
+    for format_selector, preferred_codec, description in format_strategies:
+        try:
+            logger.info(f"Trying format strategy: {description}")
+            audio_file = await _try_download_with_format(
+                url=url,
+                download_path=download_path,
+                audio_filename=audio_filename,
+                format_selector=format_selector,
+                preferred_codec=preferred_codec,
+                platform=platform,
+            )
 
-            # Add cookies for all platforms (required for Bilibili)
+            if audio_file and audio_file.exists():
+                if save_original_path is not None:
+                    logger.info(f"Original audio saved to: {audio_file}")
+                logger.info(
+                    f"Successfully downloaded audio using strategy: {description}"
+                )
+                return audio_file
+
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Format strategy '{description}' failed: {e}")
+            continue
+
+    # All strategies failed
+    logger.error(f"All download strategies failed. Last error: {last_error}")
+    return None
+
+
+async def _try_download_with_format(
+    url: str,
+    download_path: Path,
+    audio_filename: str,
+    format_selector: str,
+    preferred_codec: str,
+    platform: str,
+) -> Path | None:
+    """Attempt to download audio with specific format settings.
+
+    Args:
+        url: Video URL to download from
+        download_path: Directory to save the file
+        audio_filename: Base filename (without extension)
+        format_selector: yt-dlp format selector string
+        preferred_codec: Preferred audio codec for extraction
+        platform: Detected platform name
+
+    Returns:
+        Path to downloaded file, or None if failed
+    """
+
+    def _download():
+        # Build yt-dlp options
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "format": format_selector,
+            "outtmpl": str(download_path / audio_filename),
+        }
+
+        # Add audio extraction postprocessor
+        # 'best' codec means keep original format if possible
+        if preferred_codec == "best":
+            ydl_opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "best",
+                }
+            ]
+        else:
+            ydl_opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": preferred_codec,
+                    "preferredquality": "192",
+                }
+            ]
+
+        # Add browser impersonation for YouTube (if available)
+        if platform == "youtube":
             try:
-                ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+                test_opts = {"quiet": True, "impersonate": "chrome"}
+                test_ydl = yt_dlp.YoutubeDL(test_opts)
+                test_ydl.close()
+                ydl_opts["impersonate"] = "chrome"
+                logger.debug("Browser impersonation enabled for audio download")
             except Exception as e:
-                logger.warning(f"Failed to load cookies for audio download: {e}")
+                logger.debug(f"Browser impersonation not available: {e}")
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+        # Add cookies for all platforms (required for Bilibili)
+        try:
+            ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+        except Exception as e:
+            logger.warning(f"Failed to load cookies: {e}")
 
-        # Run download in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _download)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-        # Find the actual downloaded file (yt-dlp might change extension)
-        # Search for files matching the audio_filename pattern
-        audio_files = list(download_path.glob(f"{audio_filename}.*"))
-        if not audio_files:
-            # Fallback: try finding any audio file starting with audio_
-            audio_files = list(download_path.glob("audio_*.*"))
-        logger.info(f"Audio files: {audio_files}")
+    # Run download in thread pool
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _download)
 
-        if audio_files:
-            saved_file = audio_files[0]
-            if save_original_path is not None:
-                logger.info(f"Original audio saved to: {saved_file}")
-            return saved_file
-        else:
-            logger.error("No audio file found after download")
-            return None
+    # Find the downloaded file
+    # yt-dlp might change the extension based on codec/format
+    audio_files = list(download_path.glob(f"{audio_filename}.*"))
+    if not audio_files:
+        # Fallback: try finding any recently created audio/video file
+        audio_files = list(download_path.glob("audio_*.*"))
 
-    except Exception as e:
-        logger.error(f"Failed to download audio: {e}")
-        return None
+    logger.debug(f"Found files after download: {audio_files}")
+
+    if audio_files:
+        # Return the first matching file
+        return audio_files[0]
+
+    return None
 
 
 def _format_content(info_dict: dict[str, Any], content: str | None) -> str:

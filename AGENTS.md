@@ -1,139 +1,79 @@
-# AGENTS.md
+# PROJECT KNOWLEDGE BASE
 
-This file provides guidance to agents when working with code in this repository.
+**Generated:** 2026-01-26
+**Commit:** 3755051293cef5b08fbac2e9b7db6ba32388e199
+**Branch:** main
 
-## Development Commands
+## OVERVIEW
 
-**Environment Setup:**
+Python CLI tool for LLM context preparation - transcribes audio/video and converts documents to markdown.
+
+## STRUCTURE
+
+```
+aimd/
+├── src/aimd/
+│   ├── cli.py              # Entry point (typer CLI)
+│   ├── const.py            # Constants (extensions, engines, locales)
+│   ├── utils.py            # URL/file utilities
+│   ├── types.py            # TextContext Pydantic model
+│   └── tool/
+│       ├── audio.py        # Multi-engine transcription
+│       ├── file.py         # Document conversion (Pandoc)
+│       └── url.py          # Video URL extraction (yt-dlp)
+├── tests/
+│   └── test_epub.py
+├── pyproject.toml
+└── AGENTS.md
+```
+
+## WHERE TO LOOK
+
+| Task | Location | Notes |
+|------|----------|-------|
+| CLI logic | `src/aimd/cli.py` | Auto-detection, task dispatch |
+| Audio transcription | `src/aimd/tool/audio.py` | yap/mlx/cuda/cpu engines |
+| Document conversion | `src/aimd/tool/file.py` | Pandoc, EPUB extraction |
+| URL processing | `src/aimd/tool/url.py` | yt-dlp, subtitle extraction |
+| Constants | `src/aimd/const.py` | Extensions, engines, locales |
+
+## CONVENTIONS (THIS PROJECT)
+
+- **Async-first**: All processing functions are `async`
+- **uv only**: Use `uv run`, `uv sync`, not pip/poetry
+- **TextContext**: Tools return `TextContext(title, chunk_list, split_header_level)`
+- **40k char limit**: Documents auto-split to stay under LLM context limit
+- **Engine selection**: `auto` picks platform-optimal (yap→mlx→cuda→cpu)
+
+## ANTI-PATTERNS (THIS PROJECT)
+
+- **Danmaku forbidden**: Subtitle type blocked in `FORBIDDEN_SUBTITLE_LANGUAGES`
+- **Platform locks**: `yap`/`mlx` require macOS; `mlx` needs Apple Silicon
+- **No fallback splitter**: `file.py` throws if doc has no markdown headers
+- **Fragile encoding**: `audio.py` yap fallback tries UTF-8→GB2312→Latin-1
+- **Runtime imports**: Engine libs imported inside functions (late failure)
+
+## COMMANDS
 
 ```bash
-# Install dependencies and setup development environment
+# Setup
 uv sync --all-packages --all-extras --dev
 
-# Activate virtual environment (if needed)
-source .venv/bin/activate
-```
-
-**Code Quality:**
-
-```bash
-# Lint and format code
+# Code quality
 uv run ruff check --fix && uv run ruff format
-
-# Run pre-commit checks
 uv run pre-commit run --all-files
+
+# Run
+aimd audio.mp3                    # Auto-detect
+aimd "https://youtube.com/..."   # URL
+aimd book.epub                   # Document
+
+# Test
+uv run pytest
 ```
 
-**Version Management:**
+## NOTES
 
-```bash
-# Bump version (major, minor, patch)
-uv version --bump patch
-```
-
-**Testing and Usage:**
-
-```bash
-# Run the CLI tool
-aimd --help
-
-# Process any input - auto-detects type
-aimd audio.mp3                    # Transcribe audio
-aimd "https://www.youtube.com/watch?v=VIDEO_ID"  # Extract subtitles
-aimd book.epub                    # Convert to markdown
-aimd document.txt                 # Convert text file
-
-# With options
-aimd audio.mp3 -o output.md       # Custom output
-aimd audio.mp3 -e mlx             # Specify engine (mlx, yap, cuda, cpu)
-aimd interview.wav -l zh_CN       # Specify locale
-```
-
-## Architecture Overview
-
-### Core Components
-
-**Context Preparation Tool**: A unified CLI tool that automatically detects input type and processes accordingly.
-
-**Auto-Detection Logic** (`cli.py:_get_task_type`):
-- URL → Transcript extraction
-- Audio/Video file → Transcription
-- Document file → Pandoc conversion
-
-**Tool-Based Architecture**: Specialized tools in `tool/` directory:
-
-- `tool/file.py`: Document processing with Pandoc
-- `tool/audio.py`: Multi-engine audio transcription
-- `tool/url.py`: Video platform content extraction using yt-dlp
-
-**Core Utilities** (`utils.py`):
-
-- `save_result()`: File output handling
-- `sanitize_filename()`: Create safe filenames
-- `create_output_path_from_title()`: Generate output paths
-- `is_url()` / `is_supported_url()`: URL validation
-
-### Key Patterns
-
-**Async-First Design**: All core processing functions are async.
-
-**TextContext**: Pydantic model carrying processing context:
-- `title`: Document/video title
-- `chunk_list`: List of text chunks
-- `split_header_level`: Header level used for splitting
-
-**CLI Interface**: Single command `aimd` with auto-detection.
-
-## Important Details
-
-**Output File Handling**: When no output specified, `create_output_path_from_title()` generates filenames with template suffix (`.md` extension). For video URLs, the video title is extracted and sanitized.
-
-**Video Platform Support** (`tool/url.py`):
-
-- **Supported**: YouTube, Bilibili, 1000+ platforms via yt-dlp
-- **Content**: Metadata, subtitles, audio streams
-- **No authentication** required for most content
-
-**Audio Transcription** (`tool/audio.py`):
-
-- **Formats**: MP3, WAV, M4A, FLAC, OGG, AAC, MP4
-- **Engines**:
-  - `auto`: Platform-optimized selection
-  - `yap`: macOS only, requires yap CLI
-  - `mlx`: Apple Silicon (M1-M4), uses mlx-whisper
-  - `cuda`: NVIDIA GPU with CUDA 12
-  - `cpu`: Cross-platform fallback (faster-whisper)
-- **Languages**: Auto-detection or manual locale
-
-**Document Conversion** (`tool/file.py`):
-
-- **Formats**: EPUB, PDF, TXT, MD, 40+ others via Pandoc
-- **Features**: Title extraction, automatic chunking for large files
-- **Output**: Clean markdown optimized for LLM context
-
-**EPUB Processing** (`tool/file.py`):
-
-- **EPUB to Markdown**: Extracts images and chapter files from EPUB
-- **Output Structure**:
-  ```
-  book_name/
-  ├── book_name.md      # Combined content from all chapters
-  ├── chapters/
-  │   ├── chapter_001.md
-  │   ├── chapter_002.md
-  │   └── ...
-  └── images/
-      └── *.jpg, *.png, *.svg, etc.
-  ```
-
-**Configuration** (optional env vars):
-
-- `YT_DLP_CONFIG_HOME`: Custom yt-dlp config
-- `YT_DLP_CACHE_DIR`: Custom yt-dlp cache
-- `YAP_MODEL_PATH`: Custom yap model (macOS)
-
-**Error Handling**:
-
-- Runtime engine compatibility checks
-- Graceful fallbacks between engines
-- Cached cookie jar failures
+- **EPUB output**: Creates `book_name/{book_name.md, chapters/, images/}`
+- **Cookie dependency**: `url.py` reads Chrome cookies for YouTube/Bilibili
+- **Title extraction priority**: H1 → YAML → Setext → First line

@@ -1,4 +1,9 @@
-"""Audio transcription tools using yap CLI, mlx-whisper, and faster-whisper."""
+"""Audio transcription tools using yap CLI, mlx-whisper, and faster-whisper.
+
+Supports transcription of:
+- Audio files: mp3, wav, m4a, flac, ogg, aac, opus, wma, webm
+- Video files: mp4, mkv, avi, mov, wmv, flv, ts, m4v (audio is extracted automatically)
+"""
 
 import asyncio
 import platform
@@ -17,6 +22,7 @@ from ..const import (
     YAP_SUPPORTED_LOCALES,
     WHISPER_MODEL_SIZES,
     MLX_MODEL_MAPPINGS,
+    AUDIO_EXTENSIONS,
 )
 
 
@@ -26,10 +32,13 @@ async def get_text_from_audio(
     locale: str | None = None,
     model_size: str = "large-v3-turbo",
 ) -> TextContext:
-    """Extract text from audio file using the specified transcription engine.
+    """Extract text from audio or video file using the specified transcription engine.
+
+    Supports both audio files (mp3, wav, m4a, etc.) and video files (mp4, mkv, etc.).
+    For video files, the audio track is automatically extracted for transcription.
 
     Args:
-        file_path: Path to the audio file
+        file_path: Path to the audio or video file
         engine: Transcription engine ("auto", "yap", "mlx", "cuda", "cpu")
         locale: Language locale for transcription
         model_size: Model size for whisper-based engines
@@ -38,30 +47,58 @@ async def get_text_from_audio(
         TextContext with title and transcribed text
 
     Raises:
-        ValueError: If engine is invalid or unsupported
+        ValueError: If engine is invalid or unsupported, or file format not supported
         RuntimeError: If transcription fails
+        FileNotFoundError: If file does not exist
     """
     file_path = Path(file_path)
 
     if not file_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {file_path}")
+        raise FileNotFoundError(f"Audio/video file not found: {file_path}")
+
+    # Validate file extension
+    file_ext = file_path.suffix.lower()
+    if file_ext not in AUDIO_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file format: {file_ext}. "
+            f"Supported formats: {', '.join(sorted(AUDIO_EXTENSIONS))}"
+        )
+
+    # Check if this is a video file (will need audio extraction)
+    video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".ts", ".m4v"}
+    is_video = file_ext in video_extensions
+
+    if is_video:
+        logger.info(f"Processing video file: {file_path} (audio will be extracted)")
+    else:
+        logger.info(f"Processing audio file: {file_path}")
 
     # Determine the actual engine to use
     actual_engine = _resolve_engine(engine)
 
-    logger.info(f"Transcribing audio file: {file_path} using engine: {actual_engine}")
+    logger.info(f"Using transcription engine: {actual_engine}")
 
     # Route to appropriate transcription function
-    if actual_engine == "yap":
-        transcribed_text = await transcribe_audio_yap(file_path, locale or "zh_CN")
-    elif actual_engine == "mlx":
-        transcribed_text = await transcribe_audio_mlx(file_path, model_size, locale)
-    elif actual_engine in ("cuda", "cpu"):
-        transcribed_text = await transcribe_audio_cuda(
-            file_path, model_size, actual_engine, locale
-        )
-    else:
-        raise ValueError(f"Unsupported engine: {actual_engine}")
+    try:
+        if actual_engine == "yap":
+            transcribed_text = await transcribe_audio_yap(file_path, locale or "zh_CN")
+        elif actual_engine == "mlx":
+            transcribed_text = await transcribe_audio_mlx(file_path, model_size, locale)
+        elif actual_engine in ("cuda", "cpu"):
+            transcribed_text = await transcribe_audio_cuda(
+                file_path, model_size, actual_engine, locale
+            )
+        else:
+            raise ValueError(f"Unsupported engine: {actual_engine}")
+    except Exception as e:
+        # Add more context to the error
+        error_msg = str(e)
+        if "format" in error_msg.lower() or "codec" in error_msg.lower():
+            raise RuntimeError(
+                f"Transcription failed due to format/codec issue: {error_msg}. "
+                f"Try converting the file to a standard format like mp3 or wav."
+            ) from e
+        raise
 
     return TextContext(title=file_path.stem, chunk_list=[transcribed_text])
 

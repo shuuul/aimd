@@ -4,8 +4,28 @@
 # FILE PROCESSING CONSTANTS
 # =============================================================================
 
-# Supported audio file extensions
-AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".mp4"}
+# Supported audio file extensions (including video formats that can be transcribed)
+AUDIO_EXTENSIONS = {
+    # Audio formats
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".flac",
+    ".ogg",
+    ".aac",
+    ".opus",
+    ".wma",
+    ".webm",
+    # Video formats (will extract audio for transcription)
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".ts",
+    ".m4v",
+}
 
 # EPUB file extensions (require special handling for image extraction)
 EPUB_EXTENSIONS = {".epub", ".mobi", ".azw3"}
