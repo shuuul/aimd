@@ -574,11 +574,14 @@ async def _try_download_with_format(
             except Exception as e:
                 logger.debug(f"Browser impersonation not available: {e}")
 
-        # Add cookies for all platforms (required for Bilibili)
-        try:
-            ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
-        except Exception as e:
-            logger.warning(f"Failed to load cookies: {e}")
+        # Add cookies only for platforms that require them (NOT YouTube)
+        # YouTube downloads fail with 403 when cookies are used due to SABR streaming restrictions
+        # See: https://github.com/yt-dlp/yt-dlp/issues/12482
+        if platform != "youtube":
+            try:
+                ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+            except Exception as e:
+                logger.warning(f"Failed to load cookies: {e}")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
