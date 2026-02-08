@@ -1,6 +1,6 @@
 [project]
 name = "aimd"
-version = "0.0.7"
+version = "0.0.8"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [
@@ -13,12 +13,13 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.1.1",
     "rich>=13.9.4",
-    "yt-dlp>=2025.11.12",
+    "yt-dlp[default]>=2025.11.12",
     "torch>=2.9.1",
     "faster-whisper>=1.2.0; sys_platform != 'darwin'",
     "mlx-whisper>=0.4.2; sys_platform == 'darwin'",
     "logly>=0.1.6",
     "typer>=0.20.0",
+    "secretstorage>=3.5.0; sys_platform == 'linux'",
 ]
 
 [build-system]
