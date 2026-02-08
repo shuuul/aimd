@@ -209,5 +209,9 @@ __marimo__/
 # macOS
 .DS_Store
 
+# Cookies files (contain sensitive session data)
+cookies.txt
+*.cookies.txt
+
 # Claude
 .claude/settings.local.json
