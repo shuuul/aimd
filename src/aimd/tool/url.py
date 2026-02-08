@@ -20,6 +20,37 @@ from .audio import get_text_from_audio
 # Module-level cached YoutubeDL instance with cookies for reuse across all extractions
 _cached_ydl_instance = None
 
+# Module-level cookies file path (set via get_text_from_url's cookies_file parameter)
+_cookies_file: str | None = None
+
+
+def _is_keyring_error(error: Exception) -> bool:
+    """Check if an error is related to keyring/cookie decryption issues.
+
+    These errors occur when yt-dlp tries to read browser cookies but the
+    system keyring (e.g., GNOME Keyring, KWallet) is unavailable or locked.
+
+    Args:
+        error: The exception to check
+
+    Returns:
+        True if the error is keyring-related
+    """
+    error_str = str(error).lower()
+    keyring_indicators = [
+        "keyring",
+        "secretservice",
+        "secret service",
+        "secret-service",
+        "failed to decrypt",
+        "could not decrypt",
+        "dbus",
+        "org.freedesktop.secret",
+        "gnome-keyring",
+        "kwallet",
+    ]
+    return any(indicator in error_str for indicator in keyring_indicators)
+
 
 def _get_ydl_instance(use_cookies: bool = True, platform: str = "unknown"):
     """Get or create a YoutubeDL instance optimized for info extraction and subtitle downloads.
@@ -33,10 +64,11 @@ def _get_ydl_instance(use_cookies: bool = True, platform: str = "unknown"):
     """
     global _cached_ydl_instance
 
-    # Create a new instance if cookies setting changed or no instance exists
+    # Create a new instance if cookies/platform setting changed or no instance exists
     if (
         _cached_ydl_instance is None
         or getattr(_cached_ydl_instance, "_use_cookies", True) != use_cookies
+        or getattr(_cached_ydl_instance, "_cookies_file", None) != _cookies_file
     ):
         ydl_opts = {
             "quiet": True,
@@ -66,13 +98,19 @@ def _get_ydl_instance(use_cookies: bool = True, platform: str = "unknown"):
 
         # Add cookies for platforms that need them (especially Bilibili)
         if use_cookies:
-            try:
-                ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
-            except Exception as e:
-                logger.warning(f"Failed to load cookies from browser: {e}")
+            if _cookies_file:
+                # Use explicit cookies file (avoids keyring issues entirely)
+                ydl_opts["cookiefile"] = _cookies_file
+                logger.debug(f"Using cookies file: {_cookies_file}")
+            else:
+                try:
+                    ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+                except Exception as e:
+                    logger.warning(f"Failed to load cookies from browser: {e}")
 
         _cached_ydl_instance = yt_dlp.YoutubeDL(ydl_opts)
         _cached_ydl_instance._use_cookies = use_cookies  # Track cookies setting
+        _cached_ydl_instance._cookies_file = _cookies_file  # Track cookies file
 
     return _cached_ydl_instance
 
@@ -82,6 +120,7 @@ async def get_text_from_url(
     transcribe_engine: str = "auto",
     locale: str | None = None,
     save_original_path: Path | None = None,
+    cookies_file: str | None = None,
 ) -> TextContext:
     """Extract text content from video URLs using yt-dlp.
 
@@ -96,6 +135,9 @@ async def get_text_from_url(
             If a directory, the audio will be saved there with auto-generated name.
             If a file path, the audio will be saved to that exact path.
             If None, the audio is stored in a temporary directory and deleted after processing.
+        cookies_file: Path to a Netscape-format cookies file. When provided,
+            this is used instead of extracting cookies from the browser (avoids
+            keyring issues). Can be exported with browser extensions or yt-dlp.
 
     Returns:
         TextContext with title and content
@@ -104,6 +146,9 @@ async def get_text_from_url(
         ValueError: If URL is invalid or unsupported
         RuntimeError: If content extraction fails
     """
+    global _cookies_file
+    _cookies_file = cookies_file
+
     if not is_valid_url(url):
         raise ValueError(f"Invalid URL: {url}")
 
@@ -111,6 +156,8 @@ async def get_text_from_url(
         raise ValueError(f"Unsupported URL: {url}")
 
     logger.info(f"Processing video URL: {url}")
+    if cookies_file:
+        logger.info(f"Using cookies file: {cookies_file}")
     platform = _detect_platform(url)
 
     try:
@@ -179,12 +226,23 @@ async def _extract_video_info(url: str, platform: str) -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"Failed to extract video info with cookies: {e}")
 
-        # For YouTube, try fallback without cookies if the error suggests authentication issues
-        if platform == "youtube" and (
+        # Determine if we should retry without cookies
+        should_retry_without_cookies = False
+
+        # Keyring errors: retry without cookies on ANY platform
+        if _is_keyring_error(e):
+            logger.info("Keyring error detected, retrying without browser cookies")
+            should_retry_without_cookies = True
+
+        # YouTube-specific access issues
+        elif platform == "youtube" and (
             "not available on this app" in str(e).lower()
             or "watch on the latest version" in str(e).lower()
         ):
             logger.info("YouTube access issue detected, trying without cookies")
+            should_retry_without_cookies = True
+
+        if should_retry_without_cookies:
             try:
                 info_dict = await loop.run_in_executor(
                     None, _extract_with_config, False, platform
@@ -198,7 +256,7 @@ async def _extract_video_info(url: str, platform: str) -> dict[str, Any]:
                     f"Failed to extract video information: {fallback_error}"
                 ) from fallback_error
         else:
-            # For non-YouTube platforms or other errors, don't retry without cookies
+            # For other errors, don't retry without cookies
             raise RuntimeError(f"Failed to extract video information: {e}") from e
 
     raise RuntimeError("Failed to extract video information")
@@ -320,6 +378,9 @@ async def _extract_subtitles(
 async def _download_subtitle(url: str) -> str | None:
     """Download subtitle content from URL using yt-dlp.
 
+    Subtitles are publicly accessible, so cookies are intentionally disabled
+    to avoid triggering keyring checks or authentication issues.
+
     Args:
         url: Direct URL to subtitle file
 
@@ -329,7 +390,8 @@ async def _download_subtitle(url: str) -> str | None:
     try:
 
         def _download():
-            ydl = _get_ydl_instance()
+            # Force disable cookies for subtitle downloads (subtitles are public)
+            ydl = _get_ydl_instance(use_cookies=False)
             # Use yt-dlp's internal URL handling to download subtitle content
             response = ydl.urlopen(url)
             content = response.read().decode("utf-8")
@@ -531,8 +593,8 @@ async def _try_download_with_format(
         Path to downloaded file, or None if failed
     """
 
-    def _download():
-        # Build yt-dlp options
+    def _build_download_opts(use_cookies: bool = True):
+        """Build yt-dlp download options."""
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -572,18 +634,37 @@ async def _try_download_with_format(
         # Add cookies only for platforms that require them (NOT YouTube)
         # YouTube downloads fail with 403 when cookies are used due to SABR streaming restrictions
         # See: https://github.com/yt-dlp/yt-dlp/issues/12482
-        if platform != "youtube":
-            try:
-                ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
-            except Exception as e:
-                logger.warning(f"Failed to load cookies: {e}")
+        if use_cookies and platform != "youtube":
+            if _cookies_file:
+                # Use explicit cookies file (avoids keyring issues entirely)
+                ydl_opts["cookiefile"] = _cookies_file
+                logger.debug(f"Using cookies file for download: {_cookies_file}")
+            else:
+                try:
+                    ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+                except Exception as e:
+                    logger.warning(f"Failed to load cookies: {e}")
 
+        return ydl_opts
+
+    def _download(use_cookies: bool = True):
+        ydl_opts = _build_download_opts(use_cookies=use_cookies)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
     # Run download in thread pool
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _download)
+    try:
+        await loop.run_in_executor(None, _download, True)
+    except Exception as e:
+        # Auto-fallback: retry without cookies on keyring errors
+        if _is_keyring_error(e):
+            logger.warning(
+                f"Keyring error during audio download, retrying without cookies: {e}"
+            )
+            await loop.run_in_executor(None, _download, False)
+        else:
+            raise
 
     # Find the downloaded file
     # yt-dlp might change the extension based on codec/format

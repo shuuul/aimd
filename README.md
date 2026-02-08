@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.0.5-blue)
+  ![Version](https://img.shields.io/badge/version-0.0.7-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -109,6 +109,20 @@ aimd "https://www.bilibili.com/video/BV1Rz4y127jd"
 # Xiaoyuzhou Podcast
 aimd "https://www.xiaoyuzhoufm.com/episode/69277ae50084e2631deb56e0"
 ```
+
+#### Authenticated Access
+
+For premium or age-restricted content, you may need to export your browser cookies:
+
+```bash
+# Export Chrome cookies to a file
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+
+# Use cookies file with aimd
+aimd "https://youtube.com/watch?v=..." --cookies-file cookies.txt
+```
+
+> **Note**: Cookie files are in Netscape format and can also be created using browser extensions like "Get cookies.txt" (Chrome) or "Cookie-Editor" (Firefox).
 
 ### Document Conversion
 

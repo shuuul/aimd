@@ -108,6 +108,14 @@ def process(
         "-s",
         help="Save the original downloaded audio/video file to specified path or directory.",
     ),
+    cookies: Optional[Path] = typer.Option(
+        None,
+        "--cookies",
+        "-c",
+        help="Path to cookies file in Netscape format for video URL extraction. "
+        "Bypasses browser keyring entirely. Export with: "
+        "yt-dlp --cookies-from-browser chrome --cookies cookies.txt",
+    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -142,7 +150,12 @@ def process(
         try:
             if task_type == "transcript":
                 await _process_transcript(
-                    input_source, output_file, transcribe_engine, locale, save_original
+                    input_source,
+                    output_file,
+                    transcribe_engine,
+                    locale,
+                    save_original,
+                    cookies,
                 )
             else:
                 await _process_convert(input_source, output_file)
@@ -161,12 +174,14 @@ async def _process_transcript(
     engine: str,
     locale: str | None,
     save_original: Optional[Path] = None,
+    cookies: Optional[Path] = None,
 ):
     """Process audio/video transcription."""
     if is_url(input_source):
         logger.info(f"Getting transcript from URL: {input_source}")
+        cookies_str = str(cookies) if cookies else None
         text_context = await get_text_from_url(
-            input_source, engine, locale, save_original
+            input_source, engine, locale, save_original, cookies_file=cookies_str
         )
     else:
         file_path = Path(input_source)

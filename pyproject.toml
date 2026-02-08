@@ -1,6 +1,6 @@
 [project]
 name = "aimd"
-version = "0.0.5"
+version = "0.0.7"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [

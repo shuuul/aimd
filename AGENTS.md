@@ -76,4 +76,5 @@ uv run pytest
 
 - **EPUB output**: Creates `book_name/{book_name.md, chapters/, images/}`
 - **Cookie dependency**: `url.py` reads Chrome cookies for YouTube/Bilibili
+- **Cookie extraction**: Use `yt-dlp --cookies-from-browser chrome --cookies cookies.txt` to export Chrome cookies to a file, then pass via `--cookies-file` option
 - **Title extraction priority**: H1 → YAML → Setext → First line
