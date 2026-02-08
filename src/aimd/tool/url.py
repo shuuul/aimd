@@ -433,11 +433,12 @@ async def _download_audio(
 ) -> Path | None:
     """Download audio from video using yt-dlp with format fallbacks.
 
-    Tries multiple format strategies in order:
-    1. Best audio-only format with m4a extraction
-    2. Best audio-only format with mp3 extraction
-    3. Best combined format (video+audio) with audio extraction
-    4. Any available format with audio extraction
+    Tries format strategies in order:
+    1. Best format with audio track (extracts audio via FFmpeg)
+    2. Best combined format as fallback
+
+    Audio-only selectors (bestaudio) are avoided because YouTube's SABR
+    streaming returns HTTP 403 for direct audio-only downloads.
 
     Args:
         info_dict: Video information from yt-dlp
@@ -468,17 +469,11 @@ async def _download_audio(
 
     # Define format strategies to try in order
     # Each strategy is a tuple of (format_selector, preferred_codec, description)
+    # NOTE: Audio-only selectors like "bestaudio" cause HTTP 403 on YouTube due to
+    # SABR streaming restrictions. Use combined formats and extract audio via FFmpeg.
     format_strategies = [
-        ("bestaudio/best", "m4a", "best audio with m4a extraction"),
-        ("bestaudio/best", "mp3", "best audio with mp3 extraction"),
-        (
-            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=webm]/bestaudio/best",
-            "best",
-            "any audio format",
-        ),
         ("best[acodec!=none]", "m4a", "best format with audio track"),
-        ("best", "mp3", "best combined format"),
-        ("worstaudio/worst", "mp3", "worst quality fallback"),
+        ("best", "m4a", "best combined format"),
     ]
 
     platform = _detect_platform(url)
