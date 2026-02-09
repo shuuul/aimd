@@ -533,12 +533,24 @@ async def _download_audio(
     # Each strategy is a tuple of (format_selector, preferred_codec, description)
     # NOTE: Audio-only selectors like "bestaudio" cause HTTP 403 on YouTube due to
     # SABR streaming restrictions. Use combined formats and extract audio via FFmpeg.
-    format_strategies = [
-        ("best[acodec!=none]", "m4a", "best format with audio track"),
-        ("best", "m4a", "best combined format"),
-    ]
-
+    # However, Bilibili uses DASH (separate audio/video streams only), so "bestaudio"
+    # is required there since no combined formats exist.
     platform = _detect_platform(url)
+
+    if platform == "bilibili":
+        # Bilibili only provides separate DASH streams (audio-only + video-only).
+        # "bestaudio" works fine here; the YouTube SABR issue doesn't apply.
+        format_strategies = [
+            ("bestaudio", "m4a", "best audio-only stream"),
+            ("bestaudio[ext=m4a]", "m4a", "best m4a audio stream"),
+            ("best[acodec!=none]", "m4a", "best format with audio track"),
+            ("best", "m4a", "best combined format"),
+        ]
+    else:
+        format_strategies = [
+            ("best[acodec!=none]", "m4a", "best format with audio track"),
+            ("best", "m4a", "best combined format"),
+        ]
     last_error = None
 
     for format_selector, preferred_codec, description in format_strategies:
