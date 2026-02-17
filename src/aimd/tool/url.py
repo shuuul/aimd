@@ -118,7 +118,7 @@ def _get_ydl_instance(use_cookies: bool = True, platform: str = "unknown"):
 async def get_text_from_url(
     url: str,
     transcribe_engine: str = "auto",
-    locale: str | None = None,
+    language: str | None = None,
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
 ) -> TextContext:
@@ -130,7 +130,7 @@ async def get_text_from_url(
     Args:
         url: Video URL from any supported platform
         transcribe_engine: Transcription engine for audio fallback
-        locale: Language locale for audio transcription
+        language: Whisper language code (e.g. "zh", "en"). None for auto-detection.
         save_original_path: Path to save the original downloaded audio file.
             If a directory, the audio will be saved there with auto-generated name.
             If a file path, the audio will be saved to that exact path.
@@ -166,7 +166,7 @@ async def get_text_from_url(
         title = info_dict.get("title", "Unknown Title")
 
         # Try to get subtitles
-        subtitle_content = await _extract_subtitles(info_dict, platform, locale)
+        subtitle_content = await _extract_subtitles(info_dict, platform, language)
 
         if subtitle_content and subtitle_content.strip():
             logger.info("Successfully extracted subtitles")
@@ -176,7 +176,7 @@ async def get_text_from_url(
         # Fallback: extract content from audio
         logger.info("No subtitles available, extracting content from audio")
         audio_content = await _extract_content_from_audio(
-            info_dict, url, transcribe_engine, locale, save_original_path
+            info_dict, url, transcribe_engine, language, save_original_path
         )
 
         if audio_content and audio_content.strip():
@@ -263,14 +263,14 @@ async def _extract_video_info(url: str, platform: str) -> dict[str, Any]:
 
 
 async def _extract_subtitles(
-    info_dict: dict[str, Any], platform: str, locale: str | None
+    info_dict: dict[str, Any], platform: str, language: str | None
 ) -> str | None:
     """Extract subtitles from video with platform-specific handling and language preferences.
 
     Args:
         info_dict: Video information from yt-dlp
         platform: Detected platform name
-        locale: Language locale preference
+        language: Whisper language code preference (e.g. "zh", "en")
 
     Returns:
         Subtitle text if available, None otherwise
@@ -283,8 +283,8 @@ async def _extract_subtitles(
         logger.info("No subtitles available")
         return None
 
-    # Get priority order for subtitle languages based on locale
-    preferred_languages = _get_preferred_languages(locale)
+    # Get priority order for subtitle languages based on language preference
+    preferred_languages = _get_preferred_languages(language)
     logger.debug(f"Subtitle language preference order: {preferred_languages[:5]}...")
 
     # Find best available subtitle - prioritize manual subtitles over auto subtitles
@@ -413,7 +413,7 @@ async def _extract_content_from_audio(
     info_dict: dict[str, Any],
     url: str,
     transcribe_engine: str,
-    locale: str | None,
+    language: str | None,
     save_original_path: Path | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it.
@@ -422,7 +422,7 @@ async def _extract_content_from_audio(
         info_dict: Video information from yt-dlp
         url: Original video URL
         transcribe_engine: Transcription engine to use
-        locale: Language locale for transcription
+        language: Whisper language code (e.g. "zh", "en"). None for auto-detection.
         save_original_path: Path to save the original audio file (directory or file path)
 
     Returns:
@@ -447,7 +447,7 @@ async def _extract_content_from_audio(
             text_context = await get_text_from_audio(
                 audio_file_path,
                 engine=transcribe_engine,
-                locale=locale or "zh_CN",
+                language=language,
             )
 
             if text_context.chunk_list and text_context.chunk_list[0]:
@@ -762,29 +762,29 @@ def _detect_platform(url: str) -> str:
         return "unknown"
 
 
-def _get_preferred_languages(locale: str | None) -> list[str]:
-    """Get preferred subtitle languages based on locale.
+def _get_preferred_languages(language: str | None) -> list[str]:
+    """Get preferred subtitle languages based on language code.
 
     Args:
-        locale: Language locale preference
+        language: Whisper language code (e.g. "zh", "en")
 
     Returns:
-        List of language codes in priority order
+        List of subtitle language codes in priority order
     """
     # Use predefined language groups
     english_languages = ENGLISH_SUBTITLE_LANGUAGES
     chinese_languages = CHINESE_SUBTITLE_LANGUAGES
 
-    # Determine locale preference
-    if locale:
-        locale_lower = locale.lower()
+    # Determine language preference
+    if language:
+        lang = language.lower()
 
-        # Check for Chinese locale variants
-        if any(x in locale_lower for x in ["zh", "cn", "chinese", "hans", "hant"]):
+        # Check for Chinese language
+        if lang in ("zh", "chinese"):
             return chinese_languages + english_languages
 
-        # Check for English locale variants
-        elif any(x in locale_lower for x in ["en", "us", "gb", "english"]):
+        # Check for English language
+        elif lang in ("en", "english"):
             return english_languages + chinese_languages
 
     # Default order (Chinese first)

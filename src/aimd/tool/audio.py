@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Literal
 
 import torch
 from logly import logger
@@ -20,6 +19,7 @@ from ..types import TextContext
 from ..const import (
     TRANSCRIPTION_ENGINES,
     YAP_SUPPORTED_LOCALES,
+    LANGUAGE_TO_YAP_LOCALE,
     WHISPER_MODEL_SIZES,
     MLX_MODEL_MAPPINGS,
     AUDIO_EXTENSIONS,
@@ -29,7 +29,7 @@ from ..const import (
 async def get_text_from_audio(
     file_path: str | Path,
     engine: str = "auto",
-    locale: str | None = None,
+    language: str | None = None,
     model_size: str = "large-v3-turbo",
 ) -> TextContext:
     """Extract text from audio or video file using the specified transcription engine.
@@ -40,7 +40,7 @@ async def get_text_from_audio(
     Args:
         file_path: Path to the audio or video file
         engine: Transcription engine ("auto", "yap", "mlx", "cuda", "cpu")
-        locale: Language locale for transcription
+        language: Whisper language code (e.g. "zh", "en", "ja"). None for auto-detection.
         model_size: Model size for whisper-based engines
 
     Returns:
@@ -81,12 +81,15 @@ async def get_text_from_audio(
     # Route to appropriate transcription function
     try:
         if actual_engine == "yap":
-            transcribed_text = await transcribe_audio_yap(file_path, locale or "zh_CN")
+            yap_locale = _language_to_yap_locale(language)
+            transcribed_text = await transcribe_audio_yap(file_path, yap_locale)
         elif actual_engine == "mlx":
-            transcribed_text = await transcribe_audio_mlx(file_path, model_size, locale)
+            transcribed_text = await transcribe_audio_mlx(
+                file_path, model_size, language
+            )
         elif actual_engine in ("cuda", "cpu"):
             transcribed_text = await transcribe_audio_cuda(
-                file_path, model_size, actual_engine, locale
+                file_path, model_size, actual_engine, language
             )
         else:
             raise ValueError(f"Unsupported engine: {actual_engine}")
@@ -103,9 +106,7 @@ async def get_text_from_audio(
     return TextContext(title=file_path.stem, chunk_list=[transcribed_text])
 
 
-async def transcribe_audio_yap(
-    file_path: Path, locale: Literal["zh_CN", "en_US"] = "zh_CN"
-) -> str:
+async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
     """Transcribe audio using yap CLI (macOS only).
 
     Args:
@@ -381,6 +382,35 @@ def _resolve_engine(engine: str) -> str:
             return "cuda"
         else:
             return "cpu"
+
+
+def _language_to_yap_locale(language: str | None) -> str:
+    """Convert a Whisper language code to a yap locale code.
+
+    yap requires full locale codes (e.g. "zh_CN", "en_US"), but the public API
+    uses Whisper-style short codes (e.g. "zh", "en"). This function maps between
+    the two. Defaults to "zh_CN" when language is None.
+
+    Args:
+        language: Whisper language code (e.g. "zh", "en"), or None.
+
+    Returns:
+        yap-compatible locale string.
+
+    Raises:
+        ValueError: If the language code has no known yap locale mapping.
+    """
+    if language is None:
+        return "zh_CN"
+
+    lang = language.lower()
+    if lang in LANGUAGE_TO_YAP_LOCALE:
+        return LANGUAGE_TO_YAP_LOCALE[lang]
+
+    raise ValueError(
+        f"Unsupported language for yap engine: '{language}'. "
+        f"Supported: {list(LANGUAGE_TO_YAP_LOCALE.keys())}"
+    )
 
 
 def _is_apple_silicon() -> bool:

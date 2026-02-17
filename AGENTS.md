@@ -14,7 +14,7 @@ Python CLI tool for LLM context preparation - transcribes audio/video and conver
 aimd/
 ├── src/aimd/
 │   ├── cli.py              # Entry point (typer CLI)
-│   ├── const.py            # Constants (extensions, engines, locales)
+│   ├── const.py            # Constants (extensions, engines, language codes)
 │   ├── utils.py            # URL/file utilities
 │   ├── types.py            # TextContext Pydantic model
 │   └── tool/
@@ -35,7 +35,7 @@ aimd/
 | Audio transcription | `src/aimd/tool/audio.py` | yap/mlx/cuda/cpu engines |
 | Document conversion | `src/aimd/tool/file.py` | Pandoc, EPUB extraction |
 | URL processing | `src/aimd/tool/url.py` | yt-dlp, subtitle extraction |
-| Constants | `src/aimd/const.py` | Extensions, engines, locales |
+| Constants | `src/aimd/const.py` | Extensions, engines, language codes |
 
 ## CONVENTIONS (THIS PROJECT)
 

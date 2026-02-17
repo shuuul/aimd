@@ -24,7 +24,7 @@ src/aimd/
 |------|------|---------------|
 | CLI commands | `cli.py` | `main()`, `process()`, `_get_task_type()` |
 | Task dispatch | `cli.py` | `_process_transcript()`, `_process_convert()` |
-| Constants | `const.py` | Extensions, engines, locale lists |
+| Constants | `const.py` | Extensions, engines, language codes |
 | File/URL utils | `utils.py` | `sanitize_filename()`, `is_url()`, `is_supported_url()` |
 | Data model | `types.py` | `TextContext` |
 
@@ -33,7 +33,7 @@ src/aimd/
 - **Import paths**: Use relative imports (`from .tool.audio import ...`)
 - **CLI options**: All options have short (`-o`) and long (`--output`) flags
 - **Engine naming**: Engines are lowercase (`auto`, `mlx`, `cuda`, `cpu`)
-- **Locale format**: `zh_CN`, `en_US` (underscore, not hyphen)
+- **Language codes**: Whisper-style short codes (`zh`, `en`, `ja`). Only yap converts internally to `zh_CN`/`en_US`.
 
 ## ANTI-PATTERNS
 

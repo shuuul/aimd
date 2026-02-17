@@ -36,6 +36,13 @@ TRANSCRIPTION_ENGINES = {"auto", "yap", "mlx", "cuda", "cpu"}
 # Supported locales for yap transcription
 YAP_SUPPORTED_LOCALES = {"zh_CN", "en_US"}
 
+# Mapping from Whisper language codes to yap locale codes.
+# The CLI and public API use short codes (zh, en); yap needs full locales.
+LANGUAGE_TO_YAP_LOCALE = {
+    "zh": "zh_CN",
+    "en": "en_US",
+}
+
 # Whisper model sizes (for faster-whisper and mlx-whisper)
 WHISPER_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3-turbo"}
 

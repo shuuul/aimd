@@ -96,11 +96,12 @@ def process(
         "-e",
         help="Transcription engine: yap (macOS), mlx (Apple Silicon), cuda, cpu. Used for audio/video.",
     ),
-    locale: Optional[str] = typer.Option(
+    language: Optional[str] = typer.Option(
         None,
-        "--locale",
+        "--language",
         "-l",
-        help="Language locale for transcription (e.g., zh_CN, en_US). Used for audio/video.",
+        help="Language code for transcription (e.g., zh, en, ja). "
+        "Uses Whisper language codes. None for auto-detection.",
     ),
     save_original: Optional[Path] = typer.Option(
         None,
@@ -153,7 +154,7 @@ def process(
                     input_source,
                     output_file,
                     transcribe_engine,
-                    locale,
+                    language,
                     save_original,
                     cookies,
                 )
@@ -172,7 +173,7 @@ async def _process_transcript(
     input_source: str,
     output_file: Optional[Path],
     engine: str,
-    locale: str | None,
+    language: str | None,
     save_original: Optional[Path] = None,
     cookies: Optional[Path] = None,
 ):
@@ -181,12 +182,12 @@ async def _process_transcript(
         logger.info(f"Getting transcript from URL: {input_source}")
         cookies_str = str(cookies) if cookies else None
         text_context = await get_text_from_url(
-            input_source, engine, locale, save_original, cookies_file=cookies_str
+            input_source, engine, language, save_original, cookies_file=cookies_str
         )
     else:
         file_path = Path(input_source)
         logger.info(f"Getting transcript from: {file_path}")
-        text_context = await get_text_from_audio(file_path, engine, locale)
+        text_context = await get_text_from_audio(file_path, engine, language)
 
     if output_file is None:
         output_file = create_output_path_from_title(
