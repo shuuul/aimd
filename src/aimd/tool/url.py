@@ -779,8 +779,8 @@ def _get_preferred_languages(language: str | None) -> list[str]:
     if language:
         lang = language.lower()
 
-        # Check for Chinese language
-        if lang in ("zh", "chinese"):
+        # Check for Chinese language (including script variants)
+        if lang in ("zh", "chinese", "zh-hans", "zh-hant"):
             return chinese_languages + english_languages
 
         # Check for English language

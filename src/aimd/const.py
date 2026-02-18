@@ -71,6 +71,7 @@ ENGLISH_SUBTITLE_LANGUAGES = [
 CHINESE_SUBTITLE_LANGUAGES = [
     "zh-orig",
     "zh-Hans",
+    "zh-Hant",
     "zh-CN",
     "zh",
     "ai-zh",
