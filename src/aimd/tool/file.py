@@ -11,6 +11,7 @@ from pathlib import Path
 import pandoc
 from logly import logger
 
+from ..errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from ..types import TextContext
 
 
@@ -157,16 +158,16 @@ async def get_text_from_file(
         TextContext with title and chunk_list
 
     Raises:
-        FileNotFoundError: If file doesn't exist
-        RuntimeError: If pandoc conversion fails or document cannot be split properly
+        InputNotFoundError: If file doesn't exist
+        ProcessingFailedError: If pandoc conversion fails or document cannot be split properly
     """
     file_path = Path(file_path)
 
     if not file_path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
+        raise InputNotFoundError(f"File not found: {file_path}")
 
     if not file_path.is_file():
-        raise ValueError(f"Path is not a file: {file_path}")
+        raise UnsupportedInputError(f"Path is not a file: {file_path}")
 
     file_extension = file_path.suffix.lower()
     logger.info(f"Processing {file_extension} file: {file_path}")
@@ -198,7 +199,7 @@ async def _process_file_with_splitting(
             # Get pandoc format from internal mapping
             pandoc_format = pandoc._ext_to_file_format.get(file_extension)
             if not pandoc_format:
-                raise RuntimeError(
+                raise ProcessingFailedError(
                     f"No pandoc format found for extension: {file_extension}"
                 )
 
@@ -206,18 +207,20 @@ async def _process_file_with_splitting(
             try:
                 doc = pandoc.read(file=str(file_path), format=pandoc_format)
                 if doc is None:
-                    raise RuntimeError(
+                    raise ProcessingFailedError(
                         f"Pandoc failed to read {pandoc_format}: {file_path}"
                     )
             except Exception as e:
-                raise RuntimeError(
+                raise ProcessingFailedError(
                     f"Failed to read {file_extension} file with pandoc: {e}"
                 ) from e
 
             # Convert to markdown
             markdown_content = pandoc.write(doc, format="markdown")
             if not markdown_content:
-                raise RuntimeError(f"Pandoc produced empty markdown from: {file_path}")
+                raise ProcessingFailedError(
+                    f"Pandoc produced empty markdown from: {file_path}"
+                )
 
             return markdown_content
 
@@ -250,7 +253,7 @@ async def _process_file_with_splitting(
                 section_data.append((title, section_content.strip()))
 
         if not section_data:
-            raise RuntimeError(
+            raise ProcessingFailedError(
                 f"Document could not be split into meaningful sections under {max_chunk_size} characters"
             )
 
@@ -273,6 +276,10 @@ async def _process_file_with_splitting(
         )
 
     except Exception as e:
+        if isinstance(
+            e, (InputNotFoundError, ProcessingFailedError, UnsupportedInputError)
+        ):
+            raise
         # Enhanced error logging with debugging information
         logger.error(
             f"Failed to process file {file_path}: {e}",
@@ -287,7 +294,7 @@ async def _process_file_with_splitting(
                 "error_details": str(e),
             },
         )
-        raise RuntimeError(f"Document processing failed: {e}") from e
+        raise ProcessingFailedError(f"Document processing failed: {e}") from e
 
 
 def _combine_sections_for_processing(
@@ -358,8 +365,7 @@ def _split_markdown_by_headers(
     Returns:
         Tuple of (list of (section_title, section_content), header_level_used)
 
-    Raises:
-        RuntimeError: If no split level produces chunks under the size limit
+    Falls back to paragraph-based splitting when no header strategy works.
     """
     # Try different header levels, starting with H1 (level 1)
     for split_level in range(1, 7):  # Try H1 through H6
@@ -385,11 +391,51 @@ def _split_markdown_by_headers(
             )
             return sections, split_level
 
-    # If no header level works, raise an error
-    raise RuntimeError(
-        f"Document cannot be split into chunks under {max_chunk_size} characters using any header level (H1-H6). "
-        f"The document structure may not be suitable for automatic splitting."
-    )
+    # Fallback for headerless documents: split by paragraph blocks.
+    fallback_chunks = _split_text_by_paragraphs(markdown_content, max_chunk_size)
+    return [(None, chunk) for chunk in fallback_chunks], None
+
+
+def _split_text_by_paragraphs(text: str, max_chunk_size: int) -> list[str]:
+    """Split text by paragraph boundaries and then hard-wrap oversized blocks."""
+    paragraphs = [
+        block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()
+    ]
+    if not paragraphs:
+        stripped = text.strip()
+        return [stripped] if stripped else []
+
+    chunks: list[str] = []
+    current_parts: list[str] = []
+    current_size = 0
+
+    for paragraph in paragraphs:
+        paragraph_len = len(paragraph)
+        separator = "\n\n" if current_parts else ""
+        projected = current_size + len(separator) + paragraph_len
+        if current_parts and projected > max_chunk_size:
+            chunks.append("\n\n".join(current_parts))
+            current_parts = []
+            current_size = 0
+
+        if paragraph_len <= max_chunk_size:
+            current_parts.append(paragraph)
+            current_size += (2 if current_size else 0) + paragraph_len
+            continue
+
+        if current_parts:
+            chunks.append("\n\n".join(current_parts))
+            current_parts = []
+            current_size = 0
+
+        for idx in range(0, paragraph_len, max_chunk_size):
+            piece = paragraph[idx : idx + max_chunk_size].strip()
+            if piece:
+                chunks.append(piece)
+
+    if current_parts:
+        chunks.append("\n\n".join(current_parts))
+    return chunks
 
 
 def _split_markdown_by_header_level(
@@ -445,11 +491,12 @@ def is_supported_file(file_path: str | Path) -> bool:
     Returns:
         True if file has supported extension
     """
-    file_path = Path(file_path)
-
     if isinstance(file_path, str):
         if file_path.startswith(("http://", "https://")):
             return False
+        file_path = Path(file_path)
+    else:
+        file_path = Path(file_path)
 
     # Get all supported extensions from pandoc's internal mapping
     supported_extensions = set(pandoc._ext_to_file_format.keys())
@@ -479,13 +526,13 @@ async def process_epub_with_images(
         Tuple of (TextContext with title and chunks, path to output directory)
 
     Raises:
-        FileNotFoundError: If EPUB file doesn't exist
-        RuntimeError: If EPUB processing fails
+        InputNotFoundError: If EPUB file doesn't exist
+        ProcessingFailedError: If EPUB processing fails
     """
     file_path = Path(file_path)
 
     if not file_path.exists():
-        raise FileNotFoundError(f"EPUB file not found: {file_path}")
+        raise InputNotFoundError(f"EPUB file not found: {file_path}")
 
     if output_dir is None:
         output_dir = file_path.parent / file_path.stem
@@ -509,7 +556,9 @@ async def process_epub_with_images(
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_path)
         except zipfile.BadZipFile as e:
-            raise RuntimeError(f"Invalid EPUB file (not a valid ZIP): {e}") from e
+            raise ProcessingFailedError(
+                f"Invalid EPUB file (not a valid ZIP): {e}"
+            ) from e
 
         # Find OEBPS folder (standard EPUB structure)
         oebps_dir = None
@@ -528,7 +577,7 @@ async def process_epub_with_images(
                 break
 
         if oebps_dir is None:
-            raise RuntimeError("Could not find OEBPS/OPS folder in EPUB")
+            raise ProcessingFailedError("Could not find OEBPS/OPS folder in EPUB")
 
         # Find HTML/XHTML files
         html_files = []
@@ -536,7 +585,7 @@ async def process_epub_with_images(
             html_files.extend(oebps_dir.glob(ext))
 
         if not html_files:
-            raise RuntimeError("No HTML/XHTML files found in EPUB")
+            raise ProcessingFailedError("No HTML/XHTML files found in EPUB")
 
         # Copy images from OEBPS and its subdirectories
         image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".bmp"}
@@ -568,7 +617,7 @@ async def process_epub_with_images(
                 continue
 
         if not chapter_files:
-            raise RuntimeError("Failed to convert any HTML files to markdown")
+            raise ProcessingFailedError("Failed to convert any HTML files to markdown")
 
         # Extract title from first chapter
         first_chapter_content = chapter_files[0][1]
@@ -589,10 +638,12 @@ async def process_epub_with_images(
         )
 
         # Return TextContext with combined content
-        text_context = TextContext(
-            title=title,
-            chunk_list=[combined_content] if len(combined_content) <= 40000 else [],
+        chunk_list = (
+            [combined_content]
+            if len(combined_content) <= 40000
+            else _split_text_by_paragraphs(combined_content, 40000)
         )
+        text_context = TextContext(title=title, chunk_list=chunk_list)
 
         return text_context, output_dir
 

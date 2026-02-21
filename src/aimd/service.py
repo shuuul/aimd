@@ -56,22 +56,32 @@ async def process_transcript_input(
 ) -> TextContext:
     """Process transcription input from URL or local audio/video file."""
     if is_url(input_source):
-        if engine != "auto":
-            resolve_engine_with_preflight(engine)
-        return await get_text_from_url(
-            input_source,
-            transcribe_engine=engine,
-            language=language,
-            save_original_path=save_original,
-            cookies_file=str(cookies) if cookies else None,
-        )
+        try:
+            if engine != "auto":
+                resolve_engine_with_preflight(engine)
+            return await get_text_from_url(
+                input_source,
+                transcribe_engine=engine,
+                language=language,
+                save_original_path=save_original,
+                cookies_file=str(cookies) if cookies else None,
+            )
+        except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
+            raise
+        except Exception as exc:
+            raise ProcessingFailedError(str(exc)) from exc
 
     input_path = Path(input_source)
     if not input_path.exists():
         raise InputNotFoundError(f"Input file not found: {input_source}")
 
-    resolved_engine = resolve_engine_with_preflight(engine)
-    return await get_text_from_audio(input_path, resolved_engine, language)
+    try:
+        resolved_engine = resolve_engine_with_preflight(engine)
+        return await get_text_from_audio(input_path, resolved_engine, language)
+    except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
+        raise
+    except Exception as exc:
+        raise ProcessingFailedError(str(exc)) from exc
 
 
 async def process_convert_input(
@@ -96,7 +106,7 @@ async def process_convert_input(
 
         text_context = await get_text_from_file(input_path)
         return text_context, None
-    except FileNotFoundError as exc:
-        raise InputNotFoundError(str(exc)) from exc
-    except RuntimeError as exc:
+    except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
+        raise
+    except Exception as exc:
         raise ProcessingFailedError(str(exc)) from exc

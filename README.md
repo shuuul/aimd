@@ -63,7 +63,7 @@ aimd document.txt                 # Convert text to markdown
 # With options
 aimd audio.mp3 -o output.md       # Custom output file
 aimd audio.mp3 -e mlx             # Specify engine
-aimd interview.wav -l zh_CN       # Specify locale
+aimd interview.wav -l zh          # Specify language
 ```
 
 ## Usage
@@ -80,8 +80,8 @@ aimd audio.wav --engine yap       # macOS
 aimd audio.wav --engine cuda      # NVIDIA GPU
 aimd audio.wav --engine cpu       # Cross-platform
 
-# Process with specific locale
-aimd interview.m4a --locale zh_CN
+# Process with specific language
+aimd interview.m4a --language zh
 
 # Custom output file
 aimd lecture.mp3 -o meeting_notes.md
@@ -119,7 +119,7 @@ For premium or age-restricted content, you may need to export your browser cooki
 yt-dlp --cookies-from-browser chrome --cookies cookies.txt
 
 # Use cookies file with aimd
-aimd "https://youtube.com/watch?v=..." --cookies-file cookies.txt
+aimd "https://youtube.com/watch?v=..." --cookies cookies.txt
 ```
 
 > **Note**: Cookie files are in Netscape format and can also be created using browser extensions like "Get cookies.txt" (Chrome) or "Cookie-Editor" (Firefox).

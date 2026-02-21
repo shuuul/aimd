@@ -8,13 +8,14 @@ Supports transcription of:
 import asyncio
 import platform
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
 from logly import logger
 
 from ..capabilities import resolve_engine_with_preflight
+from ..errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
+from ..platform_utils import is_apple_silicon
 from ..types import TextContext
 from ..const import (
     YAP_SUPPORTED_LOCALES,
@@ -53,12 +54,12 @@ async def get_text_from_audio(
     file_path = Path(file_path)
 
     if not file_path.exists():
-        raise FileNotFoundError(f"Audio/video file not found: {file_path}")
+        raise InputNotFoundError(f"Audio/video file not found: {file_path}")
 
     # Validate file extension
     file_ext = file_path.suffix.lower()
     if file_ext not in AUDIO_EXTENSIONS:
-        raise ValueError(
+        raise UnsupportedInputError(
             f"Unsupported file format: {file_ext}. "
             f"Supported formats: {', '.join(sorted(AUDIO_EXTENSIONS))}"
         )
@@ -91,16 +92,18 @@ async def get_text_from_audio(
                 file_path, model_size, actual_engine, language
             )
         else:
-            raise ValueError(f"Unsupported engine: {actual_engine}")
+            raise UnsupportedInputError(f"Unsupported engine: {actual_engine}")
     except Exception as e:
         # Add more context to the error
+        if isinstance(e, (InputNotFoundError, UnsupportedInputError)):
+            raise
         error_msg = str(e)
         if "format" in error_msg.lower() or "codec" in error_msg.lower():
-            raise RuntimeError(
+            raise ProcessingFailedError(
                 f"Transcription failed due to format/codec issue: {error_msg}. "
                 f"Try converting the file to a standard format like mp3 or wav."
             ) from e
-        raise
+        raise ProcessingFailedError(f"Transcription failed: {error_msg}") from e
 
     return TextContext(title=file_path.stem, chunk_list=[transcribed_text])
 
@@ -119,16 +122,16 @@ async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
         RuntimeError: If yap is not available or transcription fails
     """
     if platform.system() != "Darwin":
-        raise RuntimeError("yap engine is only available on macOS")
+        raise ProcessingFailedError("yap engine is only available on macOS")
 
     if not shutil.which("yap"):
-        raise RuntimeError(
+        raise ProcessingFailedError(
             "yap CLI tool is not installed. Please install it from: "
             "https://github.com/finnvoor/yap"
         )
 
     if locale not in YAP_SUPPORTED_LOCALES:
-        raise ValueError(
+        raise UnsupportedInputError(
             f"Unsupported locale: {locale}. Supported: {YAP_SUPPORTED_LOCALES}"
         )
 
@@ -165,11 +168,11 @@ async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
 
         if process.returncode != 0:
             error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"yap command failed: {error_msg}")
+            raise ProcessingFailedError(f"yap command failed: {error_msg}")
 
         # Read transcribed text from output file
         if not temp_output_path.exists():
-            raise RuntimeError("yap did not create output file")
+            raise ProcessingFailedError("yap did not create output file")
 
         # Try different encodings for yap output
         try:
@@ -183,7 +186,7 @@ async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
                 ).strip()
 
         if not transcribed_text:
-            raise RuntimeError("yap produced empty transcription")
+            raise ProcessingFailedError("yap produced empty transcription")
 
         logger.info(
             f"Successfully transcribed {len(transcribed_text)} characters with yap"
@@ -215,21 +218,21 @@ async def transcribe_audio_mlx(
         RuntimeError: If mlx-whisper is not available or transcription fails
     """
     if platform.system() != "Darwin":
-        raise RuntimeError("mlx engine is only available on macOS")
+        raise ProcessingFailedError("mlx engine is only available on macOS")
 
-    if not _is_apple_silicon():
-        raise RuntimeError("mlx engine requires Apple Silicon (M1/M2/M3/M4)")
+    if not is_apple_silicon():
+        raise ProcessingFailedError("mlx engine requires Apple Silicon (M1/M2/M3/M4)")
 
     try:
         import mlx_whisper
     except ImportError:
-        raise RuntimeError(
+        raise ProcessingFailedError(
             "mlx-whisper library is not installed. Please install it: "
             "pip install mlx-whisper"
         )
 
     if model_size not in MLX_MODEL_MAPPINGS:
-        raise ValueError(
+        raise UnsupportedInputError(
             f"Unsupported model size: {model_size}. Supported: {list(MLX_MODEL_MAPPINGS.keys())}"
         )
 
@@ -253,7 +256,7 @@ async def transcribe_audio_mlx(
         transcribed_text = result["text"].strip()
 
         if not transcribed_text:
-            raise RuntimeError("MLX Whisper produced empty transcription")
+            raise ProcessingFailedError("MLX Whisper produced empty transcription")
 
         logger.info(
             f"Successfully transcribed {len(transcribed_text)} characters with MLX"
@@ -261,7 +264,7 @@ async def transcribe_audio_mlx(
         return transcribed_text
 
     except Exception as e:
-        raise RuntimeError(f"MLX transcription failed: {e}") from e
+        raise ProcessingFailedError(f"MLX transcription failed: {e}") from e
 
 
 async def transcribe_audio_cuda(
@@ -287,13 +290,13 @@ async def transcribe_audio_cuda(
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        raise RuntimeError(
+        raise ProcessingFailedError(
             "faster-whisper library is not installed. Please install it: "
             "pip install faster-whisper"
         )
 
     if model_size not in WHISPER_MODEL_SIZES:
-        raise ValueError(
+        raise UnsupportedInputError(
             f"Unsupported model size: {model_size}. Supported: {WHISPER_MODEL_SIZES}"
         )
 
@@ -338,7 +341,7 @@ async def transcribe_audio_cuda(
         transcribed_text, info = await loop.run_in_executor(None, _transcribe)
 
         if not transcribed_text:
-            raise RuntimeError("Whisper produced empty transcription")
+            raise ProcessingFailedError("Whisper produced empty transcription")
 
         logger.info(
             f"Successfully transcribed {len(transcribed_text)} characters, "
@@ -347,7 +350,7 @@ async def transcribe_audio_cuda(
         return transcribed_text
 
     except Exception as e:
-        raise RuntimeError(f"Whisper transcription failed: {e}") from e
+        raise ProcessingFailedError(f"Whisper transcription failed: {e}") from e
 
 
 def _resolve_engine(engine: str) -> str:
@@ -392,27 +395,3 @@ def _language_to_yap_locale(language: str | None) -> str:
         f"Unsupported language for yap engine: '{language}'. "
         f"Supported: {list(LANGUAGE_TO_YAP_LOCALE.keys())}"
     )
-
-
-def _is_apple_silicon() -> bool:
-    """Check if running on Apple Silicon.
-
-    Returns:
-        True if running on Apple Silicon (M1/M2/M3/M4) macOS
-    """
-    if platform.system() != "Darwin":
-        return False
-
-    try:
-        result = subprocess.run(
-            ["sysctl", "-n", "machdep.cpu.brand_string"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        cpu_info = result.stdout.strip().lower()
-        return "apple" in cpu_info and any(
-            m in cpu_info for m in ["m1", "m2", "m3", "m4"]
-        )
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False

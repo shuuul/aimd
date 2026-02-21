@@ -14,7 +14,6 @@ from .file import (
 
 from .url import (
     get_text_from_url,
-    is_supported_url,
 )
 
 __all__ = [
@@ -28,5 +27,4 @@ __all__ = [
     "is_supported_file",
     # URL tools
     "get_text_from_url",
-    "is_supported_url",
 ]

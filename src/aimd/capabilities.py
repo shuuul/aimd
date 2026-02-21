@@ -1,13 +1,14 @@
 """Environment capability detection for transcription engines."""
 
 from dataclasses import dataclass
+from functools import lru_cache
 import importlib.util
 import platform
 import shutil
-import subprocess
 
 from .const import TRANSCRIPTION_ENGINES
 from .errors import EngineUnavailableError, UnsupportedEngineError
+from .platform_utils import is_apple_silicon
 
 
 @dataclass
@@ -22,24 +23,7 @@ def _module_available(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
 
-def _is_apple_silicon() -> bool:
-    if platform.system() != "Darwin":
-        return False
-    try:
-        result = subprocess.run(
-            ["sysctl", "-n", "machdep.cpu.brand_string"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        cpu_info = result.stdout.strip().lower()
-        return "apple" in cpu_info and any(
-            chip in cpu_info for chip in ("m1", "m2", "m3", "m4")
-        )
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
-
-
+@lru_cache(maxsize=1)
 def _torch_cuda_available() -> bool:
     try:
         import torch  # type: ignore
@@ -51,7 +35,7 @@ def _torch_cuda_available() -> bool:
 def get_engine_capabilities() -> dict[str, EngineCapability]:
     """Return availability details for each supported transcription engine."""
     is_macos = platform.system() == "Darwin"
-    apple_silicon = _is_apple_silicon() if is_macos else False
+    apple_silicon = is_apple_silicon() if is_macos else False
     has_faster_whisper = _module_available("faster_whisper")
     has_mlx_whisper = _module_available("mlx_whisper")
     has_torch = _module_available("torch")

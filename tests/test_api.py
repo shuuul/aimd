@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aimd.api import app
-from aimd.errors import EngineUnavailableError
+from aimd.errors import EngineUnavailableError, ProcessingFailedError
 from aimd.types import TextContext
 
 
@@ -90,3 +90,21 @@ def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
     )
     assert response.status_code == 422
     assert "unavailable" in response.json()["detail"]
+
+
+def test_process_maps_processing_failed_error_to_http_500(monkeypatch) -> None:
+    async def _mock_fail(**kwargs):
+        raise ProcessingFailedError("boom")
+
+    monkeypatch.setattr("aimd.api.ensure_supported_input", lambda _: "transcript")
+    monkeypatch.setattr("aimd.api.process_transcript_input", _mock_fail)
+
+    response = client.post(
+        "/v1/process",
+        json={
+            "input_source": "audio.wav",
+            "transcribe_engine": "cpu",
+        },
+    )
+    assert response.status_code == 500
+    assert response.json()["detail"] == "boom"
