@@ -76,6 +76,7 @@ async def process_input(
     output_file: str | None = None,
     save_original: str | None = None,
     cookies: str | None = None,
+    cookies_from_browser: str | None = None,
 ) -> dict[str, Any]:
     """Process audio/video/url/documents and return markdown context.
 
@@ -86,6 +87,7 @@ async def process_input(
         output_file: Optional path to write resulting markdown output.
         save_original: Optional path to persist downloaded audio for URL processing.
         cookies: Optional Netscape cookies file path for URL extraction.
+        cookies_from_browser: Optional browser cookie source (e.g. chrome:default).
     """
     try:
         task_type = ensure_supported_input(input_source)
@@ -99,6 +101,7 @@ async def process_input(
                 language=language,
                 save_original=Path(save_original) if save_original else None,
                 cookies=Path(cookies) if cookies else None,
+                cookies_from_browser=cookies_from_browser,
             )
         else:
             text_context, epub_output_dir = await process_convert_input(input_source)

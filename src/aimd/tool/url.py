@@ -18,6 +18,8 @@ from ..types import TextContext
 from ..utils import is_valid_url
 from .audio import get_text_from_audio
 
+AUTH_REQUIRED_PLATFORMS = {"bilibili", "xiaohongshu"}
+
 
 def _is_keyring_error(error: Exception) -> bool:
     """Check if an error is related to keyring/cookie decryption issues."""
@@ -43,6 +45,26 @@ def _is_unsupported_url_error(error: Exception) -> bool:
     return "unsupported url" in message or "no suitable extractor" in message
 
 
+def _is_auth_required_error(error: Exception) -> bool:
+    """Best-effort check for login-required/private-content errors."""
+    message = str(error).lower()
+    indicators = [
+        "login required",
+        "sign in",
+        "private",
+        "members only",
+        "premium",
+        "watchlater",
+        "supporter-only",
+        "cookies are required",
+        "authentication",
+        "403",
+        "-403",
+        "-101",
+    ]
+    return any(indicator in message for indicator in indicators)
+
+
 def _impersonation_available() -> bool:
     """Return True when yt-dlp impersonation dependencies are available."""
     try:
@@ -52,11 +74,102 @@ def _impersonation_available() -> bool:
         return False
 
 
-def _create_ydl(
+def _parse_cookies_from_browser(
+    spec: str,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Parse browser cookie source spec to yt-dlp tuple.
+
+    Supported input examples:
+    - chrome
+    - chrome:default
+    - chrome+gnomekeyring:default
+    - firefox::container-1
+    - firefox:default::container-1
+    """
+    raw = spec.strip()
+    if not raw:
+        raise ValueError("cookies_from_browser cannot be empty")
+
+    browser_profile, sep, container = raw.partition("::")
+    container_name = container.strip() if sep and container.strip() else None
+
+    browser_keyring, has_profile, profile = browser_profile.partition(":")
+    profile_name = profile.strip() if has_profile and profile.strip() else None
+
+    browser_name, has_keyring, keyring = browser_keyring.partition("+")
+    keyring_name = keyring.strip() if has_keyring and keyring.strip() else None
+    browser_name = browser_name.strip().lower()
+
+    if not browser_name:
+        raise ValueError(f"Invalid cookies_from_browser value: {spec}")
+
+    return browser_name, profile_name, keyring_name, container_name
+
+
+def _build_cookie_sources(
     *,
-    use_cookies: bool,
     platform: str,
     cookies_file: str | None,
+    cookies_from_browser: str | None,
+) -> list[dict[str, Any]]:
+    """Build ordered cookie source attempts for yt-dlp operations."""
+    sources: list[dict[str, Any]] = []
+
+    if cookies_file:
+        sources.append(
+            {
+                "name": "cookiefile",
+                "use_cookies": True,
+                "cookiefile": cookies_file,
+                "cookiesfrombrowser": None,
+            }
+        )
+
+    if cookies_from_browser:
+        try:
+            browser_tuple = _parse_cookies_from_browser(cookies_from_browser)
+            sources.append(
+                {
+                    "name": f"cookiesfrombrowser:{cookies_from_browser}",
+                    "use_cookies": True,
+                    "cookiefile": None,
+                    "cookiesfrombrowser": browser_tuple,
+                }
+            )
+        except ValueError as exc:
+            logger.warning(str(exc))
+
+    if not cookies_file and not cookies_from_browser:
+        # Default fallback chain for common user environments.
+        default_browser_specs = ("chrome:default", "firefox")
+        for spec in default_browser_specs:
+            sources.append(
+                {
+                    "name": f"cookiesfrombrowser:{spec}",
+                    "use_cookies": True,
+                    "cookiefile": None,
+                    "cookiesfrombrowser": _parse_cookies_from_browser(spec),
+                }
+            )
+
+    # On platforms that usually require authentication, avoid early no-cookie fallback.
+    if platform not in AUTH_REQUIRED_PLATFORMS:
+        sources.append(
+            {
+                "name": "no-cookie",
+                "use_cookies": False,
+                "cookiefile": None,
+                "cookiesfrombrowser": None,
+            }
+        )
+
+    return sources
+
+
+def _create_ydl(
+    *,
+    platform: str,
+    cookie_source: dict[str, Any],
     for_subtitles: bool,
 ) -> yt_dlp.YoutubeDL:
     """Create a fresh YoutubeDL client for a single operation."""
@@ -78,11 +191,11 @@ def _create_ydl(
     if platform == "youtube" and _impersonation_available():
         ydl_opts["impersonate"] = "chrome"
 
-    if use_cookies:
-        if cookies_file:
-            ydl_opts["cookiefile"] = cookies_file
-        else:
-            ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+    if cookie_source.get("use_cookies", False):
+        if cookie_source.get("cookiefile"):
+            ydl_opts["cookiefile"] = cookie_source["cookiefile"]
+        elif cookie_source.get("cookiesfrombrowser"):
+            ydl_opts["cookiesfrombrowser"] = cookie_source["cookiesfrombrowser"]
 
     return yt_dlp.YoutubeDL(ydl_opts)
 
@@ -93,6 +206,7 @@ async def get_text_from_url(
     language: str | None = None,
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
+    cookies_from_browser: str | None = None,
 ) -> TextContext:
     """Extract text content from video URLs using yt-dlp."""
     if not is_valid_url(url):
@@ -101,11 +215,18 @@ async def get_text_from_url(
     logger.info(f"Processing video URL: {url}")
     if cookies_file:
         logger.info(f"Using cookies file: {cookies_file}")
+    if cookies_from_browser:
+        logger.info(f"Using browser cookies source: {cookies_from_browser}")
 
     platform = _detect_platform(url)
 
     try:
-        info_dict = await _extract_video_info(url, platform, cookies_file)
+        info_dict = await _extract_video_info(
+            url=url,
+            platform=platform,
+            cookies_file=cookies_file,
+            cookies_from_browser=cookies_from_browser,
+        )
         title = info_dict.get("title", "Unknown Title")
 
         subtitle_content = await _extract_subtitles(info_dict, platform, language)
@@ -122,6 +243,7 @@ async def get_text_from_url(
             language=language,
             save_original_path=save_original_path,
             cookies_file=cookies_file,
+            cookies_from_browser=cookies_from_browser,
         )
 
         if audio_content and audio_content.strip():
@@ -143,60 +265,77 @@ async def get_text_from_url(
 
 
 async def _extract_video_info(
-    url: str, platform: str, cookies_file: str | None
+    *,
+    url: str,
+    platform: str,
+    cookies_file: str | None,
+    cookies_from_browser: str | None,
 ) -> dict[str, Any]:
-    """Extract video information using yt-dlp with graceful fallback."""
-
-    def _extract_with_config(use_cookies: bool) -> dict[str, Any]:
-        with _create_ydl(
-            use_cookies=use_cookies,
-            platform=platform,
-            cookies_file=cookies_file,
-            for_subtitles=False,
-        ) as ydl:
-            return ydl.extract_info(url, download=False)
+    """Extract video information using yt-dlp with cookie-source fallback chain."""
 
     loop = asyncio.get_running_loop()
+    sources = _build_cookie_sources(
+        platform=platform,
+        cookies_file=cookies_file,
+        cookies_from_browser=cookies_from_browser,
+    )
 
-    try:
-        info_dict = await loop.run_in_executor(None, _extract_with_config, True)
-        if info_dict:
-            return info_dict
-    except Exception as exc:
-        logger.warning(f"Failed to extract video info with cookies: {exc}")
+    if not sources:
+        raise ProcessingFailedError("No available cookie source configuration")
 
-        if _is_unsupported_url_error(exc):
-            raise UnsupportedInputError(f"Unsupported URL: {url}") from exc
+    last_error: Exception | None = None
+    auth_required_seen = False
 
-        should_retry_without_cookies = False
-        if _is_keyring_error(exc):
-            should_retry_without_cookies = True
-        elif platform == "youtube" and (
-            "not available on this app" in str(exc).lower()
-            or "watch on the latest version" in str(exc).lower()
-        ):
-            should_retry_without_cookies = True
+    for source in sources:
 
-        if should_retry_without_cookies:
-            try:
-                info_dict = await loop.run_in_executor(
-                    None, _extract_with_config, False
-                )
-                if info_dict:
-                    logger.info("Successfully extracted video info without cookies")
-                    return info_dict
-            except Exception as fallback_exc:
-                if _is_unsupported_url_error(fallback_exc):
-                    raise UnsupportedInputError(
-                        f"Unsupported URL: {url}"
-                    ) from fallback_exc
-                raise ProcessingFailedError(
-                    f"Failed to extract video information: {fallback_exc}"
-                ) from fallback_exc
-        else:
-            raise ProcessingFailedError(
-                f"Failed to extract video information: {exc}"
-            ) from exc
+        def _extract_with_source() -> dict[str, Any]:
+            with _create_ydl(
+                platform=platform,
+                cookie_source=source,
+                for_subtitles=False,
+            ) as ydl:
+                return ydl.extract_info(url, download=False)
+
+        try:
+            info_dict = await loop.run_in_executor(None, _extract_with_source)
+            if info_dict:
+                logger.debug(f"Video info extracted with source: {source['name']}")
+                return info_dict
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"Video info extraction failed with {source['name']}: {exc}")
+
+            if _is_unsupported_url_error(exc):
+                raise UnsupportedInputError(f"Unsupported URL: {url}") from exc
+
+            if _is_auth_required_error(exc):
+                auth_required_seen = True
+
+                # For auth-heavy platforms, never downgrade to no-cookie attempt here.
+                if (
+                    platform in AUTH_REQUIRED_PLATFORMS
+                    and source["name"] == "no-cookie"
+                ):
+                    break
+
+                continue
+
+            if _is_keyring_error(exc):
+                continue
+
+            # Non-auth, non-keyring failures can still be transient; continue fallback chain.
+            continue
+
+    if auth_required_seen:
+        raise ProcessingFailedError(
+            "Authenticated cookies are required for this URL. "
+            "Provide --cookies (Netscape file) or --cookies-from-browser."
+        ) from last_error
+
+    if last_error is not None:
+        raise ProcessingFailedError(
+            f"Failed to extract video information: {last_error}"
+        ) from last_error
 
     raise ProcessingFailedError("Failed to extract video information")
 
@@ -295,9 +434,8 @@ async def _download_subtitle(url: str, platform: str) -> str | None:
 
     def _download() -> str:
         with _create_ydl(
-            use_cookies=False,
             platform=platform,
-            cookies_file=None,
+            cookie_source={"use_cookies": False},
             for_subtitles=True,
         ) as ydl:
             response = ydl.urlopen(url)
@@ -319,6 +457,7 @@ async def _extract_content_from_audio(
     language: str | None,
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
+    cookies_from_browser: str | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it."""
 
@@ -330,6 +469,7 @@ async def _extract_content_from_audio(
                 download_path=download_path,
                 save_original_path=save_original_path,
                 cookies_file=cookies_file,
+                cookies_from_browser=cookies_from_browser,
             )
             if not audio_file_path or not audio_file_path.exists():
                 return None
@@ -368,6 +508,7 @@ async def _download_audio(
     download_path: Path,
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
+    cookies_from_browser: str | None = None,
 ) -> Path | None:
     """Download audio from video using yt-dlp with format fallbacks."""
     if save_original_path is not None and save_original_path.suffix != "":
@@ -408,6 +549,7 @@ async def _download_audio(
                 preferred_codec=preferred_codec,
                 platform=platform,
                 cookies_file=cookies_file,
+                cookies_from_browser=cookies_from_browser,
             )
             if audio_file and audio_file.exists():
                 return audio_file
@@ -425,10 +567,11 @@ async def _try_download_with_format(
     preferred_codec: str,
     platform: str,
     cookies_file: str | None,
+    cookies_from_browser: str | None,
 ) -> Path | None:
     """Attempt to download audio with specific format settings."""
 
-    def _build_download_opts(use_cookies: bool) -> dict[str, Any]:
+    def _build_download_opts(cookie_source: dict[str, Any]) -> dict[str, Any]:
         ydl_opts: dict[str, Any] = {
             "quiet": True,
             "no_warnings": True,
@@ -455,29 +598,46 @@ async def _try_download_with_format(
         if platform == "youtube" and _impersonation_available():
             ydl_opts["impersonate"] = "chrome"
 
-        if use_cookies and platform != "youtube":
-            if cookies_file:
-                ydl_opts["cookiefile"] = cookies_file
-            else:
-                ydl_opts["cookiesfrombrowser"] = ("chrome", "default")
+        if cookie_source.get("use_cookies") and platform != "youtube":
+            if cookie_source.get("cookiefile"):
+                ydl_opts["cookiefile"] = cookie_source["cookiefile"]
+            elif cookie_source.get("cookiesfrombrowser"):
+                ydl_opts["cookiesfrombrowser"] = cookie_source["cookiesfrombrowser"]
 
         return ydl_opts
 
-    def _download(use_cookies: bool) -> None:
-        with yt_dlp.YoutubeDL(_build_download_opts(use_cookies)) as ydl:
+    def _download_with_source(cookie_source: dict[str, Any]) -> None:
+        with yt_dlp.YoutubeDL(_build_download_opts(cookie_source)) as ydl:
             ydl.download([url])
 
+    sources = _build_cookie_sources(
+        platform=platform,
+        cookies_file=cookies_file,
+        cookies_from_browser=cookies_from_browser,
+    )
+
     loop = asyncio.get_running_loop()
-    try:
-        await loop.run_in_executor(None, _download, True)
-    except Exception as exc:
-        if _is_keyring_error(exc):
-            logger.warning(
-                f"Keyring error during audio download, retrying without cookies: {exc}"
-            )
-            await loop.run_in_executor(None, _download, False)
-        else:
-            raise
+    last_error: Exception | None = None
+
+    for source in sources:
+        try:
+            await loop.run_in_executor(None, _download_with_source, source)
+            break
+        except Exception as exc:
+            last_error = exc
+            if _is_keyring_error(exc) or _is_auth_required_error(exc):
+                continue
+            continue
+
+    if (
+        last_error
+        and platform in AUTH_REQUIRED_PLATFORMS
+        and _is_auth_required_error(last_error)
+    ):
+        raise ProcessingFailedError(
+            "Authenticated cookies are required for this download. "
+            "Provide --cookies or --cookies-from-browser."
+        ) from last_error
 
     audio_files = list(download_path.glob(f"{audio_filename}.*"))
     if not audio_files:

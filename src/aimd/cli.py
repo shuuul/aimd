@@ -96,6 +96,12 @@ def process(
         "Bypasses browser keyring entirely. Export with: "
         "yt-dlp --cookies-from-browser chrome --cookies cookies.txt",
     ),
+    cookies_from_browser: Optional[str] = typer.Option(
+        None,
+        "--cookies-from-browser",
+        help="Browser cookie source for URL extraction. "
+        "Examples: chrome, chrome:default, chrome+gnomekeyring:default, firefox.",
+    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -132,6 +138,7 @@ def process(
                     language,
                     save_original,
                     cookies,
+                    cookies_from_browser,
                 )
             else:
                 await _process_convert(input_source, output_file)
@@ -154,6 +161,7 @@ async def _process_transcript(
     language: str | None,
     save_original: Optional[Path] = None,
     cookies: Optional[Path] = None,
+    cookies_from_browser: str | None = None,
 ):
     """Process audio/video transcription."""
     text_context = await process_transcript_input(
@@ -162,6 +170,7 @@ async def _process_transcript(
         language=language,
         save_original=save_original,
         cookies=cookies,
+        cookies_from_browser=cookies_from_browser,
     )
 
     if output_file is None:

@@ -120,6 +120,9 @@ yt-dlp --cookies-from-browser chrome --cookies cookies.txt
 
 # Use cookies file with aimd
 aimd "https://youtube.com/watch?v=..." --cookies cookies.txt
+
+# Or read cookies directly from browser profile
+aimd "https://www.bilibili.com/video/BV..." --cookies-from-browser "chrome:default"
 ```
 
 > **Note**: Cookie files are in Netscape format and can also be created using browser extensions like "Get cookies.txt" (Chrome) or "Cookie-Editor" (Firefox).

@@ -53,6 +53,7 @@ async def process_transcript_input(
     language: str | None = None,
     save_original: Path | None = None,
     cookies: Path | None = None,
+    cookies_from_browser: str | None = None,
 ) -> TextContext:
     """Process transcription input from URL or local audio/video file."""
     if is_url(input_source):
@@ -65,6 +66,7 @@ async def process_transcript_input(
                 language=language,
                 save_original_path=save_original,
                 cookies_file=str(cookies) if cookies else None,
+                cookies_from_browser=cookies_from_browser,
             )
         except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
             raise

@@ -59,6 +59,13 @@ class ProcessRequest(BaseModel):
         default=None,
         description="Path to Netscape-format cookies file for URL extraction.",
     )
+    cookies_from_browser: str | None = Field(
+        default=None,
+        description=(
+            "Browser cookie source for URL extraction, "
+            "e.g. chrome, chrome:default, chrome+gnomekeyring:default."
+        ),
+    )
 
 
 class ProcessResponse(BaseModel):
@@ -140,6 +147,7 @@ def create_app() -> FastAPI:
                     if request.save_original
                     else None,
                     cookies=Path(request.cookies) if request.cookies else None,
+                    cookies_from_browser=request.cookies_from_browser,
                 )
             else:
                 text_context, epub_output_dir = await process_convert_input(
