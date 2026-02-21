@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.3.0-blue)
+  ![Version](https://img.shields.io/badge/version-0.4.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
