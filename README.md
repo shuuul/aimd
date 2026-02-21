@@ -157,6 +157,43 @@ book_name/
     └── *.jpg, *.png, etc.
 ```
 
+## HTTP API (FastAPI)
+
+Run the API service:
+
+```bash
+aimd-api
+# or: uv run uvicorn aimd.api:app --host 127.0.0.1 --port 8000
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+Inspect transcription engine availability (preflight):
+
+```bash
+curl http://127.0.0.1:8000/v1/engines
+```
+
+Process any supported input:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/process \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_source": "https://www.youtube.com/watch?v=I3WUiD8HYn8",
+    "transcribe_engine": "auto",
+    "language": "en"
+  }'
+```
+
+OpenAPI docs are available at:
+- `/docs`
+- `/redoc`
+
 ## Supported Formats
 
 ### Video Platforms

@@ -5,21 +5,16 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from logly import logger
 from dotenv import load_dotenv
+from logly import logger
 
-from .const import AUDIO_EXTENSIONS, EPUB_EXTENSIONS
-from .utils import (
-    is_url,
-    create_output_path_from_title,
+from .errors import AimdError
+from .service import (
+    ensure_supported_input,
+    process_convert_input,
+    process_transcript_input,
 )
-from .tool.file import (
-    get_text_from_file,
-    is_supported_file,
-    process_epub_with_images,
-)
-from .tool.audio import get_text_from_audio
-from .tool.url import get_text_from_url
+from .utils import create_output_path_from_title
 
 load_dotenv()
 
@@ -60,22 +55,6 @@ def _configure_logging(log_level: str):
 
     if str(log_level).upper() == "DEBUG":
         logger.debug(f"Logging level configured to: {log_level}")
-
-
-def _get_task_type(input_source: str) -> str:
-    """Determine task type based on input source."""
-    if is_url(input_source):
-        return "transcript"
-    try:
-        file_path = Path(input_source)
-        if file_path.exists():
-            if file_path.suffix.lower() in AUDIO_EXTENSIONS:
-                return "transcript"
-            if is_supported_file(file_path):
-                return "convert"
-    except (OSError, ValueError):
-        pass
-    return "unknown"
 
 
 @app.command()
@@ -132,14 +111,10 @@ def process(
     """
     _configure_logging(log_level)
 
-    task_type = _get_task_type(input_source)
-
-    if task_type == "unknown":
-        typer.echo(f"Error: Unsupported input source: {input_source}", err=True)
-        typer.echo(
-            "Supported inputs: audio files, video files, video URLs, or documents (epub, txt, etc.)",
-            err=True,
-        )
+    try:
+        task_type = ensure_supported_input(input_source)
+    except AimdError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     logger.info(f"Input: {input_source}")
@@ -161,6 +136,9 @@ def process(
             else:
                 await _process_convert(input_source, output_file)
 
+        except AimdError as e:
+            logger.error(str(e))
+            raise typer.Exit(1)
         except Exception as e:
             task_name = "Transcription" if task_type == "transcript" else "Conversion"
             logger.error(f"{task_name} failed: {e}")
@@ -178,16 +156,13 @@ async def _process_transcript(
     cookies: Optional[Path] = None,
 ):
     """Process audio/video transcription."""
-    if is_url(input_source):
-        logger.info(f"Getting transcript from URL: {input_source}")
-        cookies_str = str(cookies) if cookies else None
-        text_context = await get_text_from_url(
-            input_source, engine, language, save_original, cookies_file=cookies_str
-        )
-    else:
-        file_path = Path(input_source)
-        logger.info(f"Getting transcript from: {file_path}")
-        text_context = await get_text_from_audio(file_path, engine, language)
+    text_context = await process_transcript_input(
+        input_source=input_source,
+        engine=engine,
+        language=language,
+        save_original=save_original,
+        cookies=cookies,
+    )
 
     if output_file is None:
         output_file = create_output_path_from_title(
@@ -210,14 +185,11 @@ async def _process_transcript(
 
 async def _process_convert(input_file: str, output_file: Optional[Path]):
     """Process document conversion."""
+    text_context, output_dir = await process_convert_input(input_file)
     input_path = Path(input_file)
-    file_extension = input_path.suffix.lower()
 
-    # Special handling for EPUB files with image extraction
-    if file_extension in EPUB_EXTENSIONS:
-        logger.info(f"Processing EPUB with image extraction: {input_path}")
-        text_context, output_dir = await process_epub_with_images(input_path)
-
+    # EPUB-family files are exported as a directory tree.
+    if output_dir is not None:
         logger.info(f"EPUB converted with images to: {output_dir}")
         logger.info(f"Main file: {output_dir / f'{input_path.stem}.md'}")
         logger.info(f"Images extracted to: {output_dir / 'images'}")
@@ -225,10 +197,6 @@ async def _process_convert(input_file: str, output_file: Optional[Path]):
         typer.echo("Successfully converted EPUB with images")
         typer.echo(f"Output saved to {output_dir}")
         return
-
-    # Standard file conversion
-    logger.info(f"Converting file: {input_path}")
-    text_context = await get_text_from_file(input_path)
 
     if output_file is None:
         output_file = create_output_path_from_title(

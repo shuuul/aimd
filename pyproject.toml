@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.12.15",
+    "fastapi>=0.116.1",
     "pandoc>=2.4",
     "pydantic>=2.0.0",
     "python-dotenv>=1.1.1",
@@ -19,6 +20,7 @@ dependencies = [
     "mlx-whisper>=0.4.2; sys_platform == 'darwin'",
     "logly>=0.1.6",
     "typer>=0.20.0",
+    "uvicorn>=0.35.0",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
 ]
 
@@ -28,6 +30,7 @@ build-backend = "uv_build"
 
 [project.scripts]
 aimd = "aimd.cli:main"
+aimd-api = "aimd.api:main"
 
 
 [dependency-groups]

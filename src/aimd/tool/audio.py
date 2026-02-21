@@ -12,12 +12,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import torch
 from logly import logger
 
+from ..capabilities import resolve_engine_with_preflight
 from ..types import TextContext
 from ..const import (
-    TRANSCRIPTION_ENGINES,
     YAP_SUPPORTED_LOCALES,
     LANGUAGE_TO_YAP_LOCALE,
     WHISPER_MODEL_SIZES,
@@ -300,8 +299,14 @@ async def transcribe_audio_cuda(
 
     # Auto-detect CUDA availability if device is "cuda"
     if device == "cuda":
-        if not torch.cuda.is_available():
-            logger.warning("CUDA not available, falling back to CPU")
+        try:
+            import torch  # type: ignore
+
+            if not torch.cuda.is_available():
+                logger.warning("CUDA not available, falling back to CPU")
+                device = "cpu"
+        except ImportError:
+            logger.warning("PyTorch not installed, falling back to CPU")
             device = "cpu"
 
     logger.info(
@@ -357,31 +362,7 @@ def _resolve_engine(engine: str) -> str:
     Raises:
         ValueError: If engine is invalid
     """
-    if engine not in TRANSCRIPTION_ENGINES:
-        raise ValueError(
-            f"Invalid engine '{engine}'. Valid options: {TRANSCRIPTION_ENGINES}"
-        )
-
-    if engine != "auto":
-        return engine
-
-    system = platform.system().lower()
-
-    # Auto detection logic
-    if system == "darwin":
-        # On macOS, prefer yap if available, then mlx if on Apple Silicon, then cpu
-        if shutil.which("yap"):
-            return "yap"
-        elif _is_apple_silicon():
-            return "mlx"
-        else:
-            return "cpu"
-    else:
-        # On non-macOS, use cuda if available, otherwise cpu
-        if torch.cuda.is_available():
-            return "cuda"
-        else:
-            return "cpu"
+    return resolve_engine_with_preflight(engine)
 
 
 def _language_to_yap_locale(language: str | None) -> str:
