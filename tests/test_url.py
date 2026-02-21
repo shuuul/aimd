@@ -1,12 +1,15 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from aimd.errors import ProcessingFailedError
 from aimd.tool.url import (
     _build_cookie_sources,
+    _download_audio,
     _is_auth_required_error,
     _parse_cookies_from_browser,
+    _try_download_with_format,
     get_text_from_url,
 )
 
@@ -136,3 +139,116 @@ async def test_auth_required_failure_surfaces_cookie_hint(monkeypatch) -> None:
         ProcessingFailedError, match="Authenticated cookies are required"
     ):
         await get_text_from_url("https://www.bilibili.com/video/BV1")
+
+
+@pytest.mark.asyncio
+async def test_download_audio_prefers_audio_only_for_youtube(
+    monkeypatch, tmp_path: Path
+) -> None:
+    attempts: list[tuple[str, str | None]] = []
+
+    async def _mock_try_download_with_format(**kwargs):
+        attempts.append((kwargs["format_selector"], kwargs["preferred_codec"]))
+        out = tmp_path / "audio.webm"
+        out.write_text("x", encoding="utf-8")
+        return out
+
+    monkeypatch.setattr(
+        "aimd.tool.url._try_download_with_format",
+        _mock_try_download_with_format,
+    )
+
+    out = await _download_audio(
+        info_dict={"title": "t", "id": "id"},
+        url="https://www.youtube.com/watch?v=test",
+        download_path=tmp_path,
+    )
+
+    assert out is not None
+    assert attempts
+    assert attempts[0] == (
+        "bestaudio[acodec^=opus][abr<=128]/bestaudio[abr<=128]/bestaudio",
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_download_audio_prefers_audio_only_for_bilibili(
+    monkeypatch, tmp_path: Path
+) -> None:
+    attempts: list[tuple[str, str | None]] = []
+
+    async def _mock_try_download_with_format(**kwargs):
+        attempts.append((kwargs["format_selector"], kwargs["preferred_codec"]))
+        out = tmp_path / "audio.m4a"
+        out.write_text("x", encoding="utf-8")
+        return out
+
+    monkeypatch.setattr(
+        "aimd.tool.url._try_download_with_format",
+        _mock_try_download_with_format,
+    )
+
+    out = await _download_audio(
+        info_dict={"title": "t", "id": "id"},
+        url="https://www.bilibili.com/video/BV1BDcKziEqy",
+        download_path=tmp_path,
+    )
+
+    assert out is not None
+    assert attempts
+    assert attempts[0] == ("bestaudio", None)
+
+
+@pytest.mark.asyncio
+async def test_try_download_with_format_only_adds_postprocessor_when_codec_requested(
+    monkeypatch, tmp_path: Path
+) -> None:
+    seen_opts: list[dict] = []
+
+    class _FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+            seen_opts.append(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def download(self, urls):  # noqa: ARG002
+            Path(f"{self.opts['outtmpl']}.webm").write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "aimd.tool.url._build_cookie_sources",
+        lambda **kwargs: [{"name": "no-cookie", "use_cookies": False}],
+    )
+    monkeypatch.setattr("aimd.tool.url._impersonation_available", lambda: False)
+    monkeypatch.setattr("aimd.tool.url.yt_dlp.YoutubeDL", _FakeYDL)
+
+    result_no_codec = await _try_download_with_format(
+        url="https://example.com/video",
+        download_path=tmp_path,
+        audio_filename="sample_audio",
+        format_selector="bestaudio",
+        preferred_codec=None,
+        platform="youtube",
+        cookies_file=None,
+        cookies_from_browser=None,
+    )
+    assert result_no_codec is not None
+    assert "postprocessors" not in seen_opts[-1]
+
+    result_with_codec = await _try_download_with_format(
+        url="https://example.com/video",
+        download_path=tmp_path,
+        audio_filename="sample_audio_2",
+        format_selector="bestaudio[ext=m4a]/bestaudio",
+        preferred_codec="m4a",
+        platform="youtube",
+        cookies_file=None,
+        cookies_from_browser=None,
+    )
+    assert result_with_codec is not None
+    assert seen_opts[-1]["postprocessors"][0]["preferredcodec"] == "m4a"

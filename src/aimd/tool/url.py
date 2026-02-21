@@ -527,13 +527,19 @@ async def _download_audio(
     platform = _detect_platform(url)
     if platform == "bilibili":
         format_strategies = [
-            ("bestaudio", "m4a", "best audio-only stream"),
+            ("bestaudio", None, "best audio-only stream"),
             ("bestaudio[ext=m4a]", "m4a", "best m4a audio stream"),
             ("best[acodec!=none]", "m4a", "best format with audio track"),
             ("best", "m4a", "best combined format"),
         ]
     else:
         format_strategies = [
+            (
+                "bestaudio[acodec^=opus][abr<=128]/bestaudio[abr<=128]/bestaudio",
+                None,
+                "audio-only stream (prefer opus <=128kbps)",
+            ),
+            ("bestaudio[ext=m4a]/bestaudio", "m4a", "audio-only m4a stream"),
             ("best[acodec!=none]", "m4a", "best format with audio track"),
             ("best", "m4a", "best combined format"),
         ]
@@ -564,7 +570,7 @@ async def _try_download_with_format(
     download_path: Path,
     audio_filename: str,
     format_selector: str,
-    preferred_codec: str,
+    preferred_codec: str | None,
     platform: str,
     cookies_file: str | None,
     cookies_from_browser: str | None,
@@ -579,14 +585,7 @@ async def _try_download_with_format(
             "outtmpl": str(download_path / audio_filename),
         }
 
-        if preferred_codec == "best":
-            ydl_opts["postprocessors"] = [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "best",
-                }
-            ]
-        else:
+        if preferred_codec:
             ydl_opts["postprocessors"] = [
                 {
                     "key": "FFmpegExtractAudio",
