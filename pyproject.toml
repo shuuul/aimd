@@ -1,6 +1,6 @@
 [project]
 name = "aimd"
-version = "0.2.0"
+version = "0.3.0"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [
@@ -32,7 +32,7 @@ build-backend = "uv_build"
 [project.scripts]
 aimd = "aimd.cli:main"
 aimd-api = "aimd.api:main"
-aimd-mcp = "aimd.mcp_server:main"
+aimd-mcp = "aimd.mcp:main"
 
 
 [dependency-groups]

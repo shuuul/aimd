@@ -2,32 +2,69 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aimd.api import app
-from aimd.errors import EngineUnavailableError, ProcessingFailedError
+from aimd.adapters.http.app import create_app
+from aimd.application.models import ProcessResult
+from aimd.errors import (
+    EngineUnavailableError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
+from aimd.infrastructure.capabilities.detector import EngineCapability
 from aimd.types import TextContext
 
 
-client = TestClient(app)
+class _FakeProcessUseCase:
+    def __init__(self, result=None, exc=None):
+        self._result = result
+        self._exc = exc
+
+    async def execute(self, request):  # noqa: ARG002
+        if self._exc:
+            raise self._exc
+        return self._result
 
 
-def test_healthz() -> None:
+class _FakeListEnginesUseCase:
+    def execute(self):
+        class _Result:
+            auto_selected_engine = "cpu"
+            engines = {
+                "yap": EngineCapability("yap", False, "unsupported", None),
+                "mlx": EngineCapability("mlx", False, "unsupported", None),
+                "cuda": EngineCapability("cuda", False, "unsupported", None),
+                "cpu": EngineCapability("cpu", True, None, None),
+            }
+
+        return _Result()
+
+
+def _make_client(monkeypatch, process_result=None, process_exc=None) -> TestClient:
+    class _Container:
+        process_input_use_case = _FakeProcessUseCase(process_result, process_exc)
+        list_engines_use_case = _FakeListEnginesUseCase()
+
+    monkeypatch.setattr("aimd.adapters.http.app.build_container", lambda: _Container())
+    return TestClient(create_app())
+
+
+def test_healthz(monkeypatch) -> None:
+    client = _make_client(monkeypatch)
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_process_rejects_unknown_input() -> None:
-    response = client.post(
-        "/v1/process",
-        json={
-            "input_source": "this_is_not_a_file_or_url",
-        },
+def test_process_rejects_unknown_input(monkeypatch) -> None:
+    client = _make_client(
+        monkeypatch,
+        process_exc=UnsupportedInputError("Unsupported input source"),
     )
+    response = client.post("/v1/process", json={"input_source": "x"})
     assert response.status_code == 400
-    assert "Unsupported input source" in response.json()["detail"]
 
 
-def test_engines_endpoint() -> None:
+def test_engines_endpoint(monkeypatch) -> None:
+    client = _make_client(monkeypatch)
     response = client.get("/v1/engines")
     assert response.status_code == 200
     body = response.json()
@@ -41,20 +78,16 @@ def test_engines_endpoint() -> None:
     }
 
 
-def test_process_transcript_success_with_output_file(
-    monkeypatch, tmp_path: Path
-) -> None:
-    async def _mock_process_transcript_input(**kwargs):
-        return TextContext(
+def test_process_transcript_success_with_output_file(monkeypatch, tmp_path: Path) -> None:
+    result = ProcessResult(
+        task_type="transcript",
+        text_context=TextContext(
             title="mock-title",
             chunk_list=["hello transcript"],
             split_header_level=None,
-        )
-
-    monkeypatch.setattr("aimd.api.ensure_supported_input", lambda _: "transcript")
-    monkeypatch.setattr(
-        "aimd.api.process_transcript_input", _mock_process_transcript_input
+        ),
     )
+    client = _make_client(monkeypatch, process_result=result)
 
     output_file = tmp_path / "out.md"
     response = client.post(
@@ -75,36 +108,14 @@ def test_process_transcript_success_with_output_file(
 
 
 def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
-    async def _mock_fail(**kwargs):
-        raise EngineUnavailableError("Engine 'mlx' unavailable")
-
-    monkeypatch.setattr("aimd.api.ensure_supported_input", lambda _: "transcript")
-    monkeypatch.setattr("aimd.api.process_transcript_input", _mock_fail)
-
-    response = client.post(
-        "/v1/process",
-        json={
-            "input_source": "audio.wav",
-            "transcribe_engine": "mlx",
-        },
-    )
+    client = _make_client(monkeypatch, process_exc=EngineUnavailableError("unavailable"))
+    response = client.post("/v1/process", json={"input_source": "audio.wav"})
     assert response.status_code == 422
     assert "unavailable" in response.json()["detail"]
 
 
 def test_process_maps_processing_failed_error_to_http_500(monkeypatch) -> None:
-    async def _mock_fail(**kwargs):
-        raise ProcessingFailedError("boom")
-
-    monkeypatch.setattr("aimd.api.ensure_supported_input", lambda _: "transcript")
-    monkeypatch.setattr("aimd.api.process_transcript_input", _mock_fail)
-
-    response = client.post(
-        "/v1/process",
-        json={
-            "input_source": "audio.wav",
-            "transcribe_engine": "cpu",
-        },
-    )
+    client = _make_client(monkeypatch, process_exc=ProcessingFailedError("boom"))
+    response = client.post("/v1/process", json={"input_source": "audio.wav"})
     assert response.status_code == 500
     assert response.json()["detail"] == "boom"

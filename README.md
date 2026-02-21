@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.0.9-blue)
+  ![Version](https://img.shields.io/badge/version-0.3.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -17,6 +17,16 @@ Context preparation tool for LLM workflows - Transcribe audio/video and convert 
 - **Multi-Engine Audio Transcription**: Support for yap (macOS), MLX-Whisper (Apple Silicon), faster-whisper (CUDA/CPU)
 - **Unified Video Platform Support**: Extract content from 1000+ video platforms including YouTube, Bilibili using yt-dlp
 - **Document Conversion**: Convert EPUB, PDF, TXT, and other formats to markdown using Pandoc
+
+## Architecture
+
+The runtime now uses a ports/adapters layout:
+
+- `aimd.application` for use-cases and request/response models
+- `aimd.infrastructure` for concrete transcription/URL/document processors
+- `aimd.adapters` for CLI, HTTP API, and MCP interface layers
+
+Entrypoints are exposed via `aimd.cli`, `aimd.api`, and `aimd.mcp`, backed by the adapter/application/infrastructure layers.
 
 ## Installation
 
@@ -296,7 +306,7 @@ aimd --help
 aimd/
 ├── src/aimd/
 │   ├── cli.py              # Unified CLI with auto-detection
-│   ├── mcp_server.py       # MCP server entrypoint (stdio)
+│   ├── mcp.py              # MCP server entrypoint (stdio)
 │   ├── const.py            # Constants (extensions, engines, languages)
 │   ├── utils.py            # Utility functions
 │   ├── types.py            # Pydantic models (TextContext)

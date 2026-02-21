@@ -6,33 +6,56 @@
 
 ## OVERVIEW
 
-Python context-preparation toolkit with dual interfaces:
-- **CLI** (`aimd`) for local batch usage
-- **HTTP API** (`aimd-api`, FastAPI) for service integration
+Python context-preparation toolkit with three interfaces:
+- **CLI** (`aimd`) for local usage
+- **HTTP API** (`aimd-api`, FastAPI)
+- **MCP Server** (`aimd-mcp`, stdio)
 
-Core capabilities remain: transcribe audio/video or URLs, convert docs to markdown, and process EPUB with chapters/images.
+Architecture is ports/adapters:
+- `application` for orchestration use-cases and canonical models
+- `infrastructure` for concrete processing engines and integrations
+- `adapters` for interface binding (CLI/API/MCP)
 
 ## STRUCTURE
 
 ```
 aimd/
 ├── src/aimd/
-│   ├── cli.py              # Typer entrypoint
-│   ├── api.py              # FastAPI app (/healthz, /v1/engines, /v1/process)
-│   ├── service.py          # Shared async orchestration for CLI/API
-│   ├── capabilities.py     # Engine preflight + auto engine resolution
-│   ├── errors.py           # Typed domain errors with status mapping
-│   ├── const.py            # Extensions, engines, language mappings
-│   ├── utils.py            # URL/file utilities
-│   ├── types.py            # TextContext model
-│   └── tool/
-│       ├── audio.py        # yap/mlx/faster-whisper transcription
-│       ├── file.py         # Pandoc conversion + EPUB extraction
-│       └── url.py          # yt-dlp subtitle/audio fallback
+│   ├── cli.py                    # CLI entrypoint
+│   ├── api.py                    # FastAPI entrypoint
+│   ├── mcp.py                    # MCP entrypoint
+│   ├── errors.py                 # Typed domain errors with status mapping
+│   ├── const.py                  # Extensions, engines, language mappings
+│   ├── utils.py                  # URL/file utilities
+│   ├── types.py                  # TextContext model
+│   ├── application/
+│   │   ├── models.py             # ProcessInput/ProcessResult/TaskType
+│   │   ├── bootstrap.py          # Explicit dependency wiring
+│   │   ├── use_cases/
+│   │   │   ├── process_input.py  # Main orchestration use-case
+│   │   │   └── list_engines.py   # Engine introspection use-case
+│   │   └── services/
+│   │       └── output_writer.py  # Shared output persistence
+│   ├── infrastructure/
+│   │   ├── capabilities/
+│   │   │   └── detector.py       # Engine preflight checks
+│   │   ├── transcription/        # yap/mlx/faster-whisper execution
+│   │   ├── documents/            # Pandoc + EPUB + chunking pipeline
+│   │   └── url/                  # yt-dlp cookies/subtitles/audio fallback
+│   └── adapters/
+│       ├── cli/app.py            # Typer interface adapter
+│       ├── http/app.py           # FastAPI interface adapter
+│       └── mcp/server.py         # MCP interface adapter
 ├── tests/
 │   ├── test_api.py
+│   ├── test_cli.py
+│   ├── test_use_cases.py
+│   ├── test_url.py
+│   ├── test_file_processing.py
 │   ├── test_capabilities.py
-│   └── test_epub.py
+│   └── test_mcp_server.py
+├── docs/
+│   └── architecture.md
 ├── pyproject.toml
 └── AGENTS.md
 ```
@@ -41,30 +64,31 @@ aimd/
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Shared processing flow | `src/aimd/service.py` | `ensure_supported_input`, transcript/convert orchestration |
-| API endpoints | `src/aimd/api.py` | Health, engine preflight introspection, process endpoint |
-| Engine preflight logic | `src/aimd/capabilities.py` | Availability checks + auto priority |
-| Typed error model | `src/aimd/errors.py` | Domain-level errors for CLI/API consistency |
-| CLI command behavior | `src/aimd/cli.py` | Delegates to service layer |
-| Audio transcription internals | `src/aimd/tool/audio.py` | Runtime engine execution; lazy `torch` usage |
-| URL extraction | `src/aimd/tool/url.py` | Subtitle-first + audio fallback with cookies handling |
-| Document conversion | `src/aimd/tool/file.py` | Pandoc + EPUB image/chapter extraction |
+| Main process orchestration | `src/aimd/application/use_cases/process_input.py` | task type detection + transcript/convert routing |
+| Dependency wiring | `src/aimd/application/bootstrap.py` | binds use-cases to infra implementations |
+| API routes | `src/aimd/adapters/http/app.py` | `/healthz`, `/v1/engines`, `/v1/process` |
+| CLI behavior | `src/aimd/adapters/cli/app.py` | Typer command and output persistence |
+| MCP tools | `src/aimd/adapters/mcp/server.py` | `healthz`, `list_engines`, `process_input` |
+| Engine preflight | `src/aimd/infrastructure/capabilities/detector.py` | availability + auto-resolution |
+| Audio transcription | `src/aimd/infrastructure/transcription/` | engine-specific runtime paths |
+| URL extraction | `src/aimd/infrastructure/url/` | cookie source fallback + subtitle/audio logic |
+| Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion, split logic, EPUB extraction |
 
 ## CONVENTIONS (THIS PROJECT)
 
-- **Async-first**: processing functions are async and shared by CLI/API.
-- **Single orchestration layer**: business flow goes through `service.py`.
-- **Fail-fast preflight**: transcription engine choice validated before costly work.
-- **Typed errors**: use `AimdError` subclasses for predictable status handling.
-- **TextContext contract**: downstream processing returns `TextContext(title, chunk_list, split_header_level)`.
+- **Async-first**: processing paths are async throughout use-cases/infrastructure.
+- **Use-case centric orchestration**: task routing lives in `application/use_cases`.
+- **Fail-fast preflight**: engine selection validated before expensive work.
+- **Typed errors**: use `AimdError` subclasses for predictable mapping.
+- **TextContext contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
 - **uv only**: use `uv run`, `uv sync`; avoid pip/poetry.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
-- **Headerless split failure remains**: `file.py` still errors if no usable markdown headers for chunking.
-- **Platform locks**: `yap`/`mlx` remain macOS-constrained; `mlx` requires Apple Silicon.
-- **External runtime tools**: `yap`, `pandoc`, `yt-dlp` environment issues surface at runtime.
-- **Subtitle constraints**: danmaku blocked via `FORBIDDEN_SUBTITLE_LANGUAGES`.
+- Embedding business orchestration directly in adapters.
+- Cross-layer imports from infrastructure into adapters.
+- Raising generic exceptions where a domain error exists.
+- Changing URL subtitle/cookie fallback ordering without explicit tests.
 
 ## COMMANDS
 
@@ -86,16 +110,18 @@ aimd-api
 curl http://127.0.0.1:8000/healthz
 curl http://127.0.0.1:8000/v1/engines
 
+# MCP
+aimd-mcp
+
 # Test
 uv run pytest
 ```
 
 ## NOTES
 
-- **API route summary**: `/healthz`, `/v1/engines`, `/v1/process`.
-- **Engine auto priority**:
+- API routes: `/healthz`, `/v1/engines`, `/v1/process`.
+- Engine auto priority:
   - macOS: `yap -> mlx -> cpu`
   - non-macOS: `cuda -> cpu`
-- **Lazy heavyweight import**: `torch` is no longer imported at module import time in `audio.py`.
-- **EPUB output layout**: `book_name/{book_name.md, chapters/, images/}`.
-- **Cookies support**: URL extraction supports explicit Netscape cookies file to bypass keyring issues.
+- EPUB output layout: `book_name/{book_name.md, chapters/, images/}`.
+- URL extraction supports explicit Netscape cookies file and browser cookie source.

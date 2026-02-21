@@ -6,9 +6,9 @@ import importlib.util
 import platform
 import shutil
 
-from .const import TRANSCRIPTION_ENGINES
-from .errors import EngineUnavailableError, UnsupportedEngineError
-from .platform_utils import is_apple_silicon
+from ...const import TRANSCRIPTION_ENGINES
+from ...errors import EngineUnavailableError, UnsupportedEngineError
+from ...platform_utils import is_apple_silicon
 
 
 @dataclass

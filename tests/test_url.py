@@ -4,14 +4,13 @@ from pathlib import Path
 import pytest
 
 from aimd.errors import ProcessingFailedError
-from aimd.tool.url import (
-    _build_cookie_sources,
-    _download_audio,
-    _is_auth_required_error,
-    _parse_cookies_from_browser,
-    _try_download_with_format,
-    get_text_from_url,
+from aimd.infrastructure.url.audio_download import download_audio, try_download_with_format
+from aimd.infrastructure.url.cookies import (
+    build_cookie_sources,
+    is_auth_required_error,
+    parse_cookies_from_browser,
 )
+from aimd.infrastructure.url.processor import get_text_from_url
 
 
 @pytest.mark.asyncio
@@ -31,8 +30,12 @@ async def test_get_text_from_url_extracts_info_once(monkeypatch) -> None:
     async def _mock_extract_subtitles(info_dict, platform: str, language: str | None):
         return "subtitle text"
 
-    monkeypatch.setattr("aimd.tool.url._extract_video_info", _mock_extract_video_info)
-    monkeypatch.setattr("aimd.tool.url._extract_subtitles", _mock_extract_subtitles)
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
+    )
 
     result = await get_text_from_url("https://example.com/video")
     assert result.title == "Example"
@@ -57,8 +60,12 @@ async def test_get_text_from_url_cookie_isolation(monkeypatch) -> None:
     async def _mock_extract_subtitles(info_dict, platform: str, language: str | None):
         return "subtitle text"
 
-    monkeypatch.setattr("aimd.tool.url._extract_video_info", _mock_extract_video_info)
-    monkeypatch.setattr("aimd.tool.url._extract_subtitles", _mock_extract_subtitles)
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
+    )
 
     await asyncio.gather(
         get_text_from_url("https://example.com/video-a", cookies_file="a.txt"),
@@ -69,20 +76,20 @@ async def test_get_text_from_url_cookie_isolation(monkeypatch) -> None:
 
 
 def test_parse_cookies_from_browser_variants() -> None:
-    assert _parse_cookies_from_browser("chrome") == ("chrome", None, None, None)
-    assert _parse_cookies_from_browser("chrome:default") == (
+    assert parse_cookies_from_browser("chrome") == ("chrome", None, None, None)
+    assert parse_cookies_from_browser("chrome:default") == (
         "chrome",
         "default",
         None,
         None,
     )
-    assert _parse_cookies_from_browser("chrome+gnomekeyring:default") == (
+    assert parse_cookies_from_browser("chrome+gnomekeyring:default") == (
         "chrome",
         "default",
         "gnomekeyring",
         None,
     )
-    assert _parse_cookies_from_browser("firefox:default::container-1") == (
+    assert parse_cookies_from_browser("firefox:default::container-1") == (
         "firefox",
         "default",
         None,
@@ -91,7 +98,7 @@ def test_parse_cookies_from_browser_variants() -> None:
 
 
 def test_build_cookie_sources_order_and_fallback() -> None:
-    sources = _build_cookie_sources(
+    sources = build_cookie_sources(
         platform="bilibili",
         cookies_file="cookies.txt",
         cookies_from_browser="chrome:default",
@@ -101,7 +108,7 @@ def test_build_cookie_sources_order_and_fallback() -> None:
         "cookiesfrombrowser:chrome:default",
     ]
 
-    default_sources = _build_cookie_sources(
+    default_sources = build_cookie_sources(
         platform="youtube",
         cookies_file=None,
         cookies_from_browser=None,
@@ -114,9 +121,9 @@ def test_build_cookie_sources_order_and_fallback() -> None:
 
 
 def test_is_auth_required_error_patterns() -> None:
-    assert _is_auth_required_error(RuntimeError("login required for this content"))
-    assert _is_auth_required_error(RuntimeError("private playlist -403"))
-    assert not _is_auth_required_error(RuntimeError("temporary network timeout"))
+    assert is_auth_required_error(RuntimeError("login required for this content"))
+    assert is_auth_required_error(RuntimeError("private playlist -403"))
+    assert not is_auth_required_error(RuntimeError("temporary network timeout"))
 
 
 @pytest.mark.asyncio
@@ -133,7 +140,9 @@ async def test_auth_required_failure_surfaces_cookie_hint(monkeypatch) -> None:
             "Provide --cookies (Netscape file) or --cookies-from-browser."
         )
 
-    monkeypatch.setattr("aimd.tool.url._extract_video_info", _mock_extract_video_info)
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+    )
 
     with pytest.raises(
         ProcessingFailedError, match="Authenticated cookies are required"
@@ -154,11 +163,11 @@ async def test_download_audio_prefers_audio_only_for_youtube(
         return out
 
     monkeypatch.setattr(
-        "aimd.tool.url._try_download_with_format",
+        "aimd.infrastructure.url.audio_download.try_download_with_format",
         _mock_try_download_with_format,
     )
 
-    out = await _download_audio(
+    out = await download_audio(
         info_dict={"title": "t", "id": "id"},
         url="https://www.youtube.com/watch?v=test",
         download_path=tmp_path,
@@ -185,11 +194,11 @@ async def test_download_audio_prefers_audio_only_for_bilibili(
         return out
 
     monkeypatch.setattr(
-        "aimd.tool.url._try_download_with_format",
+        "aimd.infrastructure.url.audio_download.try_download_with_format",
         _mock_try_download_with_format,
     )
 
-    out = await _download_audio(
+    out = await download_audio(
         info_dict={"title": "t", "id": "id"},
         url="https://www.bilibili.com/video/BV1BDcKziEqy",
         download_path=tmp_path,
@@ -221,13 +230,16 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
             Path(f"{self.opts['outtmpl']}.webm").write_text("x", encoding="utf-8")
 
     monkeypatch.setattr(
-        "aimd.tool.url._build_cookie_sources",
+        "aimd.infrastructure.url.audio_download.build_cookie_sources",
         lambda **kwargs: [{"name": "no-cookie", "use_cookies": False}],
     )
-    monkeypatch.setattr("aimd.tool.url._impersonation_available", lambda: False)
-    monkeypatch.setattr("aimd.tool.url.yt_dlp.YoutubeDL", _FakeYDL)
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.audio_download.impersonation_available",
+        lambda: False,
+    )
+    monkeypatch.setattr("aimd.infrastructure.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL)
 
-    result_no_codec = await _try_download_with_format(
+    result_no_codec = await try_download_with_format(
         url="https://example.com/video",
         download_path=tmp_path,
         audio_filename="sample_audio",
@@ -240,7 +252,7 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
     assert result_no_codec is not None
     assert "postprocessors" not in seen_opts[-1]
 
-    result_with_codec = await _try_download_with_format(
+    result_with_codec = await try_download_with_format(
         url="https://example.com/video",
         download_path=tmp_path,
         audio_filename="sample_audio_2",

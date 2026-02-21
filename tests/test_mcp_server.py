@@ -2,32 +2,36 @@ from pathlib import Path
 
 import pytest
 
+from aimd.application.models import ProcessResult
 from aimd.types import TextContext
 
 
 @pytest.mark.asyncio
 async def test_mcp_healthz() -> None:
-    from aimd.mcp_server import healthz
+    from aimd.mcp import healthz
 
     assert await healthz() == {"status": "ok"}
 
 
 @pytest.mark.asyncio
 async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None:
-    from aimd.mcp_server import process_input
+    from aimd.mcp import process_input
 
-    async def _mock_process_transcript_input(**kwargs):
-        return TextContext(
-            title="mock-title", chunk_list=["hello"], split_header_level=None
-        )
+    class _FakeProcessUseCase:
+        async def execute(self, request):  # noqa: ARG002
+            return ProcessResult(
+                task_type="transcript",
+                text_context=TextContext(
+                    title="mock-title",
+                    chunk_list=["hello"],
+                    split_header_level=None,
+                ),
+            )
 
-    monkeypatch.setattr(
-        "aimd.mcp_server.ensure_supported_input", lambda _: "transcript"
-    )
-    monkeypatch.setattr(
-        "aimd.mcp_server.process_transcript_input",
-        _mock_process_transcript_input,
-    )
+    class _FakeContainer:
+        process_input_use_case = _FakeProcessUseCase()
+
+    monkeypatch.setattr("aimd.adapters.mcp.server.container", _FakeContainer())
 
     output_file = tmp_path / "out.md"
     result = await process_input("input.mp3", output_file=str(output_file))

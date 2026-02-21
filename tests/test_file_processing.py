@@ -3,12 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from aimd.tool.file import _split_markdown_by_headers, process_epub_with_images
+from aimd.infrastructure.documents.chunking import split_markdown_by_headers
+from aimd.infrastructure.documents.epub_processor import process_epub_with_images
 
 
 def test_split_markdown_by_headers_fallback_without_headers() -> None:
     markdown = "Paragraph " * 6000
-    sections, header_level = _split_markdown_by_headers(markdown, max_chunk_size=4000)
+    sections, header_level = split_markdown_by_headers(markdown, max_chunk_size=4000)
 
     assert header_level is None
     assert len(sections) > 1
@@ -24,9 +25,12 @@ async def test_process_epub_large_content_keeps_chunk_list(
         zf.writestr("OEBPS/ch1.html", "<html><body>c1</body></html>")
         zf.writestr("OEBPS/ch2.html", "<html><body>c2</body></html>")
 
-    monkeypatch.setattr("aimd.tool.file.pandoc.read", lambda **kwargs: object())
     monkeypatch.setattr(
-        "aimd.tool.file.pandoc.write",
+        "aimd.infrastructure.documents.epub_processor.pandoc.read",
+        lambda **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.documents.epub_processor.pandoc.write",
         lambda doc, format: "# Chapter\n\n" + ("lorem ipsum " * 5000),
     )
 

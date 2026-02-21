@@ -1,6 +1,9 @@
 import pytest
 
-from aimd.capabilities import EngineCapability, resolve_engine_with_preflight
+from aimd.infrastructure.capabilities.detector import (
+    EngineCapability,
+    resolve_engine_with_preflight,
+)
 from aimd.errors import EngineUnavailableError, UnsupportedEngineError
 
 
@@ -17,7 +20,8 @@ def test_resolve_engine_explicit_unavailable(monkeypatch) -> None:
         "cpu": EngineCapability("cpu", True, None, None),
     }
     monkeypatch.setattr(
-        "aimd.capabilities.get_engine_capabilities", lambda: mock_capabilities
+        "aimd.infrastructure.capabilities.detector.get_engine_capabilities",
+        lambda: mock_capabilities,
     )
 
     with pytest.raises(EngineUnavailableError):
@@ -31,9 +35,12 @@ def test_resolve_engine_auto_non_macos_prefers_cuda(monkeypatch) -> None:
         "cuda": EngineCapability("cuda", True, None, None),
         "cpu": EngineCapability("cpu", True, None, None),
     }
-    monkeypatch.setattr("aimd.capabilities.platform.system", lambda: "Linux")
     monkeypatch.setattr(
-        "aimd.capabilities.get_engine_capabilities", lambda: mock_capabilities
+        "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Linux"
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.capabilities.detector.get_engine_capabilities",
+        lambda: mock_capabilities,
     )
 
     assert resolve_engine_with_preflight("auto") == "cuda"
@@ -46,9 +53,12 @@ def test_resolve_engine_auto_macos_prefers_yap(monkeypatch) -> None:
         "cuda": EngineCapability("cuda", True, None, None),
         "cpu": EngineCapability("cpu", True, None, None),
     }
-    monkeypatch.setattr("aimd.capabilities.platform.system", lambda: "Darwin")
     monkeypatch.setattr(
-        "aimd.capabilities.get_engine_capabilities", lambda: mock_capabilities
+        "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Darwin"
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.capabilities.detector.get_engine_capabilities",
+        lambda: mock_capabilities,
     )
 
     assert resolve_engine_with_preflight("auto") == "yap"
