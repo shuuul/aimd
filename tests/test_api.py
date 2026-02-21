@@ -78,7 +78,9 @@ def test_engines_endpoint(monkeypatch) -> None:
     }
 
 
-def test_process_transcript_success_with_output_file(monkeypatch, tmp_path: Path) -> None:
+def test_process_transcript_success_with_output_file(
+    monkeypatch, tmp_path: Path
+) -> None:
     result = ProcessResult(
         task_type="transcript",
         text_context=TextContext(
@@ -108,7 +110,9 @@ def test_process_transcript_success_with_output_file(monkeypatch, tmp_path: Path
 
 
 def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
-    client = _make_client(monkeypatch, process_exc=EngineUnavailableError("unavailable"))
+    client = _make_client(
+        monkeypatch, process_exc=EngineUnavailableError("unavailable")
+    )
     response = client.post("/v1/process", json={"input_source": "audio.wav"})
     assert response.status_code == 422
     assert "unavailable" in response.json()["detail"]

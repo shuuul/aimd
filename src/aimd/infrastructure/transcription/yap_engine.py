@@ -30,7 +30,9 @@ async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
 
     logger.info(f"Transcribing with yap: {file_path}, locale: {locale}")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as temp_file:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False
+    ) as temp_file:
         temp_output_path = Path(temp_file.name)
 
     try:
@@ -65,7 +67,9 @@ async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
             try:
                 transcribed_text = temp_output_path.read_text(encoding="gb2312").strip()
             except UnicodeDecodeError:
-                transcribed_text = temp_output_path.read_text(encoding="latin-1").strip()
+                transcribed_text = temp_output_path.read_text(
+                    encoding="latin-1"
+                ).strip()
 
         if not transcribed_text:
             raise ProcessingFailedError("yap produced empty transcription")

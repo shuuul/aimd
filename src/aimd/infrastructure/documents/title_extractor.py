@@ -58,7 +58,11 @@ def extract_title_from_content(
                 or "kindle-cn" in line.lower()
             ):
                 continue
-            if len(line) >= 2 and len(line) <= 100 and not line.lower().startswith("http"):
+            if (
+                len(line) >= 2
+                and len(line) <= 100
+                and not line.lower().startswith("http")
+            ):
                 extracted_title = line
                 break
 

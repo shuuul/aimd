@@ -40,14 +40,18 @@ async def transcribe_audio_whisper(
             logger.warning("PyTorch not installed, falling back to CPU")
             device = "cpu"
 
-    logger.info(f"Transcribing with faster-whisper: model={model_size}, device={device}")
+    logger.info(
+        f"Transcribing with faster-whisper: model={model_size}, device={device}"
+    )
 
     try:
         compute_type = "float16" if device == "cuda" else "int8"
 
         def _transcribe():
             model = WhisperModel(model_size, device=device, compute_type=compute_type)
-            segments, info = model.transcribe(str(file_path), language=language, beam_size=5)
+            segments, info = model.transcribe(
+                str(file_path), language=language, beam_size=5
+            )
             transcribed_text = ""
             for segment in segments:
                 transcribed_text += segment.text + "\n"

@@ -42,7 +42,9 @@ async def process_epub_with_images(
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_path)
         except zipfile.BadZipFile as e:
-            raise ProcessingFailedError(f"Invalid EPUB file (not a valid ZIP): {e}") from e
+            raise ProcessingFailedError(
+                f"Invalid EPUB file (not a valid ZIP): {e}"
+            ) from e
 
         oebps_dir = None
         for item in temp_path.iterdir():
@@ -108,5 +110,9 @@ async def process_epub_with_images(
             f"{len(list(images_dir.rglob('*')))} images"
         )
 
-        chunk_list = [combined_content] if len(combined_content) <= 40000 else split_text_by_paragraphs(combined_content, 40000)
+        chunk_list = (
+            [combined_content]
+            if len(combined_content) <= 40000
+            else split_text_by_paragraphs(combined_content, 40000)
+        )
         return TextContext(title=title, chunk_list=chunk_list), output_dir

@@ -36,7 +36,9 @@ def get_task_type(input_source: str, is_supported_file: FileSupportChecker) -> T
     return "unknown"
 
 
-def ensure_supported_input(input_source: str, is_supported_file: FileSupportChecker) -> TaskType:
+def ensure_supported_input(
+    input_source: str, is_supported_file: FileSupportChecker
+) -> TaskType:
     """Validate and return supported task type, else raise domain error."""
     task_type = get_task_type(input_source, is_supported_file)
     if task_type == "unknown":
@@ -79,7 +81,9 @@ class ProcessInputUseCase:
             return ProcessResult(task_type="transcript", text_context=text_context)
 
         try:
-            text_context, output_dir = await self.convert_processor(request.input_source)
+            text_context, output_dir = await self.convert_processor(
+                request.input_source
+            )
         except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
             raise
         except Exception as exc:
@@ -99,7 +103,10 @@ async def process_transcript_input(
     save_original: Path | None,
     cookies: Path | None,
     cookies_from_browser: str | None,
-    process_url: Callable[[str, str, str | None, Path | None, str | None, str | None], Awaitable[TextContext]],
+    process_url: Callable[
+        [str, str, str | None, Path | None, str | None, str | None],
+        Awaitable[TextContext],
+    ],
     process_audio: Callable[[Path, str, str | None], Awaitable[TextContext]],
     resolve_engine: Callable[[str], str],
 ) -> TextContext:

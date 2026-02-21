@@ -21,7 +21,9 @@ class ListEnginesResult:
 class ListEnginesUseCase:
     """List available transcription engines and auto-selected preference."""
 
-    get_capabilities: Callable[[], dict[str, EngineCapability]] = get_engine_capabilities
+    get_capabilities: Callable[[], dict[str, EngineCapability]] = (
+        get_engine_capabilities
+    )
     resolve_engine: Callable[[str], str] = resolve_engine_with_preflight
 
     def execute(self) -> ListEnginesResult:

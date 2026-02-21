@@ -38,6 +38,7 @@ async def extract_video_info(
     auth_required_seen = False
 
     for source in sources:
+
         def _extract_with_source() -> dict[str, Any]:
             with create_ydl(
                 platform=platform,
@@ -60,7 +61,10 @@ async def extract_video_info(
 
             if is_auth_required_error(exc):
                 auth_required_seen = True
-                if platform in AUTH_REQUIRED_PLATFORMS and source["name"] == "no-cookie":
+                if (
+                    platform in AUTH_REQUIRED_PLATFORMS
+                    and source["name"] == "no-cookie"
+                ):
                     break
                 continue
 
@@ -76,6 +80,8 @@ async def extract_video_info(
         ) from last_error
 
     if last_error is not None:
-        raise ProcessingFailedError(f"Failed to extract video information: {last_error}") from last_error
+        raise ProcessingFailedError(
+            f"Failed to extract video information: {last_error}"
+        ) from last_error
 
     raise ProcessingFailedError("Failed to extract video information")

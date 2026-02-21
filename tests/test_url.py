@@ -4,7 +4,10 @@ from pathlib import Path
 import pytest
 
 from aimd.errors import ProcessingFailedError
-from aimd.infrastructure.url.audio_download import download_audio, try_download_with_format
+from aimd.infrastructure.url.audio_download import (
+    download_audio,
+    try_download_with_format,
+)
 from aimd.infrastructure.url.cookies import (
     build_cookie_sources,
     is_auth_required_error,
@@ -237,7 +240,9 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
         "aimd.infrastructure.url.audio_download.impersonation_available",
         lambda: False,
     )
-    monkeypatch.setattr("aimd.infrastructure.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL)
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL
+    )
 
     result_no_codec = await try_download_with_format(
         url="https://example.com/video",

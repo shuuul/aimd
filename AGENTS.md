@@ -98,7 +98,8 @@ uv sync --all-packages --all-extras --dev
 
 # Code quality
 uv run ruff check --fix && uv run ruff format
-uv run pre-commit run --all-files
+uv run prek --all-files
+uv run prek autoupdate
 
 # CLI
 aimd audio.mp3
@@ -116,6 +117,30 @@ aimd-mcp
 # Test
 uv run pytest
 ```
+
+## DAILY COMMIT CHECKLIST
+
+```bash
+# 1) Sync environment (if needed)
+uv sync --all-packages --all-extras --dev
+
+# 2) Run hooks on all files
+uv run prek --all-files
+
+# 3) If hooks modified files (e.g., ruff-format), re-stage and re-run once
+git add -A
+uv run prek --all-files
+
+# 4) Run tests
+uv run pytest -q
+
+# 5) Commit
+git add -A
+git commit -m "<type>: <summary>"
+```
+
+Recommended maintenance:
+- Run `uv run prek autoupdate` periodically (e.g., weekly) and commit hook version bumps separately.
 
 ## NOTES
 

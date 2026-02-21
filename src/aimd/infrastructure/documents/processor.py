@@ -10,7 +10,9 @@ from .epub_processor import process_epub_with_images
 from .pandoc_reader import is_supported_file, process_file_with_splitting
 
 
-async def get_text_from_file(file_path: str | Path, max_chunk_size: int = 40000) -> TextContext:
+async def get_text_from_file(
+    file_path: str | Path, max_chunk_size: int = 40000
+) -> TextContext:
     """Extract text from file using pandoc for various formats."""
     file_path = Path(file_path)
 

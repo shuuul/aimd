@@ -78,7 +78,9 @@ async def get_text_from_audio(
         else:
             raise UnsupportedInputError(f"Unsupported engine: {actual_engine}")
     except Exception as e:
-        if isinstance(e, (InputNotFoundError, UnsupportedInputError, ProcessingFailedError)):
+        if isinstance(
+            e, (InputNotFoundError, UnsupportedInputError, ProcessingFailedError)
+        ):
             raise
         error_msg = str(e)
         if "format" in error_msg.lower() or "codec" in error_msg.lower():

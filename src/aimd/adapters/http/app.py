@@ -31,12 +31,26 @@ class EnginesResponse(BaseModel):
 
 
 class ProcessRequest(BaseModel):
-    input_source: str = Field(..., description="Audio/video file path, video URL, or document file path.")
-    output_file: str | None = Field(default=None, description="Optional path to write resulting markdown output.")
-    transcribe_engine: str = Field(default="auto", description="Transcription engine: auto, yap, mlx, cuda, cpu.")
-    language: str | None = Field(default=None, description="Whisper language code, e.g. zh, en, ja.")
-    save_original: str | None = Field(default=None, description="Optional path to persist downloaded audio from URL processing.")
-    cookies: str | None = Field(default=None, description="Path to Netscape-format cookies file for URL extraction.")
+    input_source: str = Field(
+        ..., description="Audio/video file path, video URL, or document file path."
+    )
+    output_file: str | None = Field(
+        default=None, description="Optional path to write resulting markdown output."
+    )
+    transcribe_engine: str = Field(
+        default="auto", description="Transcription engine: auto, yap, mlx, cuda, cpu."
+    )
+    language: str | None = Field(
+        default=None, description="Whisper language code, e.g. zh, en, ja."
+    )
+    save_original: str | None = Field(
+        default=None,
+        description="Optional path to persist downloaded audio from URL processing.",
+    )
+    cookies: str | None = Field(
+        default=None,
+        description="Path to Netscape-format cookies file for URL extraction.",
+    )
     cookies_from_browser: str | None = Field(
         default=None,
         description="Browser cookie source for URL extraction, e.g. chrome:default.",
@@ -90,10 +104,14 @@ def create_app() -> FastAPI:
             result = await container.process_input_use_case.execute(
                 ProcessInput(
                     input_source=request.input_source,
-                    output_file=Path(request.output_file) if request.output_file else None,
+                    output_file=Path(request.output_file)
+                    if request.output_file
+                    else None,
                     transcribe_engine=request.transcribe_engine,
                     language=request.language,
-                    save_original=Path(request.save_original) if request.save_original else None,
+                    save_original=Path(request.save_original)
+                    if request.save_original
+                    else None,
                     cookies=Path(request.cookies) if request.cookies else None,
                     cookies_from_browser=request.cookies_from_browser,
                 )
@@ -112,7 +130,9 @@ def create_app() -> FastAPI:
                 )
                 output_file = str(resolved)
             elif request.output_file and result.output_dir is not None:
-                logger.warning("Ignoring output_file for EPUB conversions; output is a directory.")
+                logger.warning(
+                    "Ignoring output_file for EPUB conversions; output is a directory."
+                )
 
             return ProcessResponse(
                 task_type=result.task_type,

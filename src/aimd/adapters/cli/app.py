@@ -141,8 +141,14 @@ def process(
 
             final_output_file = output_file
             if final_output_file is None:
-                suffix = "transcript" if result.task_type == "transcript" else "converted"
-                default_dir = Path.cwd() if result.task_type == "transcript" else Path(input_source).parent
+                suffix = (
+                    "transcript" if result.task_type == "transcript" else "converted"
+                )
+                default_dir = (
+                    Path.cwd()
+                    if result.task_type == "transcript"
+                    else Path(input_source).parent
+                )
                 final_output_file = create_output_path_from_title(
                     result.text_context.title,
                     suffix,

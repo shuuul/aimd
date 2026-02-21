@@ -87,7 +87,9 @@ async def download_audio(
         video_title = info_dict.get("title", "")
         video_id = info_dict.get("id", "unknown")
         if video_title:
-            safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in video_title)[:100]
+            safe_title = "".join(
+                c if c.isalnum() or c in " -_" else "_" for c in video_title
+            )[:100]
             audio_filename = safe_title.strip() or f"audio_{video_id}"
         else:
             audio_filename = f"audio_{video_id}"

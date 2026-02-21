@@ -22,7 +22,9 @@ async def test_use_case_transcript_flow() -> None:
         is_supported_file=lambda _: True,
     )
 
-    result = await use_case.execute(ProcessInput(input_source="https://example.com/video"))
+    result = await use_case.execute(
+        ProcessInput(input_source="https://example.com/video")
+    )
     assert result.task_type == "transcript"
     assert result.text_context.chunk_list == ["t"]
 

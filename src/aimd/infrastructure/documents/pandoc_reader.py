@@ -41,7 +41,9 @@ async def process_file_with_splitting(
 
         markdown_content = pandoc.write(doc, format="markdown")
         if not markdown_content:
-            raise ProcessingFailedError(f"Pandoc produced empty markdown from: {file_path}")
+            raise ProcessingFailedError(
+                f"Pandoc produced empty markdown from: {file_path}"
+            )
 
         return markdown_content
 
@@ -87,7 +89,9 @@ async def process_file_with_splitting(
             extra={
                 "file_path": str(file_path),
                 "file_extension": file_extension,
-                "file_size": file_path.stat().st_size if file_path.exists() else "unknown",
+                "file_size": file_path.stat().st_size
+                if file_path.exists()
+                else "unknown",
                 "max_chunk_size": max_chunk_size,
                 "error_type": type(e).__name__,
                 "error_details": str(e),

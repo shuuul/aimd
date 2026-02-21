@@ -29,6 +29,7 @@ def get_preferred_languages(language: str | None) -> list[str]:
 
 async def download_subtitle(url: str, platform: str) -> str | None:
     """Download subtitle content from URL using yt-dlp without cookies."""
+
     def _download() -> str:
         with create_ydl(
             platform=platform,
@@ -119,7 +120,9 @@ async def extract_subtitles(
                     break
 
             if not sub_url:
-                logger.warning("No suitable subtitle format found (tried SRT, VTT, TTML)")
+                logger.warning(
+                    "No suitable subtitle format found (tried SRT, VTT, TTML)"
+                )
                 return None
 
             subtitle_content = await download_subtitle(sub_url, platform)

@@ -40,6 +40,7 @@ async def transcribe_audio_mlx(
     logger.info(f"Transcribing with MLX model: {mlx_model_path}")
 
     try:
+
         def _transcribe():
             return mlx_whisper.transcribe(
                 str(file_path),

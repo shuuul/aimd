@@ -41,7 +41,9 @@ def combine_sections_for_processing(
 
 def split_text_by_paragraphs(text: str, max_chunk_size: int) -> list[str]:
     """Split text by paragraph boundaries and then hard-wrap oversized blocks."""
-    paragraphs = [block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()]
+    paragraphs = [
+        block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()
+    ]
     if not paragraphs:
         stripped = text.strip()
         return [stripped] if stripped else []
