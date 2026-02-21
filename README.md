@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.4.1-blue)
+  ![Version](https://img.shields.io/badge/version-0.4.2-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -280,7 +280,7 @@ uv sync --all-packages --all-extras --dev
 
 # Run code quality checks
 uv run ruff check --fix && uv run ruff format
-uv run pre-commit run --all-files
+uv run prek --all-files
 ```
 
 ### Version Management
@@ -305,16 +305,18 @@ aimd --help
 ```
 aimd/
 ├── src/aimd/
-│   ├── cli.py              # Unified CLI with auto-detection
-│   ├── mcp.py              # MCP server entrypoint (stdio)
-│   ├── const.py            # Constants (extensions, engines, languages)
-│   ├── utils.py            # Utility functions
-│   ├── types.py            # Pydantic models (TextContext)
-│   └── tool/
-│       ├── audio.py        # Audio transcription engines
-│       ├── file.py         # Document conversion with Pandoc
-│       └── url.py          # Video URL processing with yt-dlp
+│   ├── cli.py                    # CLI entrypoint
+│   ├── api.py                    # FastAPI entrypoint
+│   ├── mcp.py                    # MCP entrypoint
+│   ├── errors.py                 # Domain error types
+│   ├── const.py                  # Constants (extensions, engines, languages)
+│   ├── utils.py                  # URL/file utility helpers
+│   ├── types.py                  # TextContext model
+│   ├── application/              # Use-cases and dependency wiring
+│   ├── infrastructure/           # Concrete processing implementations
+│   └── adapters/                 # CLI/API/MCP interface adapters
 ├── tests/
+├── docs/
 ├── pyproject.toml
 └── AGENTS.md
 ```
@@ -323,26 +325,26 @@ aimd/
 
 ### Core Components
 
-- **Unified Processing**: Single command with auto-detection
-- **Multi-Engine Audio Transcription**: Auto-selection between yap, MLX-Whisper, faster-whisper
-- **Tool-Based Architecture**: Modular design with file, audio, and URL processing tools
-- **Pandoc Integration**: Document conversion supporting 40+ formats
+- **Application Layer**: `application/use_cases/*` owns orchestration and flow decisions.
+- **Infrastructure Layer**: `infrastructure/*` contains integrations (yt-dlp, pandoc, whisper runtimes).
+- **Adapter Layer**: `adapters/*` maps CLI/API/MCP inputs to use-cases and maps outputs back.
+- **Typed Error Contract**: `AimdError` subclasses provide consistent interface behavior.
 
 ### Processing Pipelines
 
 #### Audio/Video Processing
 
-1. **Input Detection**: Auto-detect audio, video, or URL
-2. **Engine Selection**: Choose optimal transcription engine
-3. **Content Extraction**: Speech-to-text or subtitle extraction
-4. **Markdown Formatting**: Structured output
+1. **Adapter Input Mapping**: CLI/API/MCP request -> `ProcessInput`
+2. **Use-case Orchestration**: task type detection and transcript/convert routing
+3. **Infra Execution**: engine preflight + subtitle/audio/document extraction
+4. **Output Mapping**: `ProcessResult` serialized to CLI text/API JSON/MCP response
 
 #### Document Conversion
 
-1. **Format Detection**: Identify document type via extension
-2. **Pandoc Conversion**: Convert to markdown
-3. **Title Extraction**: Extract clean titles from content
-4. **Chunking**: Split large documents automatically
+1. **Format Detection**: extension + supported format checks
+2. **Pandoc Conversion**: source document -> markdown
+3. **Title Extraction**: normalized title resolution from content
+4. **Chunking / EPUB Layout**: markdown splitting and EPUB chapter/image extraction
 
 ## Contributing
 
