@@ -194,6 +194,27 @@ OpenAPI docs are available at:
 - `/docs`
 - `/redoc`
 
+## MCP Server
+
+Run an MCP server over stdio:
+
+```bash
+aimd-mcp
+```
+
+Available MCP tools:
+- `healthz`
+- `list_engines`
+- `process_input`
+
+`process_input` mirrors the API/CLI behavior and supports:
+- `input_source`
+- `transcribe_engine`
+- `language`
+- `output_file`
+- `save_original`
+- `cookies`
+
 ## Supported Formats
 
 ### Video Platforms
@@ -272,6 +293,7 @@ aimd --help
 aimd/
 ├── src/aimd/
 │   ├── cli.py              # Unified CLI with auto-detection
+│   ├── mcp_server.py       # MCP server entrypoint (stdio)
 │   ├── const.py            # Constants (extensions, engines, languages)
 │   ├── utils.py            # Utility functions
 │   ├── types.py            # Pydantic models (TextContext)
