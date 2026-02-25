@@ -17,6 +17,7 @@ from .title_extractor import extract_title_from_content
 async def process_epub_with_images(
     file_path: str | Path,
     output_dir: Path | None = None,
+    temp_dir: Path | None = None,
 ) -> tuple[TextContext, Path]:
     """Process EPUB file with image extraction."""
     file_path = Path(file_path)
@@ -33,8 +34,8 @@ async def process_epub_with_images(
     chapters_dir.mkdir(exist_ok=True)
     images_dir.mkdir(exist_ok=True)
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
+    with tempfile.TemporaryDirectory(dir=temp_dir) as tmp:
+        temp_path = Path(tmp)
         zip_path = temp_path / "epub.zip"
         shutil.copy(file_path, zip_path)
 

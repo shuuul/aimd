@@ -20,6 +20,7 @@ async def get_text_from_url(
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
     cookies_from_browser: str | None = None,
+    temp_dir: Path | None = None,
 ) -> TextContext:
     """Extract text content from video URLs using yt-dlp."""
     if not is_valid_url(url):
@@ -57,6 +58,7 @@ async def get_text_from_url(
             save_original_path=save_original_path,
             cookies_file=cookies_file,
             cookies_from_browser=cookies_from_browser,
+            temp_dir=temp_dir,
         )
 
         if audio_content and audio_content.strip():

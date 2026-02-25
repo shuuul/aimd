@@ -1,5 +1,6 @@
 """MCP adapter for aimd."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,11 @@ async def process_input(
 ) -> dict[str, Any]:
     """Process audio/video/url/documents and return markdown context."""
     try:
+        env_temp_dir = os.environ.get("AIMD_TEMP_DIR")
+        temp_dir = Path(env_temp_dir) if env_temp_dir else None
+        if temp_dir is not None:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
         result = await container.process_input_use_case.execute(
             ProcessInput(
                 input_source=input_source,
@@ -64,6 +70,7 @@ async def process_input(
                 save_original=Path(save_original) if save_original else None,
                 cookies=Path(cookies) if cookies else None,
                 cookies_from_browser=cookies_from_browser,
+                temp_dir=temp_dir,
             )
         )
 

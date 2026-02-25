@@ -1,5 +1,6 @@
 """FastAPI adapter for aimd."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -71,7 +72,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="aimd API",
         description="Context preparation API for LLM workflows",
-        version="0.4.2",
+        version="0.4.3",
     )
     container = build_container()
 
@@ -101,6 +102,11 @@ def create_app() -> FastAPI:
     @app.post("/v1/process", response_model=ProcessResponse)
     async def process(request: ProcessRequest) -> ProcessResponse:
         try:
+            env_temp_dir = os.environ.get("AIMD_TEMP_DIR")
+            temp_dir = Path(env_temp_dir) if env_temp_dir else None
+            if temp_dir is not None:
+                temp_dir.mkdir(parents=True, exist_ok=True)
+
             result = await container.process_input_use_case.execute(
                 ProcessInput(
                     input_source=request.input_source,
@@ -114,6 +120,7 @@ def create_app() -> FastAPI:
                     else None,
                     cookies=Path(request.cookies) if request.cookies else None,
                     cookies_from_browser=request.cookies_from_browser,
+                    temp_dir=temp_dir,
                 )
             )
 

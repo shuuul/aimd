@@ -28,6 +28,7 @@ async def extract_content_from_audio(
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
     cookies_from_browser: str | None = None,
+    temp_dir: Path | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it."""
 
@@ -48,6 +49,7 @@ async def extract_content_from_audio(
                 audio_file_path,
                 engine=transcribe_engine,
                 language=language,
+                temp_dir=temp_dir,
             )
             if text_context.chunk_list and text_context.chunk_list[0]:
                 content = text_context.chunk_list[0]
@@ -68,8 +70,8 @@ async def extract_content_from_audio(
         download_dir.mkdir(parents=True, exist_ok=True)
         return await _process_audio(download_dir)
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        return await _process_audio(Path(temp_dir))
+    with tempfile.TemporaryDirectory(dir=temp_dir) as tmp:
+        return await _process_audio(Path(tmp))
 
 
 async def download_audio(

@@ -12,7 +12,9 @@ from ...const import YAP_SUPPORTED_LOCALES
 from ...errors import ProcessingFailedError, UnsupportedInputError
 
 
-async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
+async def transcribe_audio_yap(
+    file_path: Path, locale: str = "zh_CN", temp_dir: Path | None = None
+) -> str:
     """Transcribe audio using yap CLI (macOS only)."""
     if platform.system() != "Darwin":
         raise ProcessingFailedError("yap engine is only available on macOS")
@@ -31,7 +33,7 @@ async def transcribe_audio_yap(file_path: Path, locale: str = "zh_CN") -> str:
     logger.info(f"Transcribing with yap: {file_path}, locale: {locale}")
 
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False
+        mode="w", suffix=".txt", delete=False, dir=temp_dir
     ) as temp_file:
         temp_output_path = Path(temp_file.name)
 

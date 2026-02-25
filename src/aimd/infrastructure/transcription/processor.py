@@ -32,6 +32,7 @@ async def get_text_from_audio(
     engine: str = "auto",
     language: str | None = None,
     model_size: str = "large-v3-turbo",
+    temp_dir: Path | None = None,
 ) -> TextContext:
     """Extract text from audio or video file using a transcription engine."""
     file_path = Path(file_path)
@@ -61,6 +62,7 @@ async def get_text_from_audio(
             transcribed_text = await transcribe_audio_yap(
                 file_path,
                 _language_to_yap_locale(language),
+                temp_dir=temp_dir,
             )
         elif actual_engine == "mlx":
             transcribed_text = await transcribe_audio_mlx(

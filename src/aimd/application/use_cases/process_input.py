@@ -11,10 +11,12 @@ from ...utils import is_url
 from ..models import ProcessInput, ProcessResult, TaskType
 
 TranscriptProcessor = Callable[
-    [str, str, str | None, Path | None, Path | None, str | None],
+    [str, str, str | None, Path | None, Path | None, str | None, Path | None],
     Awaitable[TextContext],
 ]
-ConvertProcessor = Callable[[str], Awaitable[tuple[TextContext, Path | None]]]
+ConvertProcessor = Callable[
+    [str, Path | None], Awaitable[tuple[TextContext, Path | None]]
+]
 FileSupportChecker = Callable[[str | Path], bool]
 
 
@@ -72,6 +74,7 @@ class ProcessInputUseCase:
                     request.save_original,
                     request.cookies,
                     request.cookies_from_browser,
+                    request.temp_dir,
                 )
             except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
                 raise
@@ -82,7 +85,8 @@ class ProcessInputUseCase:
 
         try:
             text_context, output_dir = await self.convert_processor(
-                request.input_source
+                request.input_source,
+                request.temp_dir,
             )
         except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
             raise
@@ -103,11 +107,12 @@ async def process_transcript_input(
     save_original: Path | None,
     cookies: Path | None,
     cookies_from_browser: str | None,
+    temp_dir: Path | None,
     process_url: Callable[
-        [str, str, str | None, Path | None, str | None, str | None],
+        [str, str, str | None, Path | None, str | None, str | None, Path | None],
         Awaitable[TextContext],
     ],
-    process_audio: Callable[[Path, str, str | None], Awaitable[TextContext]],
+    process_audio: Callable[[Path, str, str | None, Path | None], Awaitable[TextContext]],
     resolve_engine: Callable[[str], str],
 ) -> TextContext:
     """Transcript pipeline used by the process use-case."""
@@ -121,6 +126,7 @@ async def process_transcript_input(
             save_original,
             str(cookies) if cookies else None,
             cookies_from_browser,
+            temp_dir,
         )
 
     input_path = Path(input_source)
@@ -128,12 +134,13 @@ async def process_transcript_input(
         raise InputNotFoundError(f"Input file not found: {input_source}")
 
     resolved_engine = resolve_engine(engine)
-    return await process_audio(input_path, resolved_engine, language)
+    return await process_audio(input_path, resolved_engine, language, temp_dir)
 
 
 async def process_convert_input(
     input_file: str,
-    process_epub: Callable[[Path], Awaitable[tuple[TextContext, Path]]],
+    temp_dir: Path | None,
+    process_epub: Callable[[Path, Path | None], Awaitable[tuple[TextContext, Path]]],
     process_file: Callable[[Path], Awaitable[TextContext]],
 ) -> tuple[TextContext, Path | None]:
     """Convert pipeline used by the process use-case."""
@@ -142,6 +149,6 @@ async def process_convert_input(
         raise InputNotFoundError(f"Input file not found: {input_file}")
 
     if input_path.suffix.lower() in EPUB_EXTENSIONS:
-        return await process_epub(input_path)
+        return await process_epub(input_path, temp_dir)
 
     return await process_file(input_path), None

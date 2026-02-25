@@ -100,6 +100,13 @@ def process(
         "--log-level",
         help="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
     ),
+    temp_dir: Optional[Path] = typer.Option(
+        None,
+        "--temp-dir",
+        help="Custom temporary directory for intermediate files. "
+        "Overrides AIMD_TEMP_DIR env var. Useful for sandboxed environments.",
+        envvar="AIMD_TEMP_DIR",
+    ),
 ) -> None:
     """Process audio/video/url/doc inputs to markdown."""
     _configure_logging(log_level)
@@ -118,6 +125,11 @@ def process(
 
     async def run_processing() -> None:
         try:
+            resolved_temp_dir = temp_dir
+            if resolved_temp_dir is not None:
+                resolved_temp_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Using custom temp directory: {resolved_temp_dir}")
+
             result = await container.process_input_use_case.execute(
                 ProcessInput(
                     input_source=input_source,
@@ -127,6 +139,7 @@ def process(
                     save_original=save_original,
                     cookies=cookies,
                     cookies_from_browser=cookies_from_browser,
+                    temp_dir=resolved_temp_dir,
                 )
             )
 

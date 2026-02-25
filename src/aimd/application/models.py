@@ -20,6 +20,7 @@ class ProcessInput:
     save_original: Path | None = None
     cookies: Path | None = None
     cookies_from_browser: str | None = None
+    temp_dir: Path | None = None
 
 
 @dataclass(slots=True)

@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.4.2-blue)
+  ![Version](https://img.shields.io/badge/version-0.4.3-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -264,7 +264,25 @@ export YT_DLP_CACHE_DIR="/path/to/cache"
 
 # Optional: yap engine configuration (macOS only)
 export YAP_MODEL_PATH="/path/to/custom/model"
+
+# Optional: custom temporary directory for intermediate files
+# Useful for sandboxed environments where /tmp is not writable
+export AIMD_TEMP_DIR="/path/to/writable/tmp"
 ```
+
+### Sandboxed Environments
+
+By default, aimd uses the system temporary directory (`/tmp`) for intermediate files such as downloaded audio and EPUB extraction. In sandboxed environments (e.g. spacebot) where `/tmp` may not be writable, you can redirect temp I/O:
+
+```bash
+# Via environment variable (works for CLI, MCP, and HTTP API)
+export AIMD_TEMP_DIR="/path/to/writable/tmp"
+
+# Or via CLI option
+aimd audio.mp3 --temp-dir /path/to/writable/tmp
+```
+
+The directory will be created automatically if it does not exist.
 
 ## Development
 

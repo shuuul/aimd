@@ -14,3 +14,17 @@ Core package organized with ports/adapters architecture.
 - Keep orchestration in `application/use_cases/*`.
 - Keep IO/third-party integrations in `infrastructure/*`.
 - Keep interface-specific request/response mapping in `adapters/*`.
+
+## TEMP DIRECTORY
+
+All temporary file operations (audio downloads, yap output, EPUB extraction) use
+Python's `tempfile` module with a configurable base directory:
+
+- **CLI**: `--temp-dir` option (also reads `AIMD_TEMP_DIR` env var)
+- **MCP / HTTP**: reads `AIMD_TEMP_DIR` env var at request time
+- **Default**: when unset, falls back to the system temp directory (`/tmp`)
+
+This is critical for sandboxed environments (e.g. spacebot) where `/tmp` may not
+be writable. The `temp_dir` field flows through `ProcessInput` → use-cases →
+infrastructure functions via the `dir=` parameter of `tempfile.TemporaryDirectory`
+and `tempfile.NamedTemporaryFile`.
