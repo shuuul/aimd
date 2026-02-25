@@ -112,7 +112,9 @@ async def process_transcript_input(
         [str, str, str | None, Path | None, str | None, str | None, Path | None],
         Awaitable[TextContext],
     ],
-    process_audio: Callable[[Path, str, str | None, Path | None], Awaitable[TextContext]],
+    process_audio: Callable[
+        [Path, str, str | None, Path | None], Awaitable[TextContext]
+    ],
     resolve_engine: Callable[[str], str],
 ) -> TextContext:
     """Transcript pipeline used by the process use-case."""
