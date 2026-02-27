@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.4.3-blue)
+  ![Version](https://img.shields.io/badge/version-0.5.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -14,7 +14,7 @@ Context preparation tool for LLM workflows - Transcribe audio/video and convert 
 ## Features
 
 - **Auto-Detection**: Automatically detects input type (audio, video, URL, document)
-- **Multi-Engine Audio Transcription**: Support for yap (macOS), MLX-Whisper (Apple Silicon), faster-whisper (CUDA/CPU)
+- **Multi-Engine Audio Transcription**: Support for mlx-audio (Apple Silicon, Qwen3-ASR default), yap (macOS), faster-whisper (CUDA/CPU)
 - **Unified Video Platform Support**: Extract content from 1000+ video platforms including YouTube, Bilibili using yt-dlp
 - **Document Conversion**: Convert EPUB, PDF, TXT, and other formats to markdown using Pandoc
 
@@ -58,8 +58,10 @@ aimd --help
 # Clone and install for development
 git clone https://github.com/shuuul/aimd.git
 cd aimd
-uv sync --all-packages --all-extras --dev
+uv sync --dev --upgrade --all-extras --prerelease=allow
 ```
+
+> **Note**: `--prerelease=allow` is required because mlx-audio depends on pre-release versions of some packages (e.g. transformers, huggingface-hub).
 
 ## Quick Start
 
@@ -85,10 +87,13 @@ aimd interview.wav -l zh          # Specify language
 aimd audio.mp3 --engine auto
 
 # Specify transcription engine explicitly
-aimd audio.wav --engine mlx       # Apple Silicon
-aimd audio.wav --engine yap       # macOS
+aimd audio.wav --engine mlx       # Apple Silicon (default on macOS)
+aimd audio.wav --engine yap       # macOS (Apple Speech framework)
 aimd audio.wav --engine cuda      # NVIDIA GPU
 aimd audio.wav --engine cpu       # Cross-platform
+
+# Select a specific model (mlx engine)
+aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-0.6B-8bit
 
 # Process with specific language
 aimd interview.m4a --language zh
@@ -100,10 +105,23 @@ aimd lecture.mp3 -o meeting_notes.md
 #### Available Transcription Engines
 
 - **`auto`** (default): Automatically selects the best engine for your platform
-- **`yap`**: macOS-only, fastest for supported languages (requires [yap CLI](https://github.com/finnvoor/yap))
-- **`mlx`**: Apple Silicon only, 4-5x faster than CPU (uses mlx-whisper)
+- **`mlx`**: Apple Silicon only, uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) STT (Qwen3-ASR-1.7B by default). Highest priority on macOS.
+- **`yap`**: macOS-only, uses Apple Speech framework (requires [yap CLI](https://github.com/finnvoor/yap))
 - **`cuda`**: NVIDIA GPU acceleration (requires CUDA 12 + cuDNN 9)
 - **`cpu`**: Cross-platform CPU fallback (uses faster-whisper)
+
+#### MLX Model Selection
+
+The `mlx` engine supports multiple models via `--model` / `-m`:
+
+| Model | Description |
+|-------|-------------|
+| `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B, 8-bit quantized **(default)** |
+| `mlx-community/Qwen3-ASR-0.6B-8bit` | Qwen3-ASR 0.6B, 8-bit quantized (faster, lighter) |
+| `mlx-community/whisper-large-v3-turbo-asr-fp16` | Whisper large-v3-turbo, fp16 |
+| `mlx-community/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (multilingual) |
+
+Supported languages for Qwen3-ASR: Chinese, English, Japanese, Korean, German, Spanish, French, Italian, Portuguese, Russian.
 
 ### Video URL Processing
 
@@ -223,6 +241,7 @@ Available MCP tools:
 `process_input` mirrors the API/CLI behavior and supports:
 - `input_source`
 - `transcribe_engine`
+- `model` (mlx-audio model path, e.g. `mlx-community/Qwen3-ASR-1.7B-8bit`)
 - `language`
 - `output_file`
 - `save_original`
@@ -293,8 +312,8 @@ The directory will be created automatically if it does not exist.
 git clone https://github.com/shuuul/aimd.git
 cd aimd
 
-# Install dependencies
-uv sync --all-packages --all-extras --dev
+# Install dependencies (--prerelease=allow needed for mlx-audio compatibility)
+uv sync --dev --upgrade --all-extras --prerelease=allow
 
 # Run code quality checks
 uv run ruff check --fix && uv run ruff format

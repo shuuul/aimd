@@ -37,7 +37,7 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     is_macos = platform.system() == "Darwin"
     apple_silicon = is_apple_silicon() if is_macos else False
     has_faster_whisper = _module_available("faster_whisper")
-    has_mlx_whisper = _module_available("mlx_whisper")
+    has_mlx_audio = _module_available("mlx_audio")
     has_torch = _module_available("torch")
     torch_cuda_available = _torch_cuda_available() if has_torch else False
 
@@ -62,20 +62,20 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
         ),
     )
 
-    mlx_available = is_macos and apple_silicon and has_mlx_whisper
+    mlx_available = is_macos and apple_silicon and has_mlx_audio
     mlx_reason = None
     if not is_macos:
         mlx_reason = "mlx is only supported on macOS."
     elif not apple_silicon:
         mlx_reason = "mlx requires Apple Silicon (M1/M2/M3/M4)."
-    elif not has_mlx_whisper:
-        mlx_reason = "mlx_whisper module is not installed."
+    elif not has_mlx_audio:
+        mlx_reason = "mlx_audio module is not installed."
 
     capabilities["mlx"] = EngineCapability(
         name="mlx",
         available=mlx_available,
         reason=mlx_reason,
-        fix_hint=None if mlx_available else "Install dependency: mlx-whisper",
+        fix_hint=None if mlx_available else "Install dependency: mlx-audio",
     )
 
     cuda_available = has_faster_whisper and has_torch and torch_cuda_available
@@ -130,7 +130,7 @@ def resolve_engine_with_preflight(engine: str) -> str:
         return engine
 
     if platform.system() == "Darwin":
-        priority = ("yap", "mlx", "cpu")
+        priority = ("mlx", "yap", "cpu")
     else:
         priority = ("cuda", "cpu")
 

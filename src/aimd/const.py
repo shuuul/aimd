@@ -43,16 +43,16 @@ LANGUAGE_TO_YAP_LOCALE = {
     "en": "en_US",
 }
 
-# Whisper model sizes (for faster-whisper and mlx-whisper)
+# Whisper model sizes (for faster-whisper on CPU/CUDA)
 WHISPER_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3-turbo"}
 
-# MLX model mappings
-MLX_MODEL_MAPPINGS = {
-    "tiny": "whisper-tiny-mlx",
-    "base": "whisper-base-mlx",
-    "small": "whisper-small-mlx",
-    "medium": "whisper-medium-mlx-8bit",
-    "large-v3-turbo": "whisper-large-v3-turbo",
+# mlx-audio STT models (Apple Silicon, via mlx_audio.stt)
+MLX_AUDIO_DEFAULT_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
+MLX_AUDIO_MODELS = {
+    "mlx-community/Qwen3-ASR-0.6B-8bit": "Qwen3-ASR 0.6B (8-bit quantized)",
+    "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized, default)",
+    "mlx-community/whisper-large-v3-turbo-asr-fp16": "Whisper large-v3-turbo (fp16)",
+    "mlx-community/parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3 (multilingual)",
 }
 
 # =============================================================================

@@ -11,7 +11,16 @@ from ...utils import is_url
 from ..models import ProcessInput, ProcessResult, TaskType
 
 TranscriptProcessor = Callable[
-    [str, str, str | None, Path | None, Path | None, str | None, Path | None],
+    [
+        str,
+        str,
+        str | None,
+        str | None,
+        Path | None,
+        Path | None,
+        str | None,
+        Path | None,
+    ],
     Awaitable[TextContext],
 ]
 ConvertProcessor = Callable[
@@ -71,6 +80,7 @@ class ProcessInputUseCase:
                     request.input_source,
                     request.transcribe_engine,
                     request.language,
+                    request.model,
                     request.save_original,
                     request.cookies,
                     request.cookies_from_browser,
@@ -104,16 +114,26 @@ async def process_transcript_input(
     input_source: str,
     engine: str,
     language: str | None,
+    model: str | None,
     save_original: Path | None,
     cookies: Path | None,
     cookies_from_browser: str | None,
     temp_dir: Path | None,
     process_url: Callable[
-        [str, str, str | None, Path | None, str | None, str | None, Path | None],
+        [
+            str,
+            str,
+            str | None,
+            str | None,
+            Path | None,
+            str | None,
+            str | None,
+            Path | None,
+        ],
         Awaitable[TextContext],
     ],
     process_audio: Callable[
-        [Path, str, str | None, Path | None], Awaitable[TextContext]
+        [Path, str, str | None, str | None, Path | None], Awaitable[TextContext]
     ],
     resolve_engine: Callable[[str], str],
 ) -> TextContext:
@@ -125,6 +145,7 @@ async def process_transcript_input(
             input_source,
             engine,
             language,
+            model,
             save_original,
             str(cookies) if cookies else None,
             cookies_from_browser,
@@ -136,7 +157,7 @@ async def process_transcript_input(
         raise InputNotFoundError(f"Input file not found: {input_source}")
 
     resolved_engine = resolve_engine(engine)
-    return await process_audio(input_path, resolved_engine, language, temp_dir)
+    return await process_audio(input_path, resolved_engine, language, model, temp_dir)
 
 
 async def process_convert_input(

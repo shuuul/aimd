@@ -25,6 +25,7 @@ async def extract_content_from_audio(
     url: str,
     transcribe_engine: str,
     language: str | None,
+    model: str | None = None,
     save_original_path: Path | None = None,
     cookies_file: str | None = None,
     cookies_from_browser: str | None = None,
@@ -49,6 +50,7 @@ async def extract_content_from_audio(
                 audio_file_path,
                 engine=transcribe_engine,
                 language=language,
+                model=model,
                 temp_dir=temp_dir,
             )
             if text_context.chunk_list and text_context.chunk_list[0]:
@@ -104,6 +106,11 @@ async def download_audio(
             ("best[acodec!=none]", "m4a", "best format with audio track"),
             ("best", "m4a", "best combined format"),
         ]
+    elif platform in ("xiaoyuzhoufm",):
+        format_strategies = [
+            ("best", None, "best available format"),
+            ("bestaudio", None, "best audio-only stream"),
+        ]
     else:
         format_strategies = [
             (
@@ -154,7 +161,7 @@ async def try_download_with_format(
             "quiet": True,
             "no_warnings": True,
             "format": format_selector,
-            "outtmpl": str(download_path / audio_filename),
+            "outtmpl": str(download_path / audio_filename) + ".%(ext)s",
         }
 
         if preferred_codec:

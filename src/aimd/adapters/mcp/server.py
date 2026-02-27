@@ -28,7 +28,7 @@ async def healthz() -> dict[str, str]:
 async def list_engines() -> dict[str, Any]:
     """List transcription engine capabilities and auto-selected engine."""
     result = container.list_engines_use_case.execute()
-    ordered_engines = ("yap", "mlx", "cuda", "cpu")
+    ordered_engines = ("mlx", "yap", "cuda", "cpu")
     return {
         "auto_selected_engine": result.auto_selected_engine,
         "engines": [
@@ -48,6 +48,7 @@ async def list_engines() -> dict[str, Any]:
 async def process_input(
     input_source: str,
     transcribe_engine: str = "auto",
+    model: str | None = None,
     language: str | None = None,
     output_file: str | None = None,
     save_original: str | None = None,
@@ -66,6 +67,7 @@ async def process_input(
                 input_source=input_source,
                 output_file=Path(output_file) if output_file else None,
                 transcribe_engine=transcribe_engine,
+                model=model,
                 language=language,
                 save_original=Path(save_original) if save_original else None,
                 cookies=Path(cookies) if cookies else None,

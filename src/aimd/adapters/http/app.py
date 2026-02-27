@@ -41,6 +41,10 @@ class ProcessRequest(BaseModel):
     transcribe_engine: str = Field(
         default="auto", description="Transcription engine: auto, yap, mlx, cuda, cpu."
     )
+    model: str | None = Field(
+        default=None,
+        description="Model for transcription. For mlx: HuggingFace model path. For cuda/cpu: whisper model size.",
+    )
     language: str | None = Field(
         default=None, description="Whisper language code, e.g. zh, en, ja."
     )
@@ -72,7 +76,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="aimd API",
         description="Context preparation API for LLM workflows",
-        version="0.4.3",
+        version="0.5.0",
     )
     container = build_container()
 
@@ -83,7 +87,7 @@ def create_app() -> FastAPI:
     @app.get("/v1/engines", response_model=EnginesResponse)
     async def engines() -> EnginesResponse:
         result = container.list_engines_use_case.execute()
-        ordered_engines = ("yap", "mlx", "cuda", "cpu")
+        ordered_engines = ("mlx", "yap", "cuda", "cpu")
         response_engines = [
             EngineCapabilityResponse(
                 name=engine,
@@ -114,6 +118,7 @@ def create_app() -> FastAPI:
                     if request.output_file
                     else None,
                     transcribe_engine=request.transcribe_engine,
+                    model=request.model,
                     language=request.language,
                     save_original=Path(request.save_original)
                     if request.save_original

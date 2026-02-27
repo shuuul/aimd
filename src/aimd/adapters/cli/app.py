@@ -72,6 +72,13 @@ def process(
         "-e",
         help="Transcription engine: yap (macOS), mlx (Apple Silicon), cuda, cpu. Used for audio/video.",
     ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model for transcription. For mlx engine: mlx-community/Qwen3-ASR-1.7B-8bit (default), "
+        "mlx-community/Qwen3-ASR-0.6B-8bit, etc. For cuda/cpu: whisper model size.",
+    ),
     language: Optional[str] = typer.Option(
         None,
         "--language",
@@ -135,6 +142,7 @@ def process(
                     input_source=input_source,
                     output_file=output_file,
                     transcribe_engine=transcribe_engine,
+                    model=model,
                     language=language,
                     save_original=save_original,
                     cookies=cookies,

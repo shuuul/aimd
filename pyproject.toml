@@ -1,12 +1,12 @@
 [project]
 name = "aimd"
-version = "0.4.3"
+version = "0.5.0"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.10, <3.13"
 dependencies = [
     "aiohttp>=3.12.15",
     "fastapi>=0.116.1",
@@ -17,7 +17,7 @@ dependencies = [
     "yt-dlp[default]>=2025.11.12",
     "torch>=2.9.1",
     "faster-whisper>=1.2.0; sys_platform != 'darwin'",
-    "mlx-whisper>=0.4.2; sys_platform == 'darwin'",
+    "mlx-audio>=0.3.1; sys_platform == 'darwin'",
     "logly>=0.1.6",
     "typer>=0.20.0",
     "uvicorn>=0.35.0",

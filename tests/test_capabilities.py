@@ -46,7 +46,7 @@ def test_resolve_engine_auto_non_macos_prefers_cuda(monkeypatch) -> None:
     assert resolve_engine_with_preflight("auto") == "cuda"
 
 
-def test_resolve_engine_auto_macos_prefers_yap(monkeypatch) -> None:
+def test_resolve_engine_auto_macos_prefers_mlx(monkeypatch) -> None:
     mock_capabilities = {
         "yap": EngineCapability("yap", True, None, None),
         "mlx": EngineCapability("mlx", True, None, None),
@@ -61,4 +61,4 @@ def test_resolve_engine_auto_macos_prefers_yap(monkeypatch) -> None:
         lambda: mock_capabilities,
     )
 
-    assert resolve_engine_with_preflight("auto") == "yap"
+    assert resolve_engine_with_preflight("auto") == "mlx"

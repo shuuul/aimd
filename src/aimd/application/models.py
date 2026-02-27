@@ -15,6 +15,7 @@ class ProcessInput:
 
     input_source: str
     transcribe_engine: str = "auto"
+    model: str | None = None
     language: str | None = None
     output_file: Path | None = None
     save_original: Path | None = None

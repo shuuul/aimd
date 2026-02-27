@@ -10,6 +10,8 @@ def detect_platform(url: str) -> str:
         return "bilibili"
     if "xiaohongshu.com" in url_lower or "xhslink.com" in url_lower:
         return "xiaohongshu"
+    if "xiaoyuzhoufm.com" in url_lower:
+        return "xiaoyuzhoufm"
     return "unknown"
 
 
