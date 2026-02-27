@@ -8,6 +8,7 @@ from ...const import AUDIO_EXTENSIONS, LANGUAGE_TO_YAP_LOCALE
 from ...errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
 from .mlx_engine import transcribe_audio_mlx
+from .qwen_engine import transcribe_audio_qwen
 from .resolver import resolve_engine_with_preflight
 from .whisper_engine import transcribe_audio_whisper
 from .yap_engine import transcribe_audio_yap
@@ -70,12 +71,19 @@ async def get_text_from_audio(
                 model=model,
                 language=language,
             )
-        elif actual_engine in ("cuda", "cpu"):
+        elif actual_engine == "qwen":
+            transcribed_text = await transcribe_audio_qwen(
+                file_path,
+                model=model,
+                language=language,
+            )
+        elif actual_engine in ("whisper", "cpu"):
             model_size = model or "large-v3-turbo"
+            device = "cuda" if actual_engine == "whisper" else "cpu"
             transcribed_text = await transcribe_audio_whisper(
                 file_path,
                 model_size,
-                actual_engine,
+                device,
                 language,
             )
         else:

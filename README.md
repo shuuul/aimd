@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.5.0-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -14,7 +14,7 @@ Context preparation tool for LLM workflows - Transcribe audio/video and convert 
 ## Features
 
 - **Auto-Detection**: Automatically detects input type (audio, video, URL, document)
-- **Multi-Engine Audio Transcription**: Support for mlx-audio (Apple Silicon, Qwen3-ASR default), yap (macOS), faster-whisper (CUDA/CPU)
+- **Multi-Engine Audio Transcription**: Support for mlx-audio (Apple Silicon), Qwen3-ASR (Linux/CUDA), yap (macOS), faster-whisper (CUDA/CPU)
 - **Unified Video Platform Support**: Extract content from 1000+ video platforms including YouTube, Bilibili using yt-dlp
 - **Document Conversion**: Convert EPUB, PDF, TXT, and other formats to markdown using Pandoc
 
@@ -89,8 +89,9 @@ aimd audio.mp3 --engine auto
 # Specify transcription engine explicitly
 aimd audio.wav --engine mlx       # Apple Silicon (default on macOS)
 aimd audio.wav --engine yap       # macOS (Apple Speech framework)
-aimd audio.wav --engine cuda      # NVIDIA GPU
-aimd audio.wav --engine cpu       # Cross-platform
+aimd audio.wav --engine qwen      # Linux/CUDA (Qwen3-ASR, default on Linux)
+aimd audio.wav --engine whisper   # NVIDIA GPU (faster-whisper)
+aimd audio.wav --engine cpu       # Cross-platform (faster-whisper)
 
 # Select a specific model (mlx engine)
 aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-0.6B-8bit
@@ -105,10 +106,18 @@ aimd lecture.mp3 -o meeting_notes.md
 #### Available Transcription Engines
 
 - **`auto`** (default): Automatically selects the best engine for your platform
-- **`mlx`**: Apple Silicon only, uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) STT (Qwen3-ASR-1.7B by default). Highest priority on macOS.
+- **`mlx`**: Apple Silicon only, uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) STT (Qwen3-ASR-1.7B-8bit by default). Highest priority on macOS.
 - **`yap`**: macOS-only, uses Apple Speech framework (requires [yap CLI](https://github.com/finnvoor/yap))
-- **`cuda`**: NVIDIA GPU acceleration (requires CUDA 12 + cuDNN 9)
+- **`qwen`**: Linux + CUDA, uses [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) via `qwen-asr` (Qwen3-ASR-1.7B by default). Highest priority on Linux.
+- **`whisper`**: NVIDIA GPU acceleration via faster-whisper (requires CUDA 12 + cuDNN 9)
 - **`cpu`**: Cross-platform CPU fallback (uses faster-whisper)
+
+#### Auto-Selection Priority
+
+| Platform | Priority |
+|----------|----------|
+| macOS (Apple Silicon) | `mlx` → `yap` → `cpu` |
+| Linux | `qwen` → `whisper` → `cpu` |
 
 #### MLX Model Selection
 
@@ -121,7 +130,18 @@ The `mlx` engine supports multiple models via `--model` / `-m`:
 | `mlx-community/whisper-large-v3-turbo-asr-fp16` | Whisper large-v3-turbo, fp16 |
 | `mlx-community/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (multilingual) |
 
-Supported languages for Qwen3-ASR: Chinese, English, Japanese, Korean, German, Spanish, French, Italian, Portuguese, Russian.
+Supported languages for Qwen3-ASR (mlx): Chinese, English, Japanese, Korean, German, Spanish, French, Italian, Portuguese, Russian.
+
+#### Qwen3-ASR Model Selection (Linux)
+
+The `qwen` engine supports models via `--model` / `-m`:
+
+| Model | Description |
+|-------|-------------|
+| `Qwen/Qwen3-ASR-1.7B` | Qwen3-ASR 1.7B **(default)** |
+| `Qwen/Qwen3-ASR-0.6B` | Qwen3-ASR 0.6B (faster, lighter) |
+
+The `qwen` engine supports 52 languages with auto-detection. Specify a language with `-l` (e.g. `zh`, `en`, `ja`, `ko`, `de`, `fr`, `es`, `ar`, `hi`, `th`, `vi`, etc.).
 
 ### Video URL Processing
 
@@ -241,7 +261,7 @@ Available MCP tools:
 `process_input` mirrors the API/CLI behavior and supports:
 - `input_source`
 - `transcribe_engine`
-- `model` (mlx-audio model path, e.g. `mlx-community/Qwen3-ASR-1.7B-8bit`)
+- `model` (mlx-audio model path, qwen-asr model, or whisper model size)
 - `language`
 - `output_file`
 - `save_original`

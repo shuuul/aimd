@@ -31,7 +31,7 @@ AUDIO_EXTENSIONS = {
 EPUB_EXTENSIONS = {".epub", ".mobi", ".azw3"}
 
 # Supported transcription engines
-TRANSCRIPTION_ENGINES = {"auto", "yap", "mlx", "cuda", "cpu"}
+TRANSCRIPTION_ENGINES = {"auto", "yap", "mlx", "qwen", "whisper", "cpu"}
 
 # Supported locales for yap transcription
 YAP_SUPPORTED_LOCALES = {"zh_CN", "en_US"}
@@ -53,6 +53,13 @@ MLX_AUDIO_MODELS = {
     "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized, default)",
     "mlx-community/whisper-large-v3-turbo-asr-fp16": "Whisper large-v3-turbo (fp16)",
     "mlx-community/parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3 (multilingual)",
+}
+
+# Qwen3-ASR models (Linux/CUDA, via qwen-asr)
+QWEN_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
+QWEN_ASR_MODELS = {
+    "Qwen/Qwen3-ASR-0.6B": "Qwen3-ASR 0.6B",
+    "Qwen/Qwen3-ASR-1.7B": "Qwen3-ASR 1.7B (default)",
 }
 
 # =============================================================================

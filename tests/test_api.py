@@ -31,7 +31,8 @@ class _FakeListEnginesUseCase:
             engines = {
                 "yap": EngineCapability("yap", False, "unsupported", None),
                 "mlx": EngineCapability("mlx", False, "unsupported", None),
-                "cuda": EngineCapability("cuda", False, "unsupported", None),
+                "qwen": EngineCapability("qwen", False, "unsupported", None),
+                "whisper": EngineCapability("whisper", False, "unsupported", None),
                 "cpu": EngineCapability("cpu", True, None, None),
             }
 
@@ -69,11 +70,12 @@ def test_engines_endpoint(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert "engines" in body
-    assert len(body["engines"]) == 4
+    assert len(body["engines"]) == 5
     assert {engine["name"] for engine in body["engines"]} == {
         "yap",
         "mlx",
-        "cuda",
+        "qwen",
+        "whisper",
         "cpu",
     }
 

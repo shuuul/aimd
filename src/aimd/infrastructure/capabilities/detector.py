@@ -78,22 +78,47 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
         fix_hint=None if mlx_available else "Install dependency: mlx-audio",
     )
 
-    cuda_available = has_faster_whisper and has_torch and torch_cuda_available
-    cuda_reason = None
-    if not has_faster_whisper:
-        cuda_reason = "faster_whisper module is not installed."
-    elif not has_torch:
-        cuda_reason = "torch module is not installed."
-    elif not torch_cuda_available:
-        cuda_reason = "CUDA is not available in the current PyTorch runtime."
+    has_qwen_asr = _module_available("qwen_asr")
+    is_linux = platform.system() == "Linux"
 
-    capabilities["cuda"] = EngineCapability(
-        name="cuda",
-        available=cuda_available,
-        reason=cuda_reason,
+    qwen_available = has_qwen_asr and has_torch and torch_cuda_available and is_linux
+    qwen_reason = None
+    if not is_linux:
+        qwen_reason = "qwen engine is only supported on Linux."
+    elif not has_qwen_asr:
+        qwen_reason = "qwen_asr module is not installed."
+    elif not has_torch:
+        qwen_reason = "torch module is not installed."
+    elif not torch_cuda_available:
+        qwen_reason = "CUDA is not available in the current PyTorch runtime."
+
+    capabilities["qwen"] = EngineCapability(
+        name="qwen",
+        available=qwen_available,
+        reason=qwen_reason,
         fix_hint=(
             None
-            if cuda_available
+            if qwen_available
+            else "Install dependency: qwen-asr (Linux + CUDA required)"
+        ),
+    )
+
+    whisper_available = has_faster_whisper and has_torch and torch_cuda_available
+    whisper_reason = None
+    if not has_faster_whisper:
+        whisper_reason = "faster_whisper module is not installed."
+    elif not has_torch:
+        whisper_reason = "torch module is not installed."
+    elif not torch_cuda_available:
+        whisper_reason = "CUDA is not available in the current PyTorch runtime."
+
+    capabilities["whisper"] = EngineCapability(
+        name="whisper",
+        available=whisper_available,
+        reason=whisper_reason,
+        fix_hint=(
+            None
+            if whisper_available
             else "Install CUDA-enabled PyTorch and verify torch.cuda.is_available()."
         ),
     )
@@ -132,7 +157,7 @@ def resolve_engine_with_preflight(engine: str) -> str:
     if platform.system() == "Darwin":
         priority = ("mlx", "yap", "cpu")
     else:
-        priority = ("cuda", "cpu")
+        priority = ("qwen", "whisper", "cpu")
 
     for candidate in priority:
         if capabilities[candidate].available:

@@ -39,11 +39,12 @@ class ProcessRequest(BaseModel):
         default=None, description="Optional path to write resulting markdown output."
     )
     transcribe_engine: str = Field(
-        default="auto", description="Transcription engine: auto, yap, mlx, cuda, cpu."
+        default="auto",
+        description="Transcription engine: auto, yap, mlx, qwen, whisper, cpu.",
     )
     model: str | None = Field(
         default=None,
-        description="Model for transcription. For mlx: HuggingFace model path. For cuda/cpu: whisper model size.",
+        description="Model for transcription. For mlx: HuggingFace model path. For qwen: Qwen3-ASR model. For whisper/cpu: whisper model size.",
     )
     language: str | None = Field(
         default=None, description="Whisper language code, e.g. zh, en, ja."
@@ -76,7 +77,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="aimd API",
         description="Context preparation API for LLM workflows",
-        version="0.5.0",
+        version="0.6.0",
     )
     container = build_container()
 
@@ -87,7 +88,7 @@ def create_app() -> FastAPI:
     @app.get("/v1/engines", response_model=EnginesResponse)
     async def engines() -> EnginesResponse:
         result = container.list_engines_use_case.execute()
-        ordered_engines = ("mlx", "yap", "cuda", "cpu")
+        ordered_engines = ("mlx", "yap", "qwen", "whisper", "cpu")
         response_engines = [
             EngineCapabilityResponse(
                 name=engine,

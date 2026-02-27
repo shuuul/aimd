@@ -39,7 +39,7 @@ aimd/
 │   ├── infrastructure/
 │   │   ├── capabilities/
 │   │   │   └── detector.py       # Engine preflight checks
-│   │   ├── transcription/        # mlx-audio/yap/faster-whisper execution
+│   │   ├── transcription/        # mlx-audio/qwen-asr/yap/faster-whisper execution
 │   │   ├── documents/            # Pandoc + EPUB + chunking pipeline
 │   │   └── url/                  # yt-dlp cookies/subtitles/audio fallback
 │   └── adapters/
@@ -70,7 +70,7 @@ aimd/
 | CLI behavior | `src/aimd/adapters/cli/app.py` | Typer command and output persistence |
 | MCP tools | `src/aimd/adapters/mcp/server.py` | `healthz`, `list_engines`, `process_input` |
 | Engine preflight | `src/aimd/infrastructure/capabilities/detector.py` | availability + auto-resolution |
-| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), yap, faster-whisper |
+| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), yap, faster-whisper |
 | URL extraction | `src/aimd/infrastructure/url/` | cookie source fallback + subtitle/audio logic |
 | Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion, split logic, EPUB extraction |
 
@@ -147,8 +147,9 @@ Recommended maintenance:
 - API routes: `/healthz`, `/v1/engines`, `/v1/process`.
 - Engine auto priority:
   - macOS: `mlx -> yap -> cpu`
-  - non-macOS: `cuda -> cpu`
+  - non-macOS (Linux): `qwen -> whisper -> cpu`
 - mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR-1.7B-8bit by default.
-- `--model` / `-m` CLI option selects the mlx-audio STT model.
+- qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with Qwen/Qwen3-ASR-1.7B by default (Linux + CUDA).
+- `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or whisper size).
 - EPUB output layout: `book_name/{book_name.md, chapters/, images/}`.
 - URL extraction supports explicit Netscape cookies file and browser cookie source.

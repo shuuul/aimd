@@ -16,7 +16,8 @@ def test_resolve_engine_explicit_unavailable(monkeypatch) -> None:
     mock_capabilities = {
         "yap": EngineCapability("yap", False, "missing yap", "install yap"),
         "mlx": EngineCapability("mlx", False, "unsupported", None),
-        "cuda": EngineCapability("cuda", False, "no cuda", None),
+        "qwen": EngineCapability("qwen", False, "no qwen", None),
+        "whisper": EngineCapability("whisper", False, "no whisper", None),
         "cpu": EngineCapability("cpu", True, None, None),
     }
     monkeypatch.setattr(
@@ -28,11 +29,12 @@ def test_resolve_engine_explicit_unavailable(monkeypatch) -> None:
         resolve_engine_with_preflight("yap")
 
 
-def test_resolve_engine_auto_non_macos_prefers_cuda(monkeypatch) -> None:
+def test_resolve_engine_auto_linux_prefers_qwen(monkeypatch) -> None:
     mock_capabilities = {
         "yap": EngineCapability("yap", False, "unsupported", None),
         "mlx": EngineCapability("mlx", False, "unsupported", None),
-        "cuda": EngineCapability("cuda", True, None, None),
+        "qwen": EngineCapability("qwen", True, None, None),
+        "whisper": EngineCapability("whisper", True, None, None),
         "cpu": EngineCapability("cpu", True, None, None),
     }
     monkeypatch.setattr(
@@ -43,14 +45,34 @@ def test_resolve_engine_auto_non_macos_prefers_cuda(monkeypatch) -> None:
         lambda: mock_capabilities,
     )
 
-    assert resolve_engine_with_preflight("auto") == "cuda"
+    assert resolve_engine_with_preflight("auto") == "qwen"
+
+
+def test_resolve_engine_auto_linux_falls_back_to_whisper(monkeypatch) -> None:
+    mock_capabilities = {
+        "yap": EngineCapability("yap", False, "unsupported", None),
+        "mlx": EngineCapability("mlx", False, "unsupported", None),
+        "qwen": EngineCapability("qwen", False, "no qwen-asr", None),
+        "whisper": EngineCapability("whisper", True, None, None),
+        "cpu": EngineCapability("cpu", True, None, None),
+    }
+    monkeypatch.setattr(
+        "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Linux"
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.capabilities.detector.get_engine_capabilities",
+        lambda: mock_capabilities,
+    )
+
+    assert resolve_engine_with_preflight("auto") == "whisper"
 
 
 def test_resolve_engine_auto_macos_prefers_mlx(monkeypatch) -> None:
     mock_capabilities = {
         "yap": EngineCapability("yap", True, None, None),
         "mlx": EngineCapability("mlx", True, None, None),
-        "cuda": EngineCapability("cuda", True, None, None),
+        "qwen": EngineCapability("qwen", False, "unsupported", None),
+        "whisper": EngineCapability("whisper", True, None, None),
         "cpu": EngineCapability("cpu", True, None, None),
     }
     monkeypatch.setattr(

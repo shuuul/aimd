@@ -28,7 +28,7 @@ async def healthz() -> dict[str, str]:
 async def list_engines() -> dict[str, Any]:
     """List transcription engine capabilities and auto-selected engine."""
     result = container.list_engines_use_case.execute()
-    ordered_engines = ("mlx", "yap", "cuda", "cpu")
+    ordered_engines = ("mlx", "yap", "qwen", "whisper", "cpu")
     return {
         "auto_selected_engine": result.auto_selected_engine,
         "engines": [
