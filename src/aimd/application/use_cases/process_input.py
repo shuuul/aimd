@@ -20,6 +20,7 @@ TranscriptProcessor = Callable[
         Path | None,
         str | None,
         Path | None,
+        bool,
     ],
     Awaitable[TextContext],
 ]
@@ -85,6 +86,7 @@ class ProcessInputUseCase:
                     request.cookies,
                     request.cookies_from_browser,
                     request.temp_dir,
+                    request.raw_transcript,
                 )
             except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
                 raise
@@ -119,6 +121,7 @@ async def process_transcript_input(
     cookies: Path | None,
     cookies_from_browser: str | None,
     temp_dir: Path | None,
+    raw_transcript: bool,
     process_url: Callable[
         [
             str,
@@ -129,6 +132,7 @@ async def process_transcript_input(
             str | None,
             str | None,
             Path | None,
+            bool,
         ],
         Awaitable[TextContext],
     ],
@@ -150,6 +154,7 @@ async def process_transcript_input(
             str(cookies) if cookies else None,
             cookies_from_browser,
             temp_dir,
+            raw_transcript,
         )
 
     input_path = Path(input_source)

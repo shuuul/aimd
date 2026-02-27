@@ -151,5 +151,7 @@ Recommended maintenance:
 - mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR-1.7B-8bit by default.
 - qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with Qwen/Qwen3-ASR-1.7B by default (Linux + CUDA).
 - `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or whisper size).
+- `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.
 - EPUB output layout: `book_name/{book_name.md, chapters/, images/}`.
 - URL extraction supports explicit Netscape cookies file and browser cookie source.
+- URL subtitle content is simplified to plain text by default (SRT/VTT/TTML formatting stripped via `strip_subtitle_formatting`).

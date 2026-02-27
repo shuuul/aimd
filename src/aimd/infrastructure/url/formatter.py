@@ -1,5 +1,57 @@
 """Content formatting and platform detection for URL processing."""
 
+import re
+
+
+def strip_subtitle_formatting(text: str) -> str:
+    """Strip SRT/VTT/TTML formatting from subtitle text, returning plain text.
+
+    Handles SRT (sequence numbers + timestamps), WebVTT (WEBVTT header + timestamps),
+    and TTML (XML tags). Returns the original text unchanged if no subtitle formatting
+    is detected.
+    """
+    lines = text.strip().splitlines()
+    if not lines:
+        return ""
+
+    timestamp_re = re.compile(
+        r"\d{1,2}:\d{2}:\d{2}[.,]\d{2,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[.,]\d{2,3}"
+    )
+    sequence_re = re.compile(r"^\d+$")
+    vtt_header_re = re.compile(r"^WEBVTT", re.IGNORECASE)
+    vtt_meta_re = re.compile(r"^(Kind:|Language:)", re.IGNORECASE)
+    ttml_tag_re = re.compile(r"<[^>]+>")
+
+    has_timestamps = any(timestamp_re.search(line) for line in lines[:30])
+    has_ttml = text.strip().startswith("<?xml") or "<tt " in text[:500]
+
+    if has_ttml:
+        text_content = ttml_tag_re.sub("", text)
+        segments = [s.strip() for s in text_content.split("\n") if s.strip()]
+        return " ".join(segments)
+
+    if not has_timestamps:
+        return text
+
+    text_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if vtt_header_re.match(stripped):
+            continue
+        if vtt_meta_re.match(stripped):
+            continue
+        if timestamp_re.search(stripped):
+            continue
+        if sequence_re.match(stripped):
+            continue
+        if stripped.startswith("NOTE "):
+            continue
+        text_lines.append(stripped)
+
+    return " ".join(text_lines)
+
 
 def detect_platform(url: str) -> str:
     """Detect the platform from URL."""

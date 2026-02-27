@@ -61,6 +61,11 @@ class ProcessRequest(BaseModel):
         default=None,
         description="Browser cookie source for URL extraction, e.g. chrome:default.",
     )
+    raw_transcript: bool = Field(
+        default=False,
+        description="Preserve original subtitle formatting (SRT/VTT timestamps). "
+        "By default, subtitles are simplified to plain text.",
+    )
 
 
 class ProcessResponse(BaseModel):
@@ -77,7 +82,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="aimd API",
         description="Context preparation API for LLM workflows",
-        version="0.6.0",
+        version="0.6.1",
     )
     container = build_container()
 
@@ -127,6 +132,7 @@ def create_app() -> FastAPI:
                     cookies=Path(request.cookies) if request.cookies else None,
                     cookies_from_browser=request.cookies_from_browser,
                     temp_dir=temp_dir,
+                    raw_transcript=request.raw_transcript,
                 )
             )
 

@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.6.0-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.1-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -158,6 +158,16 @@ aimd "https://www.bilibili.com/video/BV1Rz4y127jd"
 aimd "https://www.xiaoyuzhoufm.com/episode/69277ae50084e2631deb56e0"
 ```
 
+By default, downloaded subtitles are simplified to plain text (SRT/VTT timestamps and sequence numbers are stripped). Use `--raw-transcript` to preserve the original subtitle formatting:
+
+```bash
+# Default: clean plain text output
+aimd "https://www.youtube.com/watch?v=..."
+
+# Preserve original SRT/VTT formatting
+aimd "https://www.youtube.com/watch?v=..." --raw-transcript
+```
+
 #### Authenticated Access
 
 For premium or age-restricted content, you may need to export your browser cookies:
@@ -266,6 +276,7 @@ Available MCP tools:
 - `output_file`
 - `save_original`
 - `cookies`
+- `raw_transcript` (preserve original subtitle formatting, default: `false`)
 
 ## Supported Formats
 

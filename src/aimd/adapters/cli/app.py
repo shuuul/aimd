@@ -107,6 +107,12 @@ def process(
         "--log-level",
         help="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
     ),
+    raw_transcript: bool = typer.Option(
+        False,
+        "--raw-transcript",
+        help="Preserve original subtitle formatting (SRT/VTT timestamps). "
+        "By default, subtitles are simplified to plain text.",
+    ),
     temp_dir: Optional[Path] = typer.Option(
         None,
         "--temp-dir",
@@ -148,6 +154,7 @@ def process(
                     cookies=cookies,
                     cookies_from_browser=cookies_from_browser,
                     temp_dir=resolved_temp_dir,
+                    raw_transcript=raw_transcript,
                 )
             )
 

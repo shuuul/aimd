@@ -28,3 +28,16 @@ This is critical for sandboxed environments (e.g. spacebot) where `/tmp` may not
 be writable. The `temp_dir` field flows through `ProcessInput` → use-cases →
 infrastructure functions via the `dir=` parameter of `tempfile.TemporaryDirectory`
 and `tempfile.NamedTemporaryFile`.
+
+## SUBTITLE FORMATTING
+
+URL-sourced subtitles (SRT/VTT/TTML) are simplified to plain text by default.
+The `raw_transcript` field on `ProcessInput` (default `False`) controls this:
+
+- **CLI**: `--raw-transcript` flag
+- **HTTP API**: `raw_transcript` field in `ProcessRequest`
+- **MCP**: `raw_transcript` parameter on `process_input` tool
+
+The stripping is performed by `strip_subtitle_formatting()` in
+`infrastructure/url/formatter.py`, applied in `processor.py` before
+`format_content()` embeds the text into the markdown output.

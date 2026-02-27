@@ -37,6 +37,7 @@ async def _transcript_processor(
     cookies: Path | None,
     cookies_from_browser: str | None,
     temp_dir: Path | None = None,
+    raw_transcript: bool = False,
 ):
     return await process_transcript_input(
         input_source=input_source,
@@ -47,6 +48,7 @@ async def _transcript_processor(
         cookies=cookies,
         cookies_from_browser=cookies_from_browser,
         temp_dir=temp_dir,
+        raw_transcript=raw_transcript,
         process_url=get_text_from_url,
         process_audio=get_text_from_audio,
         resolve_engine=resolve_engine_with_preflight,

@@ -54,6 +54,7 @@ async def process_input(
     save_original: str | None = None,
     cookies: str | None = None,
     cookies_from_browser: str | None = None,
+    raw_transcript: bool = False,
 ) -> dict[str, Any]:
     """Process audio/video/url/documents and return markdown context."""
     try:
@@ -73,6 +74,7 @@ async def process_input(
                 cookies=Path(cookies) if cookies else None,
                 cookies_from_browser=cookies_from_browser,
                 temp_dir=temp_dir,
+                raw_transcript=raw_transcript,
             )
         )
 

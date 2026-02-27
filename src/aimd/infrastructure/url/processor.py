@@ -8,7 +8,7 @@ from ...errors import ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
 from ...utils import is_valid_url
 from .audio_download import extract_content_from_audio
-from .formatter import detect_platform, format_content
+from .formatter import detect_platform, format_content, strip_subtitle_formatting
 from .subtitles import extract_subtitles
 from .video_info import extract_video_info
 
@@ -22,6 +22,7 @@ async def get_text_from_url(
     cookies_file: str | None = None,
     cookies_from_browser: str | None = None,
     temp_dir: Path | None = None,
+    raw_transcript: bool = False,
 ) -> TextContext:
     """Extract text content from video URLs using yt-dlp."""
     if not is_valid_url(url):
@@ -47,6 +48,8 @@ async def get_text_from_url(
         subtitle_content = await extract_subtitles(info_dict, platform, language)
         if subtitle_content and subtitle_content.strip():
             logger.info("Successfully extracted subtitles")
+            if not raw_transcript:
+                subtitle_content = strip_subtitle_formatting(subtitle_content)
             content = format_content(info_dict, subtitle_content)
             return TextContext(title=title, chunk_list=[content])
 
