@@ -2,6 +2,9 @@
 
 import asyncio
 import platform
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from logly import logger
@@ -9,6 +12,8 @@ from logly import logger
 from ...const import MLX_AUDIO_DEFAULT_MODEL, MLX_AUDIO_MODELS
 from ...errors import ProcessingFailedError, UnsupportedInputError
 from ...platform_utils import is_apple_silicon
+
+MLX_AUDIO_SUPPORTED_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}
 
 LANGUAGE_CODE_TO_NAME = {
     "zh": "Chinese",
@@ -38,6 +43,42 @@ def _resolve_language(language: str | None) -> str:
         f"Unsupported language for mlx engine: '{language}'. "
         f"Supported: {list(LANGUAGE_CODE_TO_NAME.keys())}"
     )
+
+
+def _convert_to_wav(source: Path) -> Path | None:
+    """Convert an unsupported audio file to WAV via ffmpeg.
+
+    Returns the path to a temporary WAV file, or None if the format is
+    already supported by mlx-audio.  Caller is responsible for cleanup.
+    """
+    if source.suffix.lower() in MLX_AUDIO_SUPPORTED_FORMATS:
+        return None
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ProcessingFailedError(
+            f"Cannot convert {source.suffix} to WAV: ffmpeg not found. "
+            "Install ffmpeg (brew install ffmpeg) or provide a supported format "
+            f"({', '.join(sorted(MLX_AUDIO_SUPPORTED_FORMATS))})."
+        )
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    wav_path = Path(tmp.name)
+
+    logger.info(f"Converting {source.suffix} to WAV for mlx-audio compatibility")
+    result = subprocess.run(
+        [ffmpeg, "-y", "-i", str(source), "-ar", "16000", "-ac", "1", wav_path.name],
+        capture_output=True,
+        cwd=wav_path.parent,
+    )
+    if result.returncode != 0:
+        wav_path.unlink(missing_ok=True)
+        raise ProcessingFailedError(
+            f"ffmpeg conversion to WAV failed: {result.stderr.decode()}"
+        )
+
+    return wav_path
 
 
 async def transcribe_audio_mlx(
@@ -71,11 +112,14 @@ async def transcribe_audio_mlx(
         f"Transcribing with mlx-audio model: {resolved_model}, language: {resolved_language}"
     )
 
+    wav_path: Path | None = None
     try:
+        wav_path = _convert_to_wav(file_path)
+        audio_path = wav_path or file_path
 
         def _transcribe() -> str:
             stt_model = load_stt(resolved_model)
-            result = stt_model.generate(str(file_path), language=resolved_language)
+            result = stt_model.generate(str(audio_path), language=resolved_language)
             return result.text.strip()
 
         loop = asyncio.get_event_loop()
@@ -92,3 +136,6 @@ async def transcribe_audio_mlx(
         raise
     except Exception as e:
         raise ProcessingFailedError(f"mlx-audio transcription failed: {e}") from e
+    finally:
+        if wav_path is not None:
+            wav_path.unlink(missing_ok=True)
