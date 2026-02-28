@@ -322,7 +322,7 @@ export AIMD_TEMP_DIR="/path/to/writable/tmp"
 
 ### Sandboxed Environments
 
-By default, aimd uses the system temporary directory (`/tmp`) for intermediate files such as downloaded audio and EPUB extraction. In sandboxed environments (e.g. spacebot) where `/tmp` may not be writable, you can redirect temp I/O:
+By default, aimd uses the system temporary directory (`/tmp`) for intermediate files such as downloaded audio and EPUB extraction. In sandboxed environments where `/tmp` may not be writable, you can redirect temp I/O:
 
 ```bash
 # Via environment variable (works for CLI, MCP, and HTTP API)

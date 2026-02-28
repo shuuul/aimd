@@ -24,10 +24,10 @@ Python's `tempfile` module with a configurable base directory:
 - **MCP / HTTP**: reads `AIMD_TEMP_DIR` env var at request time
 - **Default**: when unset, falls back to the system temp directory (`/tmp`)
 
-This is critical for sandboxed environments (e.g. spacebot) where `/tmp` may not
-be writable. The `temp_dir` field flows through `ProcessInput` → use-cases →
-infrastructure functions via the `dir=` parameter of `tempfile.TemporaryDirectory`
-and `tempfile.NamedTemporaryFile`.
+In sandboxed environments where `/tmp` may not be writable, set `AIMD_TEMP_DIR`
+to redirect temp I/O. The `temp_dir` field flows through `ProcessInput` →
+use-cases → infrastructure functions via the `dir=` parameter of
+`tempfile.TemporaryDirectory` and `tempfile.NamedTemporaryFile`.
 
 ## SUBTITLE FORMATTING
 
