@@ -1,6 +1,7 @@
 """Subtitle extraction helpers."""
 
 import asyncio
+from collections.abc import Iterable
 
 from logly import logger
 
@@ -12,19 +13,84 @@ from ...const import (
 from .ydl_client import create_ydl
 
 
-def get_preferred_languages(language: str | None) -> list[str]:
+def _is_original_language(lang: str) -> bool:
+    """Return True when a subtitle language code represents the original language."""
+    normalized = lang.lower()
+    return normalized == "orig" or normalized.endswith("-orig") or "original" in normalized
+
+
+def _dedupe_preserve_order(languages: Iterable[str]) -> list[str]:
+    """Return languages in their first-seen order without duplicates."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for lang in languages:
+        if lang not in seen:
+            seen.add(lang)
+            ordered.append(lang)
+    return ordered
+
+
+def get_preferred_languages(
+    language: str | None,
+    available_languages: Iterable[str] | None = None,
+) -> list[str]:
     """Get preferred subtitle languages based on language code."""
     english_languages = ENGLISH_SUBTITLE_LANGUAGES
     chinese_languages = CHINESE_SUBTITLE_LANGUAGES
+    available = _dedupe_preserve_order(available_languages or [])
+    original_languages = [lang for lang in available if _is_original_language(lang)]
+    english_available = [
+        lang
+        for lang in available
+        if lang in english_languages and not _is_original_language(lang)
+    ]
+    chinese_available = [
+        lang
+        for lang in available
+        if lang in chinese_languages and not _is_original_language(lang)
+    ]
+    remaining_available = [
+        lang
+        for lang in available
+        if lang not in original_languages
+        and lang not in english_available
+        and lang not in chinese_available
+    ]
+
+    if available:
+        default_priority = (
+            original_languages
+            + english_available
+            + chinese_available
+            + remaining_available
+        )
+    else:
+        default_priority = _dedupe_preserve_order(english_languages + chinese_languages)
 
     if language:
         lang = language.lower()
+        if lang in ("orig", "original"):
+            return default_priority
         if lang in ("zh", "chinese", "zh-hans", "zh-hant"):
-            return chinese_languages + english_languages
+            if available:
+                return (
+                    chinese_available
+                    + original_languages
+                    + english_available
+                    + remaining_available
+                )
+            return _dedupe_preserve_order(chinese_languages + english_languages)
         if lang in ("en", "english"):
-            return english_languages + chinese_languages
+            if available:
+                return (
+                    english_available
+                    + original_languages
+                    + chinese_available
+                    + remaining_available
+                )
+            return _dedupe_preserve_order(english_languages + chinese_languages)
 
-    return chinese_languages + english_languages
+    return default_priority
 
 
 async def download_subtitle(url: str, platform: str) -> str | None:
@@ -60,7 +126,8 @@ async def extract_subtitles(
         logger.info("No subtitles available")
         return None
 
-    preferred_languages = get_preferred_languages(language)
+    available_languages = list(subtitles) + list(auto_subtitles)
+    preferred_languages = get_preferred_languages(language, available_languages)
     selected_lang = None
     selected_sub = None
     is_manual = False

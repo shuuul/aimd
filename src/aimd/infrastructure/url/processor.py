@@ -50,7 +50,7 @@ async def get_text_from_url(
             logger.info("Successfully extracted subtitles")
             if not raw_transcript:
                 subtitle_content = strip_subtitle_formatting(subtitle_content)
-            content = format_content(info_dict, subtitle_content)
+            content = format_content(info_dict, subtitle_content, platform)
             return TextContext(title=title, chunk_list=[content]), platform
 
         logger.info("No subtitles available, extracting content from audio")
@@ -68,11 +68,11 @@ async def get_text_from_url(
 
         if audio_content and audio_content.strip():
             logger.info("Successfully extracted content from audio")
-            content = format_content(info_dict, audio_content)
+            content = format_content(info_dict, audio_content, platform)
             return TextContext(title=title, chunk_list=[content]), platform
 
         logger.warning("Could not extract content, returning basic video info")
-        content = format_content(info_dict, None)
+        content = format_content(info_dict, None, platform)
         return TextContext(title=title, chunk_list=[content]), platform
     except UnsupportedInputError:
         raise

@@ -67,7 +67,9 @@ def detect_platform(url: str) -> str:
     return "unknown"
 
 
-def format_content(info_dict: dict[str, object], content: str | None) -> str:
+def format_content(
+    info_dict: dict[str, object], content: str | None, platform: str | None = None
+) -> str:
     """Format video metadata and extracted content into markdown."""
     title = info_dict.get("title", "Unknown Title")
     description = info_dict.get("description", "No description available")
@@ -80,6 +82,7 @@ def format_content(info_dict: dict[str, object], content: str | None) -> str:
     formatted_content = f"""# {title}
 
 **Channel:** {channel}
+**Platform:** {platform or "unknown"}
 **Duration:** {duration} seconds
 **Upload Date:** {upload_date}
 **View Count:** {view_count:,} views

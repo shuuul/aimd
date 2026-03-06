@@ -66,6 +66,7 @@ def _get_model(model_name: str):
         model_name,
         dtype=torch.bfloat16,
         device_map="cuda:0",
+        max_inference_batch_size=1,
         max_new_tokens=4096,
     )
     _cached_model_name = model_name

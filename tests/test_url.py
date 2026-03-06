@@ -14,6 +14,7 @@ from aimd.infrastructure.url.cookies import (
     parse_cookies_from_browser,
 )
 from aimd.infrastructure.url.processor import get_text_from_url
+from aimd.infrastructure.url.subtitles import get_preferred_languages
 
 
 @pytest.mark.asyncio
@@ -43,7 +44,47 @@ async def test_get_text_from_url_extracts_info_once(monkeypatch) -> None:
     text_context, platform = await get_text_from_url("https://example.com/video")
     assert text_context.title == "Example"
     assert platform == "unknown"
+    assert "**Platform:** unknown" in text_context.chunk_list[0]
     assert call_count["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_text_from_url_includes_detected_platform_in_output(
+    monkeypatch,
+) -> None:
+    async def _mock_extract_video_info(
+        *,
+        url: str,
+        platform: str,
+        cookies_file: str | None,
+        cookies_from_browser: str | None,
+    ):
+        return {
+            "title": "Example",
+            "channel": "Demo Channel",
+            "webpage_url": url,
+            "duration": 12,
+            "upload_date": "20260307",
+            "view_count": 34,
+            "description": "desc",
+        }
+
+    async def _mock_extract_subtitles(info_dict, platform: str, language: str | None):
+        return "subtitle text"
+
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
+    )
+
+    text_context, platform = await get_text_from_url(
+        "https://www.youtube.com/watch?v=test"
+    )
+
+    assert platform == "youtube"
+    assert "**Platform:** youtube" in text_context.chunk_list[0]
 
 
 @pytest.mark.asyncio
@@ -270,3 +311,17 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
     )
     assert result_with_codec is not None
     assert seen_opts[-1]["postprocessors"][0]["preferredcodec"] == "m4a"
+
+
+def test_get_preferred_languages_prefers_original_when_language_unspecified() -> None:
+    preferred = get_preferred_languages(
+        None, ["zh-Hans", "en-orig", "fr-orig", "en", "zh"]
+    )
+
+    assert preferred[:5] == ["en-orig", "fr-orig", "en", "zh-Hans", "zh"]
+
+
+def test_get_preferred_languages_prefers_original_for_orig_alias() -> None:
+    preferred = get_preferred_languages("orig", ["zh-Hans", "en-orig", "en"])
+
+    assert preferred[:3] == ["en-orig", "en", "zh-Hans"]
