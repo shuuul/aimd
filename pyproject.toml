@@ -10,7 +10,6 @@ requires-python = ">=3.10, <3.13"
 dependencies = [
     "aiohttp>=3.12.15",
     "fastapi>=0.116.1",
-    "flash-attn; sys_platform == 'linux'",
     "pandoc>=2.4",
     "pydantic>=2.0.0",
     "python-dotenv>=1.1.1",
@@ -62,9 +61,3 @@ explicit = true
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
-
-[tool.uv.extra-build-dependencies]
-flash-attn = [{ requirement = "torch", match-runtime = true }]
-
-[tool.uv.extra-build-variables]
-flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }

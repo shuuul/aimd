@@ -41,7 +41,6 @@ dependencies = [
     { name = "aiohttp" },
     { name = "fastapi" },
     { name = "faster-whisper", marker = "sys_platform != 'darwin'" },
-    { name = "flash-attn", marker = "sys_platform == 'linux'" },
     { name = "logly" },
     { name = "mcp" },
     { name = "mlx-audio", marker = "sys_platform == 'darwin'" },
@@ -72,7 +71,6 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.15" },
     { name = "fastapi", specifier = ">=0.116.1" },
     { name = "faster-whisper", marker = "sys_platform != 'darwin'", specifier = ">=1.2.0" },
-    { name = "flash-attn", marker = "sys_platform == 'linux'" },
     { name = "logly", specifier = ">=0.1.6" },
     { name = "mcp", specifier = ">=1.18.0" },
     { name = "mlx-audio", marker = "sys_platform == 'darwin'", specifier = ">=0.3.1" },
@@ -805,15 +803,6 @@ wheels = [
 ]
 
 [[package]]
-name = "einops"
-version = "0.8.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
-]
-
-[[package]]
 name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -893,16 +882,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/77/18/a1fd2231c679dcb97
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/0b/de6f54d4a8bedfe8645c41497f3c18d749f0bd3218170c667bf4b81d0cdd/filelock-3.25.0-py3-none-any.whl", hash = "sha256:5ccf8069f7948f494968fc0713c10e5c182a9c9d9eef3a636307a20c2490f047", size = 26427, upload-time = "2026-03-01T15:08:44.593Z" },
 ]
-
-[[package]]
-name = "flash-attn"
-version = "2.8.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "einops", marker = "(python_full_version < '3.11' and sys_platform == 'emscripten') or (python_full_version < '3.11' and sys_platform == 'win32') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32')" },
-    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(python_full_version < '3.11' and sys_platform == 'emscripten') or (python_full_version < '3.11' and sys_platform == 'win32') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
 
 [[package]]
 name = "flask"
