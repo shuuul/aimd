@@ -96,6 +96,7 @@ async def process_input(
             "title": result.text_context.title,
             "chunk_list": result.text_context.chunk_list,
             "split_header_level": result.text_context.split_header_level,
+            "platform": result.platform,
             "output_file": persisted_output_file,
             "output_dir": output_dir,
         }

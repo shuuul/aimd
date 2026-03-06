@@ -158,6 +158,9 @@ def process(
                 )
             )
 
+            if result.platform:
+                logger.info(f"Platform: {result.platform}")
+
             if result.task_type == "convert" and result.output_dir is not None:
                 input_path = Path(input_source)
                 logger.info(f"EPUB converted with images to: {result.output_dir}")

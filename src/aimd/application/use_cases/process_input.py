@@ -22,7 +22,7 @@ TranscriptProcessor = Callable[
         Path | None,
         bool,
     ],
-    Awaitable[TextContext],
+    Awaitable[tuple[TextContext, str | None]],
 ]
 ConvertProcessor = Callable[
     [str, Path | None], Awaitable[tuple[TextContext, Path | None]]
@@ -77,7 +77,7 @@ class ProcessInputUseCase:
 
         if task_type == "transcript":
             try:
-                text_context = await self.transcript_processor(
+                text_context, platform = await self.transcript_processor(
                     request.input_source,
                     request.transcribe_engine,
                     request.language,
@@ -93,7 +93,9 @@ class ProcessInputUseCase:
             except Exception as exc:
                 raise ProcessingFailedError(str(exc)) from exc
 
-            return ProcessResult(task_type="transcript", text_context=text_context)
+            return ProcessResult(
+                task_type="transcript", text_context=text_context, platform=platform
+            )
 
         try:
             text_context, output_dir = await self.convert_processor(
@@ -134,13 +136,13 @@ async def process_transcript_input(
             Path | None,
             bool,
         ],
-        Awaitable[TextContext],
+        Awaitable[tuple[TextContext, str]],
     ],
     process_audio: Callable[
         [Path, str, str | None, str | None, Path | None], Awaitable[TextContext]
     ],
     resolve_engine: Callable[[str], str],
-) -> TextContext:
+) -> tuple[TextContext, str | None]:
     """Transcript pipeline used by the process use-case."""
     if is_url(input_source):
         if engine != "auto":
@@ -162,7 +164,10 @@ async def process_transcript_input(
         raise InputNotFoundError(f"Input file not found: {input_source}")
 
     resolved_engine = resolve_engine(engine)
-    return await process_audio(input_path, resolved_engine, language, model, temp_dir)
+    text_context = await process_audio(
+        input_path, resolved_engine, language, model, temp_dir
+    )
+    return text_context, None
 
 
 async def process_convert_input(

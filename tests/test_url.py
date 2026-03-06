@@ -40,8 +40,9 @@ async def test_get_text_from_url_extracts_info_once(monkeypatch) -> None:
         "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
     )
 
-    result = await get_text_from_url("https://example.com/video")
-    assert result.title == "Example"
+    text_context, platform = await get_text_from_url("https://example.com/video")
+    assert text_context.title == "Example"
+    assert platform == "unknown"
     assert call_count["count"] == 1
 
 

@@ -11,7 +11,7 @@ from aimd.types import TextContext
 @pytest.mark.asyncio
 async def test_use_case_transcript_flow() -> None:
     async def _transcript(*args):  # noqa: ARG001
-        return TextContext(title="a", chunk_list=["t"])
+        return TextContext(title="a", chunk_list=["t"]), "youtube"
 
     async def _convert(*args):  # noqa: ARG001
         raise AssertionError("should not call convert")
@@ -27,6 +27,7 @@ async def test_use_case_transcript_flow() -> None:
     )
     assert result.task_type == "transcript"
     assert result.text_context.chunk_list == ["t"]
+    assert result.platform == "youtube"
 
 
 @pytest.mark.asyncio
@@ -35,7 +36,7 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
     audio.write_text("x", encoding="utf-8")
 
     async def _transcript(*args):  # noqa: ARG001
-        return TextContext(title="a", chunk_list=["t"])
+        return TextContext(title="a", chunk_list=["t"]), None
 
     async def _convert(*args):  # noqa: ARG001
         raise AssertionError("should not call convert")
@@ -48,6 +49,7 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
 
     result = await use_case.execute(ProcessInput(input_source=str(audio)))
     assert result.task_type == "transcript"
+    assert result.platform is None
 
 
 @pytest.mark.asyncio

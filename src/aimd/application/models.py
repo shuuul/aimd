@@ -33,3 +33,4 @@ class ProcessResult:
     text_context: TextContext
     output_file: Path | None = None
     output_dir: Path | None = None
+    platform: str | None = None

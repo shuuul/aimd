@@ -73,6 +73,7 @@ class ProcessResponse(BaseModel):
     title: str
     chunk_list: list[str]
     split_header_level: int | None = None
+    platform: str | None = None
     output_file: str | None = None
     output_dir: str | None = None
 
@@ -158,6 +159,7 @@ def create_app() -> FastAPI:
                 title=result.text_context.title,
                 chunk_list=result.text_context.chunk_list,
                 split_header_level=result.text_context.split_header_level,
+                platform=result.platform,
                 output_file=output_file,
                 output_dir=output_dir,
             )

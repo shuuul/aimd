@@ -23,7 +23,7 @@ async def get_text_from_url(
     cookies_from_browser: str | None = None,
     temp_dir: Path | None = None,
     raw_transcript: bool = False,
-) -> TextContext:
+) -> tuple[TextContext, str]:
     """Extract text content from video URLs using yt-dlp."""
     if not is_valid_url(url):
         raise UnsupportedInputError(f"Invalid URL: {url}")
@@ -51,7 +51,7 @@ async def get_text_from_url(
             if not raw_transcript:
                 subtitle_content = strip_subtitle_formatting(subtitle_content)
             content = format_content(info_dict, subtitle_content)
-            return TextContext(title=title, chunk_list=[content])
+            return TextContext(title=title, chunk_list=[content]), platform
 
         logger.info("No subtitles available, extracting content from audio")
         audio_content = await extract_content_from_audio(
@@ -69,11 +69,11 @@ async def get_text_from_url(
         if audio_content and audio_content.strip():
             logger.info("Successfully extracted content from audio")
             content = format_content(info_dict, audio_content)
-            return TextContext(title=title, chunk_list=[content])
+            return TextContext(title=title, chunk_list=[content]), platform
 
         logger.warning("Could not extract content, returning basic video info")
         content = format_content(info_dict, None)
-        return TextContext(title=title, chunk_list=[content])
+        return TextContext(title=title, chunk_list=[content]), platform
     except UnsupportedInputError:
         raise
     except ProcessingFailedError:
