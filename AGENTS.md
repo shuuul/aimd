@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-07
-**Commit:** working-tree
+**Generated:** 2026-03-08
+**Commit:** c7d5e24 (v0.6.5)
 **Branch:** main
 
 ## OVERVIEW
