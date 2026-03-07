@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-02-21
+**Generated:** 2026-03-07
 **Commit:** working-tree
 **Branch:** main
 
@@ -41,6 +41,12 @@ aimd/
 │   │   │   └── detector.py       # Engine preflight checks
 │   │   ├── transcription/        # mlx-audio/qwen-asr/yap/faster-whisper execution
 │   │   ├── documents/            # Pandoc + EPUB + chunking pipeline
+│   │   │   ├── epub_processor.py # Spine-ordered EPUB extraction via pandoc CLI
+│   │   │   ├── epub_cleaner.py   # Post-processing cleanup for EPUB markdown
+│   │   │   ├── pandoc_reader.py  # General pandoc-backed document conversion
+│   │   │   ├── chunking.py       # Markdown splitting by headers / paragraphs
+│   │   │   ├── title_extractor.py# Title extraction from markdown content
+│   │   │   └── processor.py      # Document processing orchestration
 │   │   └── url/                  # yt-dlp cookies/subtitles/audio fallback
 │   └── adapters/
 │       ├── cli/app.py            # Typer interface adapter
@@ -72,7 +78,9 @@ aimd/
 | Engine preflight | `src/aimd/infrastructure/capabilities/detector.py` | availability + auto-resolution |
 | Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), yap, faster-whisper |
 | URL extraction | `src/aimd/infrastructure/url/` | cookie source fallback + subtitle/audio logic |
-| Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion, split logic, EPUB extraction |
+| Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion (`markdown_mmd-raw_html`), split logic, EPUB extraction |
+| EPUB pipeline | `src/aimd/infrastructure/documents/epub_processor.py` | Spine-ordered chapters, pandoc CLI subprocess, flat image extraction |
+| EPUB markdown cleanup | `src/aimd/infrastructure/documents/epub_cleaner.py` | Footnotes, TOC, heading normalisation, image path fixup |
 
 ## CONVENTIONS (THIS PROJECT)
 
@@ -152,6 +160,8 @@ Recommended maintenance:
 - qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with Qwen/Qwen3-ASR-1.7B by default (Linux + CUDA).
 - `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or whisper size).
 - `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.
-- EPUB output layout: `book_name/{book_name.md, chapters/, images/}`.
+- EPUB pipeline: spine-based chapter ordering (container.xml → OPF → manifest + spine), pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing via `epub_cleaner.clean_markdown`.
+- EPUB output layout: `book_name/{book_name.md, chapters/, images/}`. Chapters named after original HTML stems; combined file uses `---` separators.
+- Non-EPUB document conversion uses the `pandoc` Python library with `markdown_mmd-raw_html` format and `--wrap=none`.
 - URL extraction supports explicit Netscape cookies file and browser cookie source.
 - URL subtitle content is simplified to plain text by default (SRT/VTT/TTML formatting stripped via `strip_subtitle_formatting`).

@@ -39,7 +39,9 @@ async def process_file_with_splitting(
                 f"Failed to read {file_extension} file with pandoc: {e}"
             ) from e
 
-        markdown_content = pandoc.write(doc, format="markdown")
+        markdown_content = pandoc.write(
+            doc, format="markdown_mmd-raw_html", options=["--wrap=none"]
+        )
         if not markdown_content:
             raise ProcessingFailedError(
                 f"Pandoc produced empty markdown from: {file_path}"

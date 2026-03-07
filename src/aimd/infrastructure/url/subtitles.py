@@ -16,7 +16,9 @@ from .ydl_client import create_ydl
 def _is_original_language(lang: str) -> bool:
     """Return True when a subtitle language code represents the original language."""
     normalized = lang.lower()
-    return normalized == "orig" or normalized.endswith("-orig") or "original" in normalized
+    return (
+        normalized == "orig" or normalized.endswith("-orig") or "original" in normalized
+    )
 
 
 def _dedupe_preserve_order(languages: Iterable[str]) -> list[str]:

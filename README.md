@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.6.1-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.4-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -202,17 +202,20 @@ aimd document.epub -o output.md
 
 #### EPUB Output Structure
 
-When processing EPUB files, aimd extracts:
-- **Main file**: `{book_name}.md` - Combined content from all chapters
-- **Chapters directory**: `chapters/` - Individual chapter markdown files
-- **Images directory**: `images/` - All images from the EPUB
+When processing EPUB files, aimd:
+- Reads the EPUB **spine** for correct chapter ordering (falls back to alphabetical if spine is unavailable)
+- Converts each chapter via pandoc (`-f html -t markdown_mmd-raw_html --wrap=none`)
+- Applies post-processing cleanup (heading normalisation, footnote conversion, image path fixup, TOC flattening)
+- Extracts all images into a flat `images/` directory
+
+Output layout:
 
 ```
 book_name/
-├── book_name.md      # Combined content
+├── book_name.md      # Combined content (chapters separated by ---)
 ├── chapters/
-│   ├── chapter_001.md
-│   ├── chapter_002.md
+│   ├── intro.md      # Named after original HTML stems
+│   ├── chapter01.md
 │   └── ...
 └── images/
     └── *.jpg, *.png, etc.
@@ -410,9 +413,9 @@ aimd/
 #### Document Conversion
 
 1. **Format Detection**: extension + supported format checks
-2. **Pandoc Conversion**: source document -> markdown
+2. **Pandoc Conversion**: source document -> markdown (`markdown_mmd-raw_html`, `--wrap=none`)
 3. **Title Extraction**: normalized title resolution from content
-4. **Chunking / EPUB Layout**: markdown splitting and EPUB chapter/image extraction
+4. **Chunking / EPUB Layout**: markdown splitting and EPUB spine-ordered chapter/image extraction with post-processing cleanup
 
 ## Contributing
 

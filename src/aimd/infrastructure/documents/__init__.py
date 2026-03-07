@@ -7,12 +7,14 @@ from .chunking import (
     split_processed_chunk_into_chapters,
     split_text_by_paragraphs,
 )
+from .epub_cleaner import clean_markdown
 from .epub_processor import process_epub_with_images
 from .pandoc_reader import is_supported_file
 from .processor import get_text_from_file
 from .title_extractor import extract_title_from_content
 
 __all__ = [
+    "clean_markdown",
     "combine_sections_for_processing",
     "extract_title_from_content",
     "get_text_from_file",

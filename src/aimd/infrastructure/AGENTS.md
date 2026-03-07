@@ -7,7 +7,7 @@ Infrastructure layer: concrete integrations and processing pipelines.
 - Capabilities detection and engine resolution.
 - Transcription backends (mlx-audio Qwen3-ASR / qwen-asr Qwen3-ASR / yap / faster-whisper).
 - URL extraction (yt-dlp, cookies, subtitles, audio fallback, subtitle formatting).
-- Document processing (pandoc, EPUB extraction, chunking/title logic).
+- Document processing (pandoc `markdown_mmd-raw_html`, EPUB spine-ordered extraction + `epub_cleaner` post-processing, chunking/title logic).
 
 ## Rules
 
