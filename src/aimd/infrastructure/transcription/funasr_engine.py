@@ -69,9 +69,7 @@ async def transcribe_audio_funasr(
         )
 
     device = _resolve_device()
-    logger.info(
-        f"Transcribing with FunASR model: {resolved_model}, device: {device}"
-    )
+    logger.info(f"Transcribing with FunASR model: {resolved_model}, device: {device}")
 
     try:
 
@@ -80,7 +78,9 @@ async def transcribe_audio_funasr(
 
             is_sensevoice = resolved_model in _SENSEVOICE_MODELS
             if is_sensevoice:
-                from funasr.utils.postprocess_utils import rich_transcription_postprocess  # type: ignore[import-untyped]
+                from funasr.utils.postprocess_utils import (
+                    rich_transcription_postprocess,
+                )  # type: ignore[import-untyped]
 
                 res = funasr_model.generate(
                     input=str(file_path),
