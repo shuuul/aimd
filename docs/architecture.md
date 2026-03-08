@@ -19,7 +19,7 @@ The codebase follows a ports/adapters structure:
 1. Adapter receives request payload/options.
 2. Adapter builds `ProcessInput` and calls `ProcessInputUseCase.execute`.
 3. Use-case routes request to transcript or convert pipeline.
-4. Infrastructure modules perform external-tool work (yt-dlp, pandoc, whisper backends).
+4. Infrastructure modules perform external-tool work (yt-dlp, pandoc, transcription backends).
 5. Adapter maps `ProcessResult` to interface-specific response/output.
 
 ## Error Handling

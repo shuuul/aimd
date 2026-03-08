@@ -39,7 +39,7 @@ aimd/
 │   ├── infrastructure/
 │   │   ├── capabilities/
 │   │   │   └── detector.py       # Engine preflight checks
-│   │   ├── transcription/        # mlx-audio/qwen-asr/yap/faster-whisper execution
+│   │   ├── transcription/        # mlx-audio/qwen-asr/funasr/yap execution
 │   │   ├── documents/            # Pandoc + EPUB + chunking pipeline
 │   │   │   ├── epub_processor.py # Spine-ordered EPUB extraction via pandoc CLI
 │   │   │   ├── epub_cleaner.py   # Post-processing cleanup for EPUB markdown
@@ -76,7 +76,7 @@ aimd/
 | CLI behavior | `src/aimd/adapters/cli/app.py` | Typer command and output persistence |
 | MCP tools | `src/aimd/adapters/mcp/server.py` | `healthz`, `list_engines`, `process_input` |
 | Engine preflight | `src/aimd/infrastructure/capabilities/detector.py` | availability + auto-resolution |
-| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), yap, faster-whisper |
+| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), FunASR (SenseVoiceSmall/Fun-ASR-Nano), yap |
 | URL extraction | `src/aimd/infrastructure/url/` | cookie source fallback + subtitle/audio logic |
 | Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion (`markdown_mmd-raw_html`), split logic, EPUB extraction |
 | EPUB pipeline | `src/aimd/infrastructure/documents/epub_processor.py` | Spine-ordered chapters, pandoc CLI subprocess, flat image extraction |
@@ -154,11 +154,13 @@ Recommended maintenance:
 
 - API routes: `/healthz`, `/v1/engines`, `/v1/process`.
 - Engine auto priority:
-  - macOS: `mlx -> yap -> cpu`
-  - non-macOS (Linux): `qwen -> whisper -> cpu`
+  - macOS: `mlx -> yap -> funasr`
+  - non-macOS (Linux): `qwen -> funasr`
 - mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR-1.7B-8bit by default.
 - qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with Qwen/Qwen3-ASR-1.7B by default (Linux + CUDA).
-- `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or whisper size).
+- funasr engine uses [FunASR](https://github.com/modelscope/FunASR) with SenseVoiceSmall by default (CPU/CUDA). Also supports Fun-ASR-Nano-2512.
+- FunASR does not officially support MPS (Apple Silicon GPU). On macOS, use `mlx` instead.
+- `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or FunASR model).
 - `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.
 - EPUB pipeline: spine-based chapter ordering (container.xml → OPF → manifest + spine), pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing via `epub_cleaner.clean_markdown`.
 - EPUB output layout: `book_name/{book_name.md, chapters/, images/}`. Chapters named after original HTML stems; combined file uses `---` separators.

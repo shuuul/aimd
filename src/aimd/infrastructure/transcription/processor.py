@@ -7,10 +7,10 @@ from logly import logger
 from ...const import AUDIO_EXTENSIONS, LANGUAGE_TO_YAP_LOCALE
 from ...errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
+from .funasr_engine import transcribe_audio_funasr
 from .mlx_engine import transcribe_audio_mlx
 from .qwen_engine import transcribe_audio_qwen
 from .resolver import resolve_engine_with_preflight
-from .whisper_engine import transcribe_audio_whisper
 from .yap_engine import transcribe_audio_yap
 
 
@@ -77,14 +77,11 @@ async def get_text_from_audio(
                 model=model,
                 language=language,
             )
-        elif actual_engine in ("whisper", "cpu"):
-            model_size = model or "large-v3-turbo"
-            device = "cuda" if actual_engine == "whisper" else "cpu"
-            transcribed_text = await transcribe_audio_whisper(
+        elif actual_engine == "funasr":
+            transcribed_text = await transcribe_audio_funasr(
                 file_path,
-                model_size,
-                device,
-                language,
+                model=model,
+                language=language,
             )
         else:
             raise UnsupportedInputError(f"Unsupported engine: {actual_engine}")

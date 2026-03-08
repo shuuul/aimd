@@ -27,13 +27,12 @@ class _FakeProcessUseCase:
 class _FakeListEnginesUseCase:
     def execute(self):
         class _Result:
-            auto_selected_engine = "cpu"
+            auto_selected_engine = "funasr"
             engines = {
                 "yap": EngineCapability("yap", False, "unsupported", None),
                 "mlx": EngineCapability("mlx", False, "unsupported", None),
                 "qwen": EngineCapability("qwen", False, "unsupported", None),
-                "whisper": EngineCapability("whisper", False, "unsupported", None),
-                "cpu": EngineCapability("cpu", True, None, None),
+                "funasr": EngineCapability("funasr", True, None, None),
             }
 
         return _Result()
@@ -70,13 +69,12 @@ def test_engines_endpoint(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert "engines" in body
-    assert len(body["engines"]) == 5
+    assert len(body["engines"]) == 4
     assert {engine["name"] for engine in body["engines"]} == {
         "yap",
         "mlx",
         "qwen",
-        "whisper",
-        "cpu",
+        "funasr",
     }
 
 

@@ -17,6 +17,7 @@ class EngineCapability:
     available: bool
     reason: str | None = None
     fix_hint: str | None = None
+    deprecated: bool = False
 
 
 def _module_available(module_name: str) -> bool:
@@ -36,7 +37,6 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     """Return availability details for each supported transcription engine."""
     is_macos = platform.system() == "Darwin"
     apple_silicon = is_apple_silicon() if is_macos else False
-    has_faster_whisper = _module_available("faster_whisper")
     has_mlx_audio = _module_available("mlx_audio")
     has_torch = _module_available("torch")
     torch_cuda_available = _torch_cuda_available() if has_torch else False
@@ -103,33 +103,12 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
         ),
     )
 
-    whisper_available = has_faster_whisper and has_torch and torch_cuda_available
-    whisper_reason = None
-    if not has_faster_whisper:
-        whisper_reason = "faster_whisper module is not installed."
-    elif not has_torch:
-        whisper_reason = "torch module is not installed."
-    elif not torch_cuda_available:
-        whisper_reason = "CUDA is not available in the current PyTorch runtime."
-
-    capabilities["whisper"] = EngineCapability(
-        name="whisper",
-        available=whisper_available,
-        reason=whisper_reason,
-        fix_hint=(
-            None
-            if whisper_available
-            else "Install CUDA-enabled PyTorch and verify torch.cuda.is_available()."
-        ),
-    )
-
-    capabilities["cpu"] = EngineCapability(
-        name="cpu",
-        available=has_faster_whisper,
-        reason=None
-        if has_faster_whisper
-        else "faster_whisper module is not installed.",
-        fix_hint=None if has_faster_whisper else "Install dependency: faster-whisper",
+    has_funasr = _module_available("funasr")
+    capabilities["funasr"] = EngineCapability(
+        name="funasr",
+        available=has_funasr,
+        reason=None if has_funasr else "funasr module is not installed.",
+        fix_hint=None if has_funasr else "Install dependency: funasr",
     )
 
     return capabilities
@@ -155,9 +134,9 @@ def resolve_engine_with_preflight(engine: str) -> str:
         return engine
 
     if platform.system() == "Darwin":
-        priority = ("mlx", "yap", "cpu")
+        priority = ("mlx", "yap", "funasr")
     else:
-        priority = ("qwen", "whisper", "cpu")
+        priority = ("qwen", "funasr")
 
     for candidate in priority:
         if capabilities[candidate].available:

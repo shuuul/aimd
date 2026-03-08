@@ -70,20 +70,21 @@ def process(
         "auto",
         "--engine",
         "-e",
-        help="Transcription engine: yap (macOS), mlx (Apple Silicon), qwen (Linux/CUDA), whisper (CUDA), cpu. Used for audio/video.",
+        help="Transcription engine: mlx (Apple Silicon), qwen (Linux/CUDA), funasr (CPU/CUDA), yap (macOS).",
     ),
     model: Optional[str] = typer.Option(
         None,
         "--model",
         "-m",
-        help="Model for transcription. For mlx engine: mlx-community/Qwen3-ASR-1.7B-8bit (default). "
-        "For qwen engine: Qwen/Qwen3-ASR-1.7B (default). For whisper/cpu: whisper model size.",
+        help="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-8bit (default). "
+        "For qwen: Qwen/Qwen3-ASR-1.7B (default). "
+        "For funasr: FunAudioLLM/SenseVoiceSmall (default) or FunAudioLLM/Fun-ASR-Nano-2512.",
     ),
     language: Optional[str] = typer.Option(
         None,
         "--language",
         "-l",
-        help="Language code for transcription (e.g., zh, en, ja). Uses Whisper language codes.",
+        help="Language code for transcription (e.g., zh, en, ja).",
     ),
     save_original: Optional[Path] = typer.Option(
         None,

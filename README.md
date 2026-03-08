@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.6.5-blue)
+  ![Version](https://img.shields.io/badge/version-0.7.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -14,7 +14,7 @@ Context preparation tool for LLM workflows - Transcribe audio/video and convert 
 ## Features
 
 - **Auto-Detection**: Automatically detects input type (audio, video, URL, document)
-- **Multi-Engine Audio Transcription**: Support for mlx-audio (Apple Silicon), Qwen3-ASR (Linux/CUDA), yap (macOS), faster-whisper (CUDA/CPU)
+- **Multi-Engine Audio Transcription**: Support for mlx-audio (Apple Silicon), Qwen3-ASR (Linux/CUDA), FunASR (CPU/CUDA), yap (macOS)
 - **Unified Video Platform Support**: Extract content from 1000+ video platforms including YouTube, Bilibili using yt-dlp
 - **Document Conversion**: Convert EPUB, PDF, TXT, and other formats to markdown using Pandoc
 
@@ -88,10 +88,9 @@ aimd audio.mp3 --engine auto
 
 # Specify transcription engine explicitly
 aimd audio.wav --engine mlx       # Apple Silicon (default on macOS)
-aimd audio.wav --engine yap       # macOS (Apple Speech framework)
 aimd audio.wav --engine qwen      # Linux/CUDA (Qwen3-ASR, default on Linux)
-aimd audio.wav --engine whisper   # NVIDIA GPU (faster-whisper)
-aimd audio.wav --engine cpu       # Cross-platform (faster-whisper)
+aimd audio.wav --engine funasr    # CPU/CUDA (SenseVoiceSmall, cross-platform fallback)
+aimd audio.wav --engine yap       # macOS (Apple Speech framework)
 
 # Select a specific model (mlx engine)
 aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-0.6B-8bit
@@ -107,17 +106,16 @@ aimd lecture.mp3 -o meeting_notes.md
 
 - **`auto`** (default): Automatically selects the best engine for your platform
 - **`mlx`**: Apple Silicon only, uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) STT (Qwen3-ASR-1.7B-8bit by default). Highest priority on macOS.
-- **`yap`**: macOS-only, uses Apple Speech framework (requires [yap CLI](https://github.com/finnvoor/yap))
 - **`qwen`**: Linux + CUDA, uses [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) via `qwen-asr` (Qwen3-ASR-1.7B by default). Highest priority on Linux.
-- **`whisper`**: NVIDIA GPU acceleration via faster-whisper (requires CUDA 12 + cuDNN 9)
-- **`cpu`**: Cross-platform CPU fallback (uses faster-whisper)
+- **`funasr`**: CPU/CUDA, uses [FunASR](https://github.com/modelscope/FunASR) (SenseVoiceSmall by default). Cross-platform fallback engine.
+- **`yap`**: macOS-only, uses Apple Speech framework (requires [yap CLI](https://github.com/finnvoor/yap))
 
 #### Auto-Selection Priority
 
 | Platform | Priority |
 |----------|----------|
-| macOS (Apple Silicon) | `mlx` → `yap` → `cpu` |
-| Linux | `qwen` → `whisper` → `cpu` |
+| macOS (Apple Silicon) | `mlx` → `yap` → `funasr` |
+| Linux | `qwen` → `funasr` |
 
 #### MLX Model Selection
 
@@ -127,7 +125,6 @@ The `mlx` engine supports multiple models via `--model` / `-m`:
 |-------|-------------|
 | `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B, 8-bit quantized **(default)** |
 | `mlx-community/Qwen3-ASR-0.6B-8bit` | Qwen3-ASR 0.6B, 8-bit quantized (faster, lighter) |
-| `mlx-community/whisper-large-v3-turbo-asr-fp16` | Whisper large-v3-turbo, fp16 |
 | `mlx-community/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (multilingual) |
 
 Supported languages for Qwen3-ASR (mlx): Chinese, English, Japanese, Korean, German, Spanish, French, Italian, Portuguese, Russian.
@@ -142,6 +139,21 @@ The `qwen` engine supports models via `--model` / `-m`:
 | `Qwen/Qwen3-ASR-0.6B` | Qwen3-ASR 0.6B (faster, lighter) |
 
 The `qwen` engine supports 52 languages with auto-detection. Specify a language with `-l` (e.g. `zh`, `en`, `ja`, `ko`, `de`, `fr`, `es`, `ar`, `hi`, `th`, `vi`, etc.).
+
+#### FunASR Model Selection
+
+The `funasr` engine supports models via `--model` / `-m`:
+
+| Model | Description |
+|-------|-------------|
+| `FunAudioLLM/SenseVoiceSmall` | SenseVoice Small, 234M params, multilingual **(default)** |
+| `FunAudioLLM/Fun-ASR-Nano-2512` | Fun-ASR-Nano, 800M params, 31 languages, lyric recognition |
+
+SenseVoiceSmall supports ASR, language identification, speech emotion recognition, and audio event detection. Fun-ASR-Nano supports 31 languages with mixed-language recognition and regional accent support.
+
+The `funasr` engine automatically uses CUDA when available, otherwise falls back to CPU.
+
+> **Note on MPS (Apple Silicon GPU)**: FunASR does not officially support MPS. While a source-code patch can enable MPS with ~2.4x speedup, this requires modifying FunASR internals. On macOS, use the `mlx` engine instead for native Apple Silicon acceleration.
 
 ### Video URL Processing
 
@@ -274,7 +286,7 @@ Available MCP tools:
 `process_input` mirrors the API/CLI behavior and supports:
 - `input_source`
 - `transcribe_engine`
-- `model` (mlx-audio model path, qwen-asr model, or whisper model size)
+- `model` (mlx-audio model path, qwen-asr model, or FunASR model)
 - `language`
 - `output_file`
 - `save_original`
@@ -397,7 +409,7 @@ aimd/
 ### Core Components
 
 - **Application Layer**: `application/use_cases/*` owns orchestration and flow decisions.
-- **Infrastructure Layer**: `infrastructure/*` contains integrations (yt-dlp, pandoc, whisper runtimes).
+- **Infrastructure Layer**: `infrastructure/*` contains integrations (yt-dlp, pandoc, transcription runtimes).
 - **Adapter Layer**: `adapters/*` maps CLI/API/MCP inputs to use-cases and maps outputs back.
 - **Typed Error Contract**: `AimdError` subclasses provide consistent interface behavior.
 

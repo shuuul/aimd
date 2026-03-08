@@ -5,7 +5,7 @@ Infrastructure layer: concrete integrations and processing pipelines.
 ## Responsibilities
 
 - Capabilities detection and engine resolution.
-- Transcription backends (mlx-audio Qwen3-ASR / qwen-asr Qwen3-ASR / yap / faster-whisper).
+- Transcription backends (mlx-audio Qwen3-ASR / qwen-asr Qwen3-ASR / FunASR SenseVoiceSmall+Fun-ASR-Nano / yap).
 - URL extraction (yt-dlp, cookies, subtitles, audio fallback, subtitle formatting).
 - Document processing (pandoc `markdown_mmd-raw_html`, EPUB spine-ordered extraction + `epub_cleaner` post-processing, chunking/title logic).
 
