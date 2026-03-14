@@ -101,8 +101,8 @@ aimd/
 ## COMMANDS
 
 ```bash
-# Setup (--prerelease=allow needed for mlx-audio compatibility)
-uv sync --dev --upgrade --all-extras --prerelease=allow
+# Setup
+uv sync --dev --upgrade --all-extras
 
 # Code quality
 uv run ruff check --fix && uv run ruff format
@@ -130,7 +130,7 @@ uv run pytest
 
 ```bash
 # 1) Sync environment (if needed)
-uv sync --dev --upgrade --all-extras --prerelease=allow
+uv sync --dev --upgrade --all-extras
 
 # 2) Run hooks on all files
 uv run prek --all-files

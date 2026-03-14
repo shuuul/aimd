@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.7.0-blue)
+  ![Version](https://img.shields.io/badge/version-0.7.1-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -58,10 +58,8 @@ aimd --help
 # Clone and install for development
 git clone https://github.com/shuuul/aimd.git
 cd aimd
-uv sync --dev --upgrade --all-extras --prerelease=allow
-```
+uv sync --dev --upgrade --all-extras
 
-> **Note**: `--prerelease=allow` is required because mlx-audio depends on pre-release versions of some packages (e.g. transformers, huggingface-hub).
 
 ## Quick Start
 
@@ -358,8 +356,8 @@ The directory will be created automatically if it does not exist.
 git clone https://github.com/shuuul/aimd.git
 cd aimd
 
-# Install dependencies (--prerelease=allow needed for mlx-audio compatibility)
-uv sync --dev --upgrade --all-extras --prerelease=allow
+# Install dependencies
+uv sync --dev --upgrade --all-extras
 
 # Run code quality checks
 uv run ruff check --fix && uv run ruff format
