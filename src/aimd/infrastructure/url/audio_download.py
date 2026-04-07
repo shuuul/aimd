@@ -20,6 +20,26 @@ from .formatter import detect_platform
 from .ydl_client import impersonation_available
 
 
+_MAX_FILENAME_BYTES = 200
+
+
+def _truncate_to_bytes(name: str, max_bytes: int = _MAX_FILENAME_BYTES) -> str:
+    """Truncate a filename stem so its UTF-8 encoding stays within *max_bytes*.
+
+    Avoids splitting multi-byte characters by encoding one character at a time.
+    """
+    encoded = name.encode()
+    if len(encoded) <= max_bytes:
+        return name
+    truncated = bytearray()
+    for ch in name:
+        ch_bytes = ch.encode()
+        if len(truncated) + len(ch_bytes) > max_bytes:
+            break
+        truncated.extend(ch_bytes)
+    return truncated.decode()
+
+
 async def extract_content_from_audio(
     info_dict: dict[str, Any],
     url: str,
@@ -93,8 +113,10 @@ async def download_audio(
         if video_title:
             safe_title = "".join(
                 c if c.isalnum() or c in " -_" else "_" for c in video_title
-            )[:100]
-            audio_filename = safe_title.strip() or f"audio_{video_id}"
+            )
+            audio_filename = (
+                _truncate_to_bytes(safe_title.strip()) or f"audio_{video_id}"
+            )
         else:
             audio_filename = f"audio_{video_id}"
 
