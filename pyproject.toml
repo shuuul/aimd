@@ -19,7 +19,7 @@ dependencies = [
     "torchaudio>=2.9.1",
     "funasr>=1.3.1",
     "qwen-asr; sys_platform == 'linux'",
-    "mlx-audio>=0.4.1; sys_platform == 'darwin'",
+    "mlx-audio>=0.4.2; sys_platform == 'darwin'",
     "logly>=0.1.6",
     "typer>=0.20.0",
     "uvicorn>=0.35.0",
