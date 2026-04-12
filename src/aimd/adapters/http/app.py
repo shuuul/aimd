@@ -44,9 +44,10 @@ class ProcessRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Model for transcription. For mlx: HuggingFace model path. "
-        "For qwen: Qwen3-ASR model. For funasr: FunAudioLLM/SenseVoiceSmall (default) "
-        "or FunAudioLLM/Fun-ASR-Nano-2512.",
+        description="Model for transcription. For mlx: HuggingFace model path "
+        "(e.g. Qwen3-ASR or mlx-community/Fun-ASR-Nano-2512-4bit). "
+        "For qwen: Qwen3-ASR model. For funasr: FunAudioLLM/Fun-ASR-Nano-2512 (default) "
+        "or FunAudioLLM/SenseVoiceSmall.",
     )
     language: str | None = Field(
         default=None, description="Language code for transcription, e.g. zh, en, ja."

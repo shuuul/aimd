@@ -44,10 +44,10 @@ LANGUAGE_TO_YAP_LOCALE = {
 }
 
 # FunASR models (CPU/CUDA, via funasr)
-FUNASR_DEFAULT_MODEL = "FunAudioLLM/SenseVoiceSmall"
+FUNASR_DEFAULT_MODEL = "FunAudioLLM/Fun-ASR-Nano-2512"
 FUNASR_MODELS = {
-    "FunAudioLLM/SenseVoiceSmall": "SenseVoice Small (234M, multilingual, default)",
-    "FunAudioLLM/Fun-ASR-Nano-2512": "Fun-ASR-Nano (800M, 31 languages, lyric recognition)",
+    "FunAudioLLM/Fun-ASR-Nano-2512": "Fun-ASR-Nano (800M, 31 languages, lyric recognition, default)",
+    "FunAudioLLM/SenseVoiceSmall": "SenseVoice Small (234M, multilingual)",
 }
 
 # mlx-audio STT models (Apple Silicon, via mlx_audio.stt)
@@ -56,7 +56,11 @@ MLX_AUDIO_MODELS = {
     "mlx-community/Qwen3-ASR-0.6B-8bit": "Qwen3-ASR 0.6B (8-bit quantized)",
     "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized, default)",
     "mlx-community/parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3 (multilingual)",
+    "mlx-community/Fun-ASR-Nano-2512-4bit": "Fun-ASR-Nano 4-bit (mlx-audio-plus, multilingual)",
 }
+
+# Subset of MLX_AUDIO_MODELS loaded via mlx_audio.stt.models.funasr (not mlx_audio.stt.load)
+MLX_AUDIO_FUNASR_NANO_MODELS = frozenset({"mlx-community/Fun-ASR-Nano-2512-4bit"})
 
 # Qwen3-ASR models (Linux/CUDA, via qwen-asr)
 QWEN_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"

@@ -25,6 +25,7 @@ dependencies = [
     "uvicorn>=0.35.0",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "mcp>=1.18.0",
+    "mlx-audio-plus>=0.1.6; sys_platform == 'darwin'",
 ]
 
 [build-system]

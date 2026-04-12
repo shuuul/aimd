@@ -76,9 +76,10 @@ def process(
         None,
         "--model",
         "-m",
-        help="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-8bit (default). "
+        help="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-8bit (default), "
+        "or mlx-community/Fun-ASR-Nano-2512-4bit (Fun-ASR-Nano via mlx-audio-plus). "
         "For qwen: Qwen/Qwen3-ASR-1.7B (default). "
-        "For funasr: FunAudioLLM/SenseVoiceSmall (default) or FunAudioLLM/Fun-ASR-Nano-2512.",
+        "For funasr: FunAudioLLM/Fun-ASR-Nano-2512 (default) or FunAudioLLM/SenseVoiceSmall.",
     ),
     language: Optional[str] = typer.Option(
         None,

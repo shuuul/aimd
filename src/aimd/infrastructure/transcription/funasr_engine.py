@@ -53,7 +53,7 @@ async def transcribe_audio_funasr(
     model: str | None = None,
     language: str | None = None,
 ) -> str:
-    """Transcribe audio using FunASR (SenseVoiceSmall / Fun-ASR-Nano)."""
+    """Transcribe audio using FunASR (Fun-ASR-Nano / SenseVoiceSmall)."""
     try:
         import funasr  # type: ignore[import-untyped]  # noqa: F401
     except ImportError:

@@ -87,7 +87,7 @@ aimd audio.mp3 --engine auto
 # Specify transcription engine explicitly
 aimd audio.wav --engine mlx       # Apple Silicon (default on macOS)
 aimd audio.wav --engine qwen      # Linux/CUDA (Qwen3-ASR, default on Linux)
-aimd audio.wav --engine funasr    # CPU/CUDA (SenseVoiceSmall, cross-platform fallback)
+aimd audio.wav --engine funasr    # CPU/CUDA (Fun-ASR-Nano, cross-platform fallback)
 aimd audio.wav --engine yap       # macOS (Apple Speech framework)
 
 # Select a specific model (mlx engine)
@@ -105,7 +105,7 @@ aimd lecture.mp3 -o meeting_notes.md
 - **`auto`** (default): Automatically selects the best engine for your platform
 - **`mlx`**: Apple Silicon only, uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) STT (Qwen3-ASR-1.7B-8bit by default). Highest priority on macOS.
 - **`qwen`**: Linux + CUDA, uses [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) via `qwen-asr` (Qwen3-ASR-1.7B by default). Highest priority on Linux.
-- **`funasr`**: CPU/CUDA, uses [FunASR](https://github.com/modelscope/FunASR) (SenseVoiceSmall by default). Cross-platform fallback engine.
+- **`funasr`**: CPU/CUDA, uses [FunASR](https://github.com/modelscope/FunASR) (Fun-ASR-Nano by default). Cross-platform fallback engine.
 - **`yap`**: macOS-only, uses Apple Speech framework (requires [yap CLI](https://github.com/finnvoor/yap))
 
 #### Auto-Selection Priority
@@ -124,8 +124,11 @@ The `mlx` engine supports multiple models via `--model` / `-m`:
 | `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B, 8-bit quantized **(default)** |
 | `mlx-community/Qwen3-ASR-0.6B-8bit` | Qwen3-ASR 0.6B, 8-bit quantized (faster, lighter) |
 | `mlx-community/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (multilingual) |
+| `mlx-community/Fun-ASR-Nano-2512-4bit` | Fun-ASR-Nano 4-bit ([mlx-audio-plus](https://huggingface.co/mlx-community/Fun-ASR-Nano-2512-4bit)) |
 
 Supported languages for Qwen3-ASR (mlx): Chinese, English, Japanese, Korean, German, Spanish, French, Italian, Portuguese, Russian.
+
+For **Fun-ASR-Nano** (`-m mlx-community/Fun-ASR-Nano-2512-4bit`), pass `-l` with a short code (`en`, `zh`, `ja`, …) or omit it for `auto` language handling.
 
 #### Qwen3-ASR Model Selection (Linux)
 
@@ -144,14 +147,16 @@ The `funasr` engine supports models via `--model` / `-m`:
 
 | Model | Description |
 |-------|-------------|
-| `FunAudioLLM/SenseVoiceSmall` | SenseVoice Small, 234M params, multilingual **(default)** |
-| `FunAudioLLM/Fun-ASR-Nano-2512` | Fun-ASR-Nano, 800M params, 31 languages, lyric recognition |
+| `FunAudioLLM/Fun-ASR-Nano-2512` | Fun-ASR-Nano, 800M params, 31 languages, lyric recognition **(default)** |
+| `FunAudioLLM/SenseVoiceSmall` | SenseVoice Small, 234M params, multilingual |
 
-SenseVoiceSmall supports ASR, language identification, speech emotion recognition, and audio event detection. Fun-ASR-Nano supports 31 languages with mixed-language recognition and regional accent support.
+Fun-ASR-Nano supports 31 languages with mixed-language recognition and regional accent support. SenseVoiceSmall adds language identification, speech emotion recognition, and audio event detection.
 
 The `funasr` engine automatically uses CUDA when available, otherwise falls back to CPU.
 
 > **Note on MPS (Apple Silicon GPU)**: FunASR does not officially support MPS. While a source-code patch can enable MPS with ~2.4x speedup, this requires modifying FunASR internals. On macOS, use the `mlx` engine instead for native Apple Silicon acceleration.
+
+> **MLX vs PyTorch Fun-ASR-Nano**: `--engine mlx -m mlx-community/Fun-ASR-Nano-2512-4bit` uses **mlx-audio-plus**’s MLX Fun-ASR-Nano loader. `--engine funasr` uses PyTorch **FunAudioLLM/Fun-ASR-Nano-2512** instead. Pick one stack per run; both are optional alternatives to Qwen3-ASR on mlx.
 
 ### Video URL Processing
 

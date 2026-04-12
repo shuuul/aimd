@@ -76,7 +76,7 @@ aimd/
 | CLI behavior | `src/aimd/adapters/cli/app.py` | Typer command and output persistence |
 | MCP tools | `src/aimd/adapters/mcp/server.py` | `healthz`, `list_engines`, `process_input` |
 | Engine preflight | `src/aimd/infrastructure/capabilities/detector.py` | availability + auto-resolution |
-| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), FunASR (SenseVoiceSmall/Fun-ASR-Nano), yap |
+| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), FunASR (Fun-ASR-Nano/SenseVoiceSmall), yap |
 | URL extraction | `src/aimd/infrastructure/url/` | cookie source fallback + subtitle/audio logic |
 | Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion (`markdown_mmd-raw_html`), split logic, EPUB extraction |
 | EPUB pipeline | `src/aimd/infrastructure/documents/epub_processor.py` | Spine-ordered chapters, pandoc CLI subprocess, flat image extraction |
@@ -158,7 +158,8 @@ Recommended maintenance:
   - non-macOS (Linux): `qwen -> funasr`
 - mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR-1.7B-8bit by default.
 - qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with Qwen/Qwen3-ASR-1.7B by default (Linux + CUDA).
-- funasr engine uses [FunASR](https://github.com/modelscope/FunASR) with SenseVoiceSmall by default (CPU/CUDA). Also supports Fun-ASR-Nano-2512.
+- funasr engine uses [FunASR](https://github.com/modelscope/FunASR) with Fun-ASR-Nano-2512 by default (CPU/CUDA). Also supports SenseVoiceSmall.
+- MLX Fun-ASR-Nano: `-m mlx-community/Fun-ASR-Nano-2512-4bit` with `--engine mlx` uses `mlx_audio.stt.models.funasr` (**mlx-audio-plus**); Qwen3/Parakeet still use `mlx_audio.stt.load`.
 - FunASR does not officially support MPS (Apple Silicon GPU). On macOS, use `mlx` instead.
 - `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or FunASR model).
 - `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.
