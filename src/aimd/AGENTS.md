@@ -17,7 +17,7 @@ Core package organized with ports/adapters architecture.
 
 ## TEMP DIRECTORY
 
-All temporary file operations (audio downloads, yap output, EPUB extraction) use
+All temporary file operations (audio downloads, EPUB extraction) use
 Python's `tempfile` module with a configurable base directory:
 
 - **CLI**: `--temp-dir` option (also reads `AIMD_TEMP_DIR` env var)

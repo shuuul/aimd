@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.7.2-blue)
+  ![Version](https://img.shields.io/badge/version-0.7.3-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -14,7 +14,7 @@ Context preparation tool for LLM workflows - Transcribe audio/video and convert 
 ## Features
 
 - **Auto-Detection**: Automatically detects input type (audio, video, URL, document)
-- **Multi-Engine Audio Transcription**: Support for mlx-audio (Apple Silicon), Qwen3-ASR (Linux/CUDA), FunASR (CPU/CUDA), yap (macOS)
+- **Multi-Engine Audio Transcription**: Fun-ASR-Nano via **FunASR** (PyTorch, CPU/CUDA) and **mlx-audio-plus** (Apple Silicon MLX)
 - **Unified Video Platform Support**: Extract content from 1000+ video platforms including YouTube, Bilibili using yt-dlp
 - **Document Conversion**: Convert EPUB, PDF, TXT, and other formats to markdown using Pandoc
 
@@ -45,11 +45,28 @@ uv tool install git+https://github.com/shuuul/aimd
 ### Install via uv (Recommended)
 
 ```bash
-# Install from GitHub repository
+# Install from GitHub repository (CLI-only dependency set by default)
 uv tool install git+https://github.com/shuuul/aimd
+
+# Same, but include HTTP API + MCP entrypoints (`aimd-api`, `aimd-mcp`)
+pip install "git+https://github.com/shuuul/aimd.git[api,mcp]"
 
 # Verify installation
 aimd --help
+```
+
+### Optional extras
+
+| Extra | Purpose | Entrypoints |
+|-------|---------|-------------|
+| `api` | FastAPI HTTP server | `aimd-api` |
+| `mcp` | MCP server (stdio) | `aimd-mcp` |
+
+```bash
+pip install 'aimd[api]'          # HTTP API only
+pip install 'aimd[mcp]'         # MCP only
+pip install 'aimd[api,mcp]'      # both
+uv sync --extra api --extra mcp  # same, in a uv project
 ```
 
 ### Development Setup
@@ -58,7 +75,8 @@ aimd --help
 # Clone and install for development
 git clone https://github.com/shuuul/aimd.git
 cd aimd
-uv sync --dev --upgrade --all-extras
+# Dev group includes API/MCP deps for tests; core install is CLI-only
+uv sync --dev --upgrade
 
 
 ## Quick Start
@@ -85,13 +103,11 @@ aimd interview.wav -l zh          # Specify language
 aimd audio.mp3 --engine auto
 
 # Specify transcription engine explicitly
-aimd audio.wav --engine mlx       # Apple Silicon (default on macOS)
-aimd audio.wav --engine qwen      # Linux/CUDA (Qwen3-ASR, default on Linux)
-aimd audio.wav --engine funasr    # CPU/CUDA (Fun-ASR-Nano, cross-platform fallback)
-aimd audio.wav --engine yap       # macOS (Apple Speech framework)
+aimd audio.wav --engine mlx       # Apple Silicon, Fun-ASR-Nano MLX (default on macOS)
+aimd audio.wav --engine funasr    # Fun-ASR-Nano PyTorch (default on Linux / fallback)
 
-# Select a specific model (mlx engine)
-aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-0.6B-8bit
+# Select a specific model (mlx defaults to Fun-ASR-Nano 4-bit)
+aimd audio.wav -e mlx -m mlx-community/Fun-ASR-Nano-2512-4bit
 
 # Process with specific language
 aimd interview.m4a --language zh
@@ -103,43 +119,25 @@ aimd lecture.mp3 -o meeting_notes.md
 #### Available Transcription Engines
 
 - **`auto`** (default): Automatically selects the best engine for your platform
-- **`mlx`**: Apple Silicon only, uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) STT (Qwen3-ASR-1.7B-8bit by default). Highest priority on macOS.
-- **`qwen`**: Linux + CUDA, uses [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) via `qwen-asr` (Qwen3-ASR-1.7B by default). Highest priority on Linux.
-- **`funasr`**: CPU/CUDA, uses [FunASR](https://github.com/modelscope/FunASR) (Fun-ASR-Nano by default). Cross-platform fallback engine.
-- **`yap`**: macOS-only, uses Apple Speech framework (requires [yap CLI](https://github.com/finnvoor/yap))
+- **`mlx`**: Apple Silicon only; [mlx-audio-plus](https://huggingface.co/mlx-community/Fun-ASR-Nano-2512-4bit) Fun-ASR-Nano (**default** on macOS when available).
+- **`funasr`**: [FunASR](https://github.com/modelscope/FunASR) with **FunAudioLLM/Fun-ASR-Nano-2512** by default; CPU or CUDA. **Default** on Linux and cross-platform fallback.
 
 #### Auto-Selection Priority
 
 | Platform | Priority |
 |----------|----------|
-| macOS (Apple Silicon) | `mlx` → `yap` → `funasr` |
-| Linux | `qwen` → `funasr` |
+| macOS (Apple Silicon) | `mlx` → `funasr` |
+| Linux / Windows / other | `funasr` |
 
 #### MLX Model Selection
 
-The `mlx` engine supports multiple models via `--model` / `-m`:
+The `mlx` engine uses Fun-ASR-Nano via `--model` / `-m`:
 
 | Model | Description |
 |-------|-------------|
-| `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B, 8-bit quantized **(default)** |
-| `mlx-community/Qwen3-ASR-0.6B-8bit` | Qwen3-ASR 0.6B, 8-bit quantized (faster, lighter) |
-| `mlx-community/parakeet-tdt-0.6b-v3` | Parakeet TDT 0.6B v3 (multilingual) |
-| `mlx-community/Fun-ASR-Nano-2512-4bit` | Fun-ASR-Nano 4-bit ([mlx-audio-plus](https://huggingface.co/mlx-community/Fun-ASR-Nano-2512-4bit)) |
+| `mlx-community/Fun-ASR-Nano-2512-4bit` | Fun-ASR-Nano 4-bit **(default)** ([mlx-audio-plus](https://huggingface.co/mlx-community/Fun-ASR-Nano-2512-4bit)) |
 
-Supported languages for Qwen3-ASR (mlx): Chinese, English, Japanese, Korean, German, Spanish, French, Italian, Portuguese, Russian.
-
-For **Fun-ASR-Nano** (`-m mlx-community/Fun-ASR-Nano-2512-4bit`), pass `-l` with a short code (`en`, `zh`, `ja`, …) or omit it for `auto` language handling.
-
-#### Qwen3-ASR Model Selection (Linux)
-
-The `qwen` engine supports models via `--model` / `-m`:
-
-| Model | Description |
-|-------|-------------|
-| `Qwen/Qwen3-ASR-1.7B` | Qwen3-ASR 1.7B **(default)** |
-| `Qwen/Qwen3-ASR-0.6B` | Qwen3-ASR 0.6B (faster, lighter) |
-
-The `qwen` engine supports 52 languages with auto-detection. Specify a language with `-l` (e.g. `zh`, `en`, `ja`, `ko`, `de`, `fr`, `es`, `ar`, `hi`, `th`, `vi`, etc.).
+Pass `-l` with a short code (`en`, `zh`, `ja`, …) or omit it for `auto` language handling.
 
 #### FunASR Model Selection
 
@@ -156,7 +154,7 @@ The `funasr` engine automatically uses CUDA when available, otherwise falls back
 
 > **Note on MPS (Apple Silicon GPU)**: FunASR does not officially support MPS. While a source-code patch can enable MPS with ~2.4x speedup, this requires modifying FunASR internals. On macOS, use the `mlx` engine instead for native Apple Silicon acceleration.
 
-> **MLX vs PyTorch Fun-ASR-Nano**: `--engine mlx -m mlx-community/Fun-ASR-Nano-2512-4bit` uses **mlx-audio-plus**’s MLX Fun-ASR-Nano loader. `--engine funasr` uses PyTorch **FunAudioLLM/Fun-ASR-Nano-2512** instead. Pick one stack per run; both are optional alternatives to Qwen3-ASR on mlx.
+> **MLX vs PyTorch Fun-ASR-Nano**: `--engine mlx -m mlx-community/Fun-ASR-Nano-2512-4bit` uses **mlx-audio-plus** on Apple Silicon. `--engine funasr` uses PyTorch **FunAudioLLM/Fun-ASR-Nano-2512**. Pick one stack per run.
 
 ### Video URL Processing
 
@@ -289,7 +287,7 @@ Available MCP tools:
 `process_input` mirrors the API/CLI behavior and supports:
 - `input_source`
 - `transcribe_engine`
-- `model` (mlx-audio model path, qwen-asr model, or FunASR model)
+- `model` (mlx Fun-ASR-Nano path or FunASR model id)
 - `language`
 - `output_file`
 - `save_original`
@@ -330,9 +328,6 @@ Thanks to yt-dlp integration, aimd supports content extraction from:
 export YT_DLP_CONFIG_HOME="/path/to/config"
 export YT_DLP_CACHE_DIR="/path/to/cache"
 
-# Optional: yap engine configuration (macOS only)
-export YAP_MODEL_PATH="/path/to/custom/model"
-
 # Optional: custom temporary directory for intermediate files
 # Useful for sandboxed environments where /tmp is not writable
 export AIMD_TEMP_DIR="/path/to/writable/tmp"
@@ -361,8 +356,8 @@ The directory will be created automatically if it does not exist.
 git clone https://github.com/shuuul/aimd.git
 cd aimd
 
-# Install dependencies
-uv sync --dev --upgrade --all-extras
+# Install dependencies (dev group includes API/MCP libs for tests)
+uv sync --dev --upgrade
 
 # Run code quality checks
 uv run ruff check --fix && uv run ruff format

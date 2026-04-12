@@ -1,4 +1,4 @@
-"""mlx-audio STT transcription engine implementation."""
+"""mlx-audio-plus Fun-ASR-Nano STT (Apple Silicon only)."""
 
 import asyncio
 import platform
@@ -9,11 +9,7 @@ from pathlib import Path
 
 from logly import logger
 
-from ...const import (
-    MLX_AUDIO_DEFAULT_MODEL,
-    MLX_AUDIO_FUNASR_NANO_MODELS,
-    MLX_AUDIO_MODELS,
-)
+from ...const import MLX_AUDIO_DEFAULT_MODEL, MLX_AUDIO_MODELS
 from ...errors import ProcessingFailedError, UnsupportedInputError
 from ...platform_utils import is_apple_silicon
 
@@ -31,23 +27,6 @@ LANGUAGE_CODE_TO_NAME = {
     "pt": "Portuguese",
     "ru": "Russian",
 }
-
-
-def _resolve_language(language: str | None) -> str:
-    """Map short language codes to full names expected by mlx-audio."""
-    if language is None:
-        return "Chinese"
-    lang = language.lower()
-    if lang in LANGUAGE_CODE_TO_NAME:
-        return LANGUAGE_CODE_TO_NAME[lang]
-    for full_name in LANGUAGE_CODE_TO_NAME.values():
-        if lang == full_name.lower():
-            return full_name
-    raise UnsupportedInputError(
-        f"Unsupported language for mlx engine: '{language}'. "
-        f"Supported: {list(LANGUAGE_CODE_TO_NAME.keys())}"
-    )
-
 
 _FUNASR_LANG_CODES = frozenset(
     {
@@ -123,7 +102,7 @@ async def transcribe_audio_mlx(
     model: str | None = None,
     language: str | None = None,
 ) -> str:
-    """Transcribe audio using mlx-audio STT (Apple Silicon only)."""
+    """Transcribe audio using Fun-ASR-Nano via mlx-audio-plus (Apple Silicon only)."""
     if platform.system() != "Darwin":
         raise ProcessingFailedError("mlx engine is only available on macOS")
 
@@ -137,17 +116,7 @@ async def transcribe_audio_mlx(
             f"Available: {list(MLX_AUDIO_MODELS.keys())}"
         )
 
-    is_funasr_nano = resolved_model in MLX_AUDIO_FUNASR_NANO_MODELS
-    if is_funasr_nano:
-        resolved_language = _resolve_funasr_nano_language(language)
-    else:
-        try:
-            from mlx_audio.stt import load as load_stt
-        except ImportError:
-            raise ProcessingFailedError(
-                "mlx-audio library is not installed. Install it: pip install mlx-audio"
-            ) from None
-        resolved_language = _resolve_language(language)
+    resolved_language = _resolve_funasr_nano_language(language)
 
     logger.info(
         f"Transcribing with mlx-audio model: {resolved_model}, language: {resolved_language}"
@@ -159,19 +128,14 @@ async def transcribe_audio_mlx(
         audio_path = wav_path or file_path
 
         def _transcribe() -> str:
-            if is_funasr_nano:
-                try:
-                    from mlx_audio.stt.models.funasr import Model as FunASRNanoModel
-                except ImportError as e:
-                    raise ProcessingFailedError(
-                        "Fun-ASR-Nano (MLX) requires mlx-audio-plus. "
-                        "Install dependencies (e.g. uv sync) so mlx-audio-plus is present."
-                    ) from e
-                stt_model = FunASRNanoModel.from_pretrained(resolved_model)
-                result = stt_model.generate(str(audio_path), language=resolved_language)
-                return result.text.strip()
-
-            stt_model = load_stt(resolved_model)
+            try:
+                from mlx_audio.stt.models.funasr import Model as FunASRNanoModel
+            except ImportError as e:
+                raise ProcessingFailedError(
+                    "Fun-ASR-Nano (MLX) requires mlx-audio-plus. "
+                    "Install dependencies (e.g. uv sync) so mlx-audio-plus is present."
+                ) from e
+            stt_model = FunASRNanoModel.from_pretrained(resolved_model)
             result = stt_model.generate(str(audio_path), language=resolved_language)
             return result.text.strip()
 

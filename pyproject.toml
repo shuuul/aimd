@@ -1,6 +1,6 @@
 [project]
 name = "aimd"
-version = "0.7.3"
+version = "0.8.0"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [
@@ -8,8 +8,6 @@ authors = [
 ]
 requires-python = ">=3.10, <3.13"
 dependencies = [
-    "aiohttp>=3.12.15",
-    "fastapi>=0.116.1",
     "pandoc>=2.4",
     "pydantic>=2.0.0",
     "python-dotenv>=1.1.1",
@@ -19,14 +17,20 @@ dependencies = [
     "torchaudio>=2.9.1",
     "funasr @ git+https://github.com/modelscope/FunASR.git@b842ff8107e1da950947ada0d11ae3c008baeb54",
     "tiktoken>=0.5.0",
-    "qwen-asr; sys_platform == 'linux'",
-    "mlx-audio>=0.4.2; sys_platform == 'darwin'",
+    "transformers>=4.40.0",
     "logly>=0.1.6",
     "typer>=0.20.0",
-    "uvicorn>=0.35.0",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
-    "mcp>=1.18.0",
     "mlx-audio-plus>=0.1.6; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+]
+mcp = [
+    "mcp>=1.18.0",
 ]
 
 [build-system]
@@ -46,6 +50,9 @@ dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=1.1.0",
     "ruff>=0.12.8",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+    "mcp>=1.18.0",
 ]
 
 [tool.uv.sources]
@@ -68,3 +75,8 @@ explicit = true
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[tool.ruff.lint.per-file-ignores]
+# Lazy exports via PEP 562 __getattr__; names resolve at runtime when api/mcp extras are installed.
+"src/aimd/api.py" = ["F822"]
+"src/aimd/mcp.py" = ["F822"]

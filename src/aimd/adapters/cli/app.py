@@ -70,15 +70,13 @@ def process(
         "auto",
         "--engine",
         "-e",
-        help="Transcription engine: mlx (Apple Silicon), qwen (Linux/CUDA), funasr (CPU/CUDA), yap (macOS).",
+        help="Transcription engine: mlx (Apple Silicon, Fun-ASR-Nano MLX), funasr (CPU/CUDA, Fun-ASR-Nano default).",
     ),
     model: Optional[str] = typer.Option(
         None,
         "--model",
         "-m",
-        help="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-8bit (default), "
-        "or mlx-community/Fun-ASR-Nano-2512-4bit (Fun-ASR-Nano via mlx-audio-plus). "
-        "For qwen: Qwen/Qwen3-ASR-1.7B (default). "
+        help="Model for transcription. For mlx: mlx-community/Fun-ASR-Nano-2512-4bit (default). "
         "For funasr: FunAudioLLM/Fun-ASR-Nano-2512 (default) or FunAudioLLM/SenseVoiceSmall.",
     ),
     language: Optional[str] = typer.Option(

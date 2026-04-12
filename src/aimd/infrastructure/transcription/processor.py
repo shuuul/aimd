@@ -4,28 +4,12 @@ from pathlib import Path
 
 from logly import logger
 
-from ...const import AUDIO_EXTENSIONS, LANGUAGE_TO_YAP_LOCALE
+from ...const import AUDIO_EXTENSIONS
 from ...errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
 from .funasr_engine import transcribe_audio_funasr
 from .mlx_engine import transcribe_audio_mlx
-from .qwen_engine import transcribe_audio_qwen
 from .resolver import resolve_engine_with_preflight
-from .yap_engine import transcribe_audio_yap
-
-
-def _language_to_yap_locale(language: str | None) -> str:
-    if language is None:
-        return "zh_CN"
-
-    lang = language.lower()
-    if lang in LANGUAGE_TO_YAP_LOCALE:
-        return LANGUAGE_TO_YAP_LOCALE[lang]
-
-    raise UnsupportedInputError(
-        f"Unsupported language for yap engine: '{language}'. "
-        f"Supported: {list(LANGUAGE_TO_YAP_LOCALE.keys())}"
-    )
 
 
 async def get_text_from_audio(
@@ -59,20 +43,8 @@ async def get_text_from_audio(
     logger.info(f"Using transcription engine: {actual_engine}")
 
     try:
-        if actual_engine == "yap":
-            transcribed_text = await transcribe_audio_yap(
-                file_path,
-                _language_to_yap_locale(language),
-                temp_dir=temp_dir,
-            )
-        elif actual_engine == "mlx":
+        if actual_engine == "mlx":
             transcribed_text = await transcribe_audio_mlx(
-                file_path,
-                model=model,
-                language=language,
-            )
-        elif actual_engine == "qwen":
-            transcribed_text = await transcribe_audio_qwen(
                 file_path,
                 model=model,
                 language=language,

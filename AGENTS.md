@@ -39,7 +39,7 @@ aimd/
 │   ├── infrastructure/
 │   │   ├── capabilities/
 │   │   │   └── detector.py       # Engine preflight checks
-│   │   ├── transcription/        # mlx-audio/qwen-asr/funasr/yap execution
+│   │   ├── transcription/        # mlx-audio-plus Fun-ASR-Nano / FunASR PyTorch
 │   │   ├── documents/            # Pandoc + EPUB + chunking pipeline
 │   │   │   ├── epub_processor.py # Spine-ordered EPUB extraction via pandoc CLI
 │   │   │   ├── epub_cleaner.py   # Post-processing cleanup for EPUB markdown
@@ -76,7 +76,7 @@ aimd/
 | CLI behavior | `src/aimd/adapters/cli/app.py` | Typer command and output persistence |
 | MCP tools | `src/aimd/adapters/mcp/server.py` | `healthz`, `list_engines`, `process_input` |
 | Engine preflight | `src/aimd/infrastructure/capabilities/detector.py` | availability + auto-resolution |
-| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio (Qwen3-ASR), qwen-asr (Qwen3-ASR), FunASR (Fun-ASR-Nano/SenseVoiceSmall), yap |
+| Audio transcription | `src/aimd/infrastructure/transcription/` | mlx-audio-plus Fun-ASR-Nano (MLX), FunASR PyTorch (Fun-ASR-Nano / SenseVoiceSmall) |
 | URL extraction | `src/aimd/infrastructure/url/` | cookie source fallback + subtitle/audio logic |
 | Document conversion | `src/aimd/infrastructure/documents/` | Pandoc conversion (`markdown_mmd-raw_html`), split logic, EPUB extraction |
 | EPUB pipeline | `src/aimd/infrastructure/documents/epub_processor.py` | Spine-ordered chapters, pandoc CLI subprocess, flat image extraction |
@@ -101,8 +101,8 @@ aimd/
 ## COMMANDS
 
 ```bash
-# Setup
-uv sync --dev --upgrade --all-extras
+# Setup (dev group includes fastapi/uvicorn/mcp for tests; core package is CLI-first)
+uv sync --dev --upgrade
 
 # Code quality
 uv run ruff check --fix && uv run ruff format
@@ -130,7 +130,7 @@ uv run pytest
 
 ```bash
 # 1) Sync environment (if needed)
-uv sync --dev --upgrade --all-extras
+uv sync --dev --upgrade
 
 # 2) Run hooks on all files
 uv run prek --all-files
@@ -152,16 +152,15 @@ Recommended maintenance:
 
 ## NOTES
 
+- **Dependencies**: Core install is **CLI-first** (`aimd`). Optional extras: `api` (FastAPI + uvicorn → `aimd-api`), `mcp` (`aimd-mcp`). Development uses `uv sync --dev`, which includes those packages so API/MCP tests run without extra flags.
 - API routes: `/healthz`, `/v1/engines`, `/v1/process`.
 - Engine auto priority:
-  - macOS: `mlx -> yap -> funasr`
-  - non-macOS (Linux): `qwen -> funasr`
-- mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR-1.7B-8bit by default.
-- qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with Qwen/Qwen3-ASR-1.7B by default (Linux + CUDA).
+  - macOS: `mlx -> funasr`
+  - non-macOS: `funasr`
+- mlx engine uses [mlx-audio-plus](https://huggingface.co/mlx-community/Fun-ASR-Nano-2512-4bit) Fun-ASR-Nano (`mlx_audio.stt.models.funasr`) by default on Apple Silicon.
 - funasr engine uses [FunASR](https://github.com/modelscope/FunASR) with Fun-ASR-Nano-2512 by default (CPU/CUDA). Also supports SenseVoiceSmall.
-- MLX Fun-ASR-Nano: `-m mlx-community/Fun-ASR-Nano-2512-4bit` with `--engine mlx` uses `mlx_audio.stt.models.funasr` (**mlx-audio-plus**); Qwen3/Parakeet still use `mlx_audio.stt.load`.
 - FunASR does not officially support MPS (Apple Silicon GPU). On macOS, use `mlx` instead.
-- `--model` / `-m` CLI option selects the transcription model (mlx-audio path, qwen-asr model, or FunASR model).
+- `--model` / `-m` CLI option selects the transcription model (mlx Fun-ASR-Nano id or FunASR model id).
 - `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.
 - EPUB pipeline: spine-based chapter ordering (container.xml → OPF → manifest + spine), pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing via `epub_cleaner.clean_markdown`.
 - EPUB output layout: `book_name/{book_name.md, chapters/, images/}`. Chapters named after original HTML stems; combined file uses `---` separators.
