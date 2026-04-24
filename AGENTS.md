@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-08
-**Commit:** c7d5e24 (v0.6.5)
+**Generated:** 2026-04-24
+**Commit:** 87b5255 (v0.8.1)
 **Branch:** main
 
 ## OVERVIEW
@@ -158,7 +158,7 @@ Recommended maintenance:
   - macOS: `mlx -> funasr`
   - non-macOS: `funasr`
 - mlx engine uses [mlx-audio-plus](https://huggingface.co/mlx-community/Fun-ASR-Nano-2512-4bit) Fun-ASR-Nano (`mlx_audio.stt.models.funasr`) by default on Apple Silicon.
-- funasr engine uses [FunASR](https://github.com/modelscope/FunASR) with Fun-ASR-Nano-2512 by default (CPU/CUDA). Also supports SenseVoiceSmall.
+- funasr engine uses [FunASR](https://github.com/modelscope/FunASR) with Fun-ASR-Nano-2512 by default. Also supports SenseVoiceSmall. `torch`/`torchaudio` install from the CPU wheel index on macOS; on other platforms they resolve from default PyPI (CPU build — no explicit CUDA index configured).
 - FunASR does not officially support MPS (Apple Silicon GPU). On macOS, use `mlx` instead.
 - `--model` / `-m` CLI option selects the transcription model (mlx Fun-ASR-Nano id or FunASR model id).
 - `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.

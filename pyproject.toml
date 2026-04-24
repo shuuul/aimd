@@ -1,6 +1,6 @@
 [project]
 name = "aimd"
-version = "0.8.0"
+version = "0.8.1"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [
@@ -57,23 +57,16 @@ dev = [
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
-    { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" },
+    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" }
 ]
 torchaudio = [
-    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
-    { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" },
+    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" }
 ]
 
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.ruff.lint.per-file-ignores]
