@@ -3,7 +3,7 @@
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yt_dlp
 from logly import logger
@@ -14,6 +14,7 @@ from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
     is_auth_required_error,
+    is_cookie_source_unavailable_error,
     is_keyring_error,
 )
 from .formatter import detect_platform
@@ -207,7 +208,7 @@ async def try_download_with_format(
         return ydl_opts
 
     def _download_with_source(cookie_source: dict[str, Any]) -> None:
-        with yt_dlp.YoutubeDL(_build_download_opts(cookie_source)) as ydl:
+        with yt_dlp.YoutubeDL(cast(Any, _build_download_opts(cookie_source))) as ydl:
             ydl.download([url])
 
     sources = build_cookie_sources(
@@ -218,6 +219,8 @@ async def try_download_with_format(
 
     loop = asyncio.get_running_loop()
     last_error: Exception | None = None
+    auth_required_seen = False
+    cookie_source_issue_seen = False
 
     for source in sources:
         try:
@@ -225,14 +228,16 @@ async def try_download_with_format(
             break
         except Exception as exc:
             last_error = exc
-            if is_keyring_error(exc) or is_auth_required_error(exc):
+            if is_auth_required_error(exc):
+                auth_required_seen = True
+                continue
+            if is_keyring_error(exc) or is_cookie_source_unavailable_error(exc):
+                cookie_source_issue_seen = True
                 continue
             continue
 
-    if (
-        last_error
-        and platform in AUTH_REQUIRED_PLATFORMS
-        and is_auth_required_error(last_error)
+    if platform in AUTH_REQUIRED_PLATFORMS and (
+        auth_required_seen or cookie_source_issue_seen
     ):
         raise ProcessingFailedError(
             "Authenticated cookies are required for this download. "

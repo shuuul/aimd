@@ -13,6 +13,7 @@ from aimd.infrastructure.url.cookies import (
     is_auth_required_error,
     parse_cookies_from_browser,
 )
+from aimd.infrastructure.url.video_info import extract_video_info
 from aimd.infrastructure.url.processor import get_text_from_url
 from aimd.infrastructure.url.subtitles import get_preferred_languages
 
@@ -168,6 +169,7 @@ def test_build_cookie_sources_order_and_fallback() -> None:
 def test_is_auth_required_error_patterns() -> None:
     assert is_auth_required_error(RuntimeError("login required for this content"))
     assert is_auth_required_error(RuntimeError("private playlist -403"))
+    assert is_auth_required_error(RuntimeError("HTTP Error 412: Precondition Failed"))
     assert not is_auth_required_error(RuntimeError("temporary network timeout"))
 
 
@@ -193,6 +195,43 @@ async def test_auth_required_failure_surfaces_cookie_hint(monkeypatch) -> None:
         ProcessingFailedError, match="Authenticated cookies are required"
     ):
         await get_text_from_url("https://www.bilibili.com/video/BV1")
+
+
+@pytest.mark.asyncio
+async def test_extract_video_info_surfaces_cookie_hint_after_bilibili_412(
+    monkeypatch,
+) -> None:
+    class _FakeYDL:
+        def __init__(self, source_name: str) -> None:
+            self.source_name = source_name
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract_info(self, url: str, download: bool = False):  # noqa: ARG002
+            if self.source_name == "cookiesfrombrowser:chrome:default":
+                raise RuntimeError("HTTP Error 412: Precondition Failed")
+            raise RuntimeError("could not find firefox cookies database")
+
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.video_info.create_ydl",
+        lambda *, platform, cookie_source, for_subtitles: _FakeYDL(  # noqa: ARG005
+            cookie_source["name"]
+        ),
+    )
+
+    with pytest.raises(
+        ProcessingFailedError, match="Authenticated cookies are required"
+    ):
+        await extract_video_info(
+            url="https://www.bilibili.com/video/BV1iVoVBgERD/",
+            platform="bilibili",
+            cookies_file=None,
+            cookies_from_browser=None,
+        )
 
 
 @pytest.mark.asyncio
@@ -311,6 +350,66 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
     )
     assert result_with_codec is not None
     assert seen_opts[-1]["postprocessors"][0]["preferredcodec"] == "m4a"
+
+
+@pytest.mark.asyncio
+async def test_try_download_with_format_surfaces_cookie_hint_after_bilibili_412(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class _FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def download(self, urls):  # noqa: ARG002
+            browser_name = self.opts["cookiesfrombrowser"][0]
+            if browser_name == "chrome":
+                raise RuntimeError("HTTP Error 412: Precondition Failed")
+            raise RuntimeError("could not find firefox cookies database")
+
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.audio_download.build_cookie_sources",
+        lambda **kwargs: [  # noqa: ARG005
+            {
+                "name": "cookiesfrombrowser:chrome:default",
+                "use_cookies": True,
+                "cookiefile": None,
+                "cookiesfrombrowser": ("chrome", "default", None, None),
+            },
+            {
+                "name": "cookiesfrombrowser:firefox",
+                "use_cookies": True,
+                "cookiefile": None,
+                "cookiesfrombrowser": ("firefox", None, None, None),
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.audio_download.impersonation_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "aimd.infrastructure.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL
+    )
+
+    with pytest.raises(
+        ProcessingFailedError, match="Authenticated cookies are required"
+    ):
+        await try_download_with_format(
+            url="https://www.bilibili.com/video/BV1iVoVBgERD/",
+            download_path=tmp_path,
+            audio_filename="sample_audio",
+            format_selector="bestaudio",
+            preferred_codec=None,
+            platform="bilibili",
+            cookies_file=None,
+            cookies_from_browser=None,
+        )
 
 
 def test_get_preferred_languages_prefers_original_when_language_unspecified() -> None:

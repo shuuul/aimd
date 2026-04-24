@@ -1,6 +1,7 @@
 """FunASR transcription engine implementation (CPU/CUDA)."""
 
 import asyncio
+import re
 from pathlib import Path
 
 from logly import logger
@@ -9,7 +10,7 @@ from ...const import FUNASR_DEFAULT_MODEL, FUNASR_MODELS
 from ...errors import ProcessingFailedError, UnsupportedInputError
 
 _SENSEVOICE_MODELS = {"FunAudioLLM/SenseVoiceSmall"}
-_NO_SPEECH_CONTROL_TOKENS = ("<|no|>", "<|nospeech|>")
+_CONTROL_TOKEN_PATTERN = re.compile(r"<\|[^>]+?\|>")
 _NO_SPEECH_FALLBACK_MODEL = "FunAudioLLM/SenseVoiceSmall"
 
 _cached_model = None
@@ -51,17 +52,55 @@ def _get_model(model_name: str, device: str):
 
 
 def _contains_control_tokens(text: str) -> bool:
-    """Return True when transcription output contains known no-speech tokens."""
-    lowered = text.lower()
-    return any(token in lowered for token in _NO_SPEECH_CONTROL_TOKENS)
+    """Return True when transcription output contains model control tokens."""
+    return bool(_CONTROL_TOKEN_PATTERN.search(text))
 
 
 def _clean_transcribed_text(text: str) -> str:
-    """Remove control tokens that should not surface in user-facing transcripts."""
-    cleaned = text
-    for token in _NO_SPEECH_CONTROL_TOKENS:
-        cleaned = cleaned.replace(token, " ")
+    """Remove model control tokens that should not surface in transcripts."""
+    cleaned = _CONTROL_TOKEN_PATTERN.sub(" ", text)
     return " ".join(cleaned.split())
+
+
+def _install_control_token_safe_ctc_tokenizer(model: object) -> None:
+    """Patch Fun-ASR-Nano CTC tokenization so leaked control tokens do not abort decoding."""
+    tokenizer = getattr(model, "ctc_tokenizer", None)
+    if tokenizer is None or getattr(tokenizer, "_aimd_control_token_safe", False):
+        return
+
+    original_encode = getattr(tokenizer, "encode", None)
+    if not callable(original_encode):
+        return
+
+    def _safe_encode(text: object, **kwargs):
+        original_text = text
+        if isinstance(text, str):
+            text = _clean_transcribed_text(text)
+
+        try:
+            return original_encode(text, **kwargs)
+        except ValueError as exc:
+            if not isinstance(original_text, str):
+                raise
+            if not (
+                _contains_control_tokens(original_text)
+                or _contains_control_tokens(str(exc))
+            ):
+                raise
+
+            retry_kwargs = dict(kwargs)
+            retry_kwargs.setdefault("disallowed_special", ())
+            return original_encode(
+                _clean_transcribed_text(original_text), **retry_kwargs
+            )
+
+    try:
+        setattr(tokenizer, "encode", _safe_encode)
+        setattr(tokenizer, "_aimd_control_token_safe", True)
+    except (AttributeError, TypeError):
+        logger.debug(
+            "Failed to install control-token-safe CTC tokenizer patch for Fun-ASR-Nano"
+        )
 
 
 def _should_retry_with_sensevoice(exc: Exception, model_name: str) -> bool:
@@ -100,6 +139,9 @@ async def transcribe_audio_funasr(
             funasr_model = _get_model(model_name, device)
 
             is_sensevoice = model_name in _SENSEVOICE_MODELS
+            if not is_sensevoice:
+                _install_control_token_safe_ctc_tokenizer(funasr_model)
+
             if is_sensevoice:
                 from funasr.utils.postprocess_utils import (
                     rich_transcription_postprocess,

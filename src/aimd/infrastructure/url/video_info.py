@@ -10,6 +10,7 @@ from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
     is_auth_required_error,
+    is_cookie_source_unavailable_error,
     is_keyring_error,
     is_unsupported_url_error,
 )
@@ -36,6 +37,7 @@ async def extract_video_info(
 
     last_error: Exception | None = None
     auth_required_seen = False
+    cookie_source_issue_seen = False
 
     for source in sources:
 
@@ -68,12 +70,15 @@ async def extract_video_info(
                     break
                 continue
 
-            if is_keyring_error(exc):
+            if is_keyring_error(exc) or is_cookie_source_unavailable_error(exc):
+                cookie_source_issue_seen = True
                 continue
 
             continue
 
-    if auth_required_seen:
+    if platform in AUTH_REQUIRED_PLATFORMS and (
+        auth_required_seen or cookie_source_issue_seen
+    ):
         raise ProcessingFailedError(
             "Authenticated cookies are required for this URL. "
             "Provide --cookies (Netscape file) or --cookies-from-browser."

@@ -25,6 +25,23 @@ def is_keyring_error(error: Exception) -> bool:
     return any(indicator in error_str for indicator in keyring_indicators)
 
 
+def is_cookie_source_unavailable_error(error: Exception) -> bool:
+    """Check if a browser-cookie source is unavailable on this machine."""
+    error_str = str(error).lower()
+    unavailable_indicators = [
+        "could not find firefox cookies database",
+        "could not find chrome cookies database",
+        "could not find chromium cookies database",
+        "could not find edge cookies database",
+        "could not find opera cookies database",
+        "cookies database",
+        "cookie database",
+        "browser profile not found",
+        "profile directory does not exist",
+    ]
+    return any(indicator in error_str for indicator in unavailable_indicators)
+
+
 def is_unsupported_url_error(error: Exception) -> bool:
     """Best-effort check for yt-dlp unsupported URL errors."""
     message = str(error).lower()
@@ -35,6 +52,8 @@ def is_auth_required_error(error: Exception) -> bool:
     """Best-effort check for login-required/private-content errors."""
     message = str(error).lower()
     indicators = [
+        "http error 412",
+        "precondition failed",
         "login required",
         "sign in",
         "private",

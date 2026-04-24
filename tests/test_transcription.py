@@ -34,6 +34,29 @@ class _FakeModel:
         return [{"text": self.text}]
 
 
+class _FakeTokenizer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def encode(self, text: str, **kwargs):  # noqa: ANN003, ARG002
+        self.calls.append(text)
+        if "<|" in text:
+            raise ValueError(
+                "Encountered text corresponding to disallowed special token '<|no|>'"
+            )
+        return [1] if text else []
+
+
+class _FakeNanoModel:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.ctc_tokenizer = _FakeTokenizer()
+
+    def generate(self, **kwargs):  # noqa: ANN003, ARG002
+        self.ctc_tokenizer.encode(self.text)
+        return [{"text": self.text}]
+
+
 @pytest.mark.asyncio
 async def test_transcribe_audio_funasr_retries_with_sensevoice_on_control_token_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -110,3 +133,31 @@ async def test_transcribe_audio_funasr_strips_no_speech_control_tokens(
     result = await transcribe_audio_funasr(audio_file, model=FUNASR_DEFAULT_MODEL)
 
     assert result == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_audio_funasr_keeps_nano_when_ctc_tokenizer_hits_control_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_funasr(monkeypatch)
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"wav")
+
+    calls: list[str] = []
+    nano_model = _FakeNanoModel(text="hello <|no|> world")
+
+    def _mock_get_model(model_name: str, device: str):  # noqa: ARG001
+        calls.append(model_name)
+        if model_name == FUNASR_DEFAULT_MODEL:
+            return nano_model
+        return _FakeModel(text="unexpected fallback")
+
+    monkeypatch.setattr(
+        "aimd.infrastructure.transcription.funasr_engine._get_model", _mock_get_model
+    )
+
+    result = await transcribe_audio_funasr(audio_file, model=FUNASR_DEFAULT_MODEL)
+
+    assert result == "hello world"
+    assert calls == [FUNASR_DEFAULT_MODEL]
+    assert nano_model.ctc_tokenizer.calls == ["hello world"]
