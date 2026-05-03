@@ -27,10 +27,10 @@ class _FakeProcessUseCase:
 class _FakeListEnginesUseCase:
     def execute(self):
         class _Result:
-            auto_selected_engine = "funasr"
+            auto_selected_engine = "qwen"
             engines = {
                 "mlx": EngineCapability("mlx", False, "unsupported", None),
-                "funasr": EngineCapability("funasr", True, None, None),
+                "qwen": EngineCapability("qwen", True, None, None),
             }
 
         return _Result()
@@ -70,7 +70,7 @@ def test_engines_endpoint(monkeypatch) -> None:
     assert len(body["engines"]) == 2
     assert {engine["name"] for engine in body["engines"]} == {
         "mlx",
-        "funasr",
+        "qwen",
     }
 
 

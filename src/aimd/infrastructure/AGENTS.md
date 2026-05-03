@@ -5,7 +5,7 @@ Infrastructure layer: concrete integrations and processing pipelines.
 ## Responsibilities
 
 - Capabilities detection and engine resolution.
-- Transcription backends (mlx-audio-plus Fun-ASR-Nano on MLX; FunASR PyTorch).
+- Transcription backends (mlx-audio Qwen3-ASR on MLX; qwen-asr on Linux/CUDA).
 - URL extraction (yt-dlp, cookies, subtitles, audio fallback, subtitle formatting).
 - Document processing (pandoc `markdown_mmd-raw_html`, EPUB spine-ordered extraction + `epub_cleaner` post-processing, chunking/title logic).
 

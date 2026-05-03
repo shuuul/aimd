@@ -31,19 +31,20 @@ AUDIO_EXTENSIONS = {
 EPUB_EXTENSIONS = {".epub", ".mobi", ".azw3"}
 
 # Supported transcription engines
-TRANSCRIPTION_ENGINES = {"auto", "mlx", "funasr"}
+TRANSCRIPTION_ENGINES = {"auto", "mlx", "qwen"}
 
-# FunASR models (CPU/CUDA, via funasr)
-FUNASR_DEFAULT_MODEL = "FunAudioLLM/Fun-ASR-Nano-2512"
-FUNASR_MODELS = {
-    "FunAudioLLM/Fun-ASR-Nano-2512": "Fun-ASR-Nano (800M, 31 languages, lyric recognition, default)",
-    "FunAudioLLM/SenseVoiceSmall": "SenseVoice Small (234M, multilingual)",
+# mlx-audio STT models (Apple Silicon, via mlx_audio.stt)
+MLX_AUDIO_DEFAULT_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
+MLX_AUDIO_MODELS = {
+    "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized, default)",
+    "mlx-community/Qwen3-ASR-0.6B-8bit": "Qwen3-ASR 0.6B (8-bit quantized)",
 }
 
-# mlx-audio-plus Fun-ASR-Nano (Apple Silicon only; see mlx_engine)
-MLX_AUDIO_DEFAULT_MODEL = "mlx-community/Fun-ASR-Nano-2512-4bit"
-MLX_AUDIO_MODELS = {
-    "mlx-community/Fun-ASR-Nano-2512-4bit": "Fun-ASR-Nano 4-bit (mlx-audio-plus, multilingual)",
+# Qwen3-ASR models (Linux/CUDA, via qwen-asr)
+QWEN_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
+QWEN_ASR_MODELS = {
+    "Qwen/Qwen3-ASR-1.7B": "Qwen3-ASR 1.7B (default)",
+    "Qwen/Qwen3-ASR-0.6B": "Qwen3-ASR 0.6B",
 }
 
 # =============================================================================

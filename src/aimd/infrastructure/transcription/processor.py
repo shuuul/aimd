@@ -7,8 +7,8 @@ from logly import logger
 from ...const import AUDIO_EXTENSIONS
 from ...errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
-from .funasr_engine import transcribe_audio_funasr
 from .mlx_engine import transcribe_audio_mlx
+from .qwen_engine import transcribe_audio_qwen
 from .resolver import resolve_engine_with_preflight
 
 
@@ -49,8 +49,8 @@ async def get_text_from_audio(
                 model=model,
                 language=language,
             )
-        elif actual_engine == "funasr":
-            transcribed_text = await transcribe_audio_funasr(
+        elif actual_engine == "qwen":
+            transcribed_text = await transcribe_audio_qwen(
                 file_path,
                 model=model,
                 language=language,

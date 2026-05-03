@@ -1,6 +1,7 @@
 """Environment capability detection for transcription engines."""
 
 from dataclasses import dataclass
+from functools import lru_cache
 import importlib.util
 import platform
 
@@ -22,11 +23,24 @@ def _module_available(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
 
+@lru_cache(maxsize=1)
+def _torch_cuda_available() -> bool:
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return False
+    return bool(torch.cuda.is_available())
+
+
 def get_engine_capabilities() -> dict[str, EngineCapability]:
     """Return availability details for each supported transcription engine."""
     is_macos = platform.system() == "Darwin"
+    is_linux = platform.system() == "Linux"
     apple_silicon = is_apple_silicon() if is_macos else False
     has_mlx_audio = _module_available("mlx_audio")
+    has_torch = _module_available("torch")
+    has_qwen_asr = _module_available("qwen_asr")
+    torch_cuda_available = _torch_cuda_available() if has_torch else False
 
     capabilities: dict[str, EngineCapability] = {}
 
@@ -43,15 +57,29 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
         name="mlx",
         available=mlx_available,
         reason=mlx_reason,
-        fix_hint=None if mlx_available else "Install dependency: mlx-audio-plus",
+        fix_hint=None if mlx_available else "Install dependency: mlx-audio",
     )
 
-    has_funasr = _module_available("funasr")
-    capabilities["funasr"] = EngineCapability(
-        name="funasr",
-        available=has_funasr,
-        reason=None if has_funasr else "funasr module is not installed.",
-        fix_hint=None if has_funasr else "Install dependency: funasr",
+    qwen_available = is_linux and has_qwen_asr and has_torch and torch_cuda_available
+    qwen_reason = None
+    if not is_linux:
+        qwen_reason = "qwen engine is only supported on Linux."
+    elif not has_qwen_asr:
+        qwen_reason = "qwen_asr module is not installed."
+    elif not has_torch:
+        qwen_reason = "torch module is not installed."
+    elif not torch_cuda_available:
+        qwen_reason = "CUDA is not available in the current PyTorch runtime."
+
+    capabilities["qwen"] = EngineCapability(
+        name="qwen",
+        available=qwen_available,
+        reason=qwen_reason,
+        fix_hint=(
+            None
+            if qwen_available
+            else "Install dependency: qwen-asr (Linux + CUDA required)"
+        ),
     )
 
     return capabilities
@@ -77,9 +105,9 @@ def resolve_engine_with_preflight(engine: str) -> str:
         return engine
 
     if platform.system() == "Darwin":
-        priority = ("mlx", "funasr")
+        priority = ("mlx",)
     else:
-        priority = ("funasr",)
+        priority = ("qwen",)
 
     for candidate in priority:
         if capabilities[candidate].available:

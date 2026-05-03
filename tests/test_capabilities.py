@@ -15,7 +15,7 @@ def test_resolve_engine_invalid_name() -> None:
 def test_resolve_engine_explicit_unavailable(monkeypatch) -> None:
     mock_capabilities = {
         "mlx": EngineCapability("mlx", False, "unsupported", None),
-        "funasr": EngineCapability("funasr", True, None, None),
+        "qwen": EngineCapability("qwen", True, None, None),
     }
     monkeypatch.setattr(
         "aimd.infrastructure.capabilities.detector.get_engine_capabilities",
@@ -26,10 +26,10 @@ def test_resolve_engine_explicit_unavailable(monkeypatch) -> None:
         resolve_engine_with_preflight("mlx")
 
 
-def test_resolve_engine_auto_linux_prefers_funasr(monkeypatch) -> None:
+def test_resolve_engine_auto_linux_prefers_qwen(monkeypatch) -> None:
     mock_capabilities = {
         "mlx": EngineCapability("mlx", False, "unsupported", None),
-        "funasr": EngineCapability("funasr", True, None, None),
+        "qwen": EngineCapability("qwen", True, None, None),
     }
     monkeypatch.setattr(
         "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Linux"
@@ -39,13 +39,13 @@ def test_resolve_engine_auto_linux_prefers_funasr(monkeypatch) -> None:
         lambda: mock_capabilities,
     )
 
-    assert resolve_engine_with_preflight("auto") == "funasr"
+    assert resolve_engine_with_preflight("auto") == "qwen"
 
 
 def test_resolve_engine_auto_linux_no_engine(monkeypatch) -> None:
     mock_capabilities = {
         "mlx": EngineCapability("mlx", False, "unsupported", None),
-        "funasr": EngineCapability("funasr", False, "no funasr", None),
+        "qwen": EngineCapability("qwen", False, "no qwen", None),
     }
     monkeypatch.setattr(
         "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Linux"
@@ -62,7 +62,7 @@ def test_resolve_engine_auto_linux_no_engine(monkeypatch) -> None:
 def test_resolve_engine_auto_macos_prefers_mlx(monkeypatch) -> None:
     mock_capabilities = {
         "mlx": EngineCapability("mlx", True, None, None),
-        "funasr": EngineCapability("funasr", True, None, None),
+        "qwen": EngineCapability("qwen", False, "linux only", None),
     }
     monkeypatch.setattr(
         "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Darwin"
@@ -75,10 +75,10 @@ def test_resolve_engine_auto_macos_prefers_mlx(monkeypatch) -> None:
     assert resolve_engine_with_preflight("auto") == "mlx"
 
 
-def test_resolve_engine_auto_macos_falls_back_to_funasr(monkeypatch) -> None:
+def test_resolve_engine_auto_macos_no_engine(monkeypatch) -> None:
     mock_capabilities = {
         "mlx": EngineCapability("mlx", False, "unsupported", None),
-        "funasr": EngineCapability("funasr", True, None, None),
+        "qwen": EngineCapability("qwen", False, "linux only", None),
     }
     monkeypatch.setattr(
         "aimd.infrastructure.capabilities.detector.platform.system", lambda: "Darwin"
@@ -88,4 +88,5 @@ def test_resolve_engine_auto_macos_falls_back_to_funasr(monkeypatch) -> None:
         lambda: mock_capabilities,
     )
 
-    assert resolve_engine_with_preflight("auto") == "funasr"
+    with pytest.raises(EngineUnavailableError):
+        resolve_engine_with_preflight("auto")
