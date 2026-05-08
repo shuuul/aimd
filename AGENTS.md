@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-05-03
-**Commit:** bb3830d (v0.8.2)
+**Generated:** 2026-05-09
+**Commit:** e45cedc (v0.8.3)
 **Branch:** main
 
 ## OVERVIEW
@@ -157,7 +157,7 @@ Recommended maintenance:
 - Engine auto priority:
   - macOS: `mlx`
   - Linux: `qwen`
-- mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR (`mlx-community/Qwen3-ASR-1.7B-8bit` by default; `0.6B-8bit` also available) on Apple Silicon.
+- mlx engine uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Qwen3-ASR (`mlx-community/Qwen3-ASR-1.7B-4bit` by default; 1.7B `{6,8}bit` and 0.6B `{4,6,8}bit` variants also available) on Apple Silicon.
 - qwen engine uses [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with `Qwen/Qwen3-ASR-1.7B` by default; `Qwen/Qwen3-ASR-0.6B` also available. Requires Linux with a CUDA-capable GPU. `torch`/`torchaudio` install from the CPU wheel index on macOS; on Linux they resolve from default PyPI.
 - `--model` / `-m` CLI option selects the transcription model (mlx Qwen3-ASR id or qwen-asr model id).
 - `--raw-transcript` CLI option preserves original subtitle formatting (SRT/VTT); default strips to plain text.

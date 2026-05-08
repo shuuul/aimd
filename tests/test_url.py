@@ -161,7 +161,14 @@ def test_build_cookie_sources_order_and_fallback() -> None:
     )
     assert [s["name"] for s in default_sources] == [
         "cookiesfrombrowser:chrome:default",
+        "cookiesfrombrowser:chromium",
+        "cookiesfrombrowser:brave",
+        "cookiesfrombrowser:edge",
+        "cookiesfrombrowser:vivaldi",
+        "cookiesfrombrowser:opera",
         "cookiesfrombrowser:firefox",
+        "cookiesfrombrowser:safari",
+        "cookiesfrombrowser:whale",
         "no-cookie",
     ]
 

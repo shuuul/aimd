@@ -3,7 +3,7 @@
 
   ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.8.2-blue)
+  ![Version](https://img.shields.io/badge/version-0.8.3-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
 
@@ -106,8 +106,8 @@ aimd audio.mp3 --engine auto
 aimd audio.wav --engine mlx       # Apple Silicon, Qwen3-ASR via mlx-audio (default on macOS)
 aimd audio.wav --engine qwen      # Qwen3-ASR via qwen-asr (default on Linux, requires CUDA)
 
-# Select a specific model (mlx defaults to Qwen3-ASR-1.7B-8bit)
-aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-1.7B-8bit
+# Select a specific model (mlx defaults to Qwen3-ASR-1.7B-4bit)
+aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-1.7B-4bit
 
 # Process with specific language
 aimd interview.m4a --language zh
@@ -135,7 +135,11 @@ The `mlx` engine supports Qwen3-ASR models via `--model` / `-m`:
 
 | Model | Description |
 |-------|-------------|
-| `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B (8-bit quantized) **(default)** |
+| `mlx-community/Qwen3-ASR-1.7B-4bit` | Qwen3-ASR 1.7B (4-bit quantized) **(default)** |
+| `mlx-community/Qwen3-ASR-1.7B-6bit` | Qwen3-ASR 1.7B (6-bit quantized) |
+| `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B (8-bit quantized) |
+| `mlx-community/Qwen3-ASR-0.6B-4bit` | Qwen3-ASR 0.6B (4-bit quantized) |
+| `mlx-community/Qwen3-ASR-0.6B-6bit` | Qwen3-ASR 0.6B (6-bit quantized) |
 | `mlx-community/Qwen3-ASR-0.6B-8bit` | Qwen3-ASR 0.6B (8-bit quantized) |
 
 Pass `-l` with a short code (`en`, `zh`, `ja`, …); defaults to Chinese when omitted.

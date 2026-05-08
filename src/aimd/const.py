@@ -34,9 +34,13 @@ EPUB_EXTENSIONS = {".epub", ".mobi", ".azw3"}
 TRANSCRIPTION_ENGINES = {"auto", "mlx", "qwen"}
 
 # mlx-audio STT models (Apple Silicon, via mlx_audio.stt)
-MLX_AUDIO_DEFAULT_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
+MLX_AUDIO_DEFAULT_MODEL = "mlx-community/Qwen3-ASR-1.7B-4bit"
 MLX_AUDIO_MODELS = {
-    "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized, default)",
+    "mlx-community/Qwen3-ASR-1.7B-4bit": "Qwen3-ASR 1.7B (4-bit quantized, default)",
+    "mlx-community/Qwen3-ASR-1.7B-6bit": "Qwen3-ASR 1.7B (6-bit quantized)",
+    "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized)",
+    "mlx-community/Qwen3-ASR-0.6B-4bit": "Qwen3-ASR 0.6B (4-bit quantized)",
+    "mlx-community/Qwen3-ASR-0.6B-6bit": "Qwen3-ASR 0.6B (6-bit quantized)",
     "mlx-community/Qwen3-ASR-0.6B-8bit": "Qwen3-ASR 0.6B (8-bit quantized)",
 }
 

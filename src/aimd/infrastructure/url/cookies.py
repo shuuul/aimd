@@ -128,7 +128,19 @@ def build_cookie_sources(
             logger.warning(str(exc))
 
     if not cookies_file and not cookies_from_browser:
-        default_browser_specs = ("chrome:default", "firefox")
+        # Ordered probe of all yt-dlp supported browsers; unavailable ones are
+        # skipped via `is_cookie_source_unavailable_error` in the caller.
+        default_browser_specs = (
+            "chrome:default",
+            "chromium",
+            "brave",
+            "edge",
+            "vivaldi",
+            "opera",
+            "firefox",
+            "safari",
+            "whale",
+        )
         for spec in default_browser_specs:
             sources.append(
                 {

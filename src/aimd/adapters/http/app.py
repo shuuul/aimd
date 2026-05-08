@@ -44,7 +44,8 @@ class ProcessRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-8bit (default) or 0.6B-8bit. "
+        description="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-4bit (default), "
+        "1.7B-{6,8}bit, or 0.6B-{4,6,8}bit. "
         "For qwen: Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
     )
     language: str | None = Field(

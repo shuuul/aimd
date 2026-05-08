@@ -12,9 +12,7 @@ from .audio_utils import convert_to_wav_if_needed
 
 # Silence noisy upstream warnings emitted while loading nagisa / qwen-asr /
 # transformers. These are benign and would otherwise pollute CLI output.
-warnings.filterwarnings(
-    "ignore", category=SyntaxWarning, module=r"nagisa(\..*)?"
-)
+warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"nagisa(\..*)?")
 warnings.filterwarnings(
     "ignore",
     message=r"The following generation flags are not valid.*",
