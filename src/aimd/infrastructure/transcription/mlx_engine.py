@@ -45,6 +45,7 @@ async def transcribe_audio_mlx(
     file_path: Path,
     model: str | None = None,
     language: str | None = None,
+    temp_dir: Path | None = None,
 ) -> str:
     """Transcribe audio using mlx-audio STT (Apple Silicon only)."""
     if platform.system() != "Darwin":
@@ -74,7 +75,7 @@ async def transcribe_audio_mlx(
 
     wav_path: Path | None = None
     try:
-        wav_path = convert_to_wav_if_needed(file_path)
+        wav_path = convert_to_wav_if_needed(file_path, temp_dir=temp_dir)
         audio_path = wav_path or file_path
 
         def _transcribe() -> str:

@@ -16,6 +16,7 @@ AUDIO_EXTENSIONS = {
     ".opus",
     ".wma",
     ".webm",
+    ".mp4a",
     # Video formats (will extract audio for transcription)
     ".mp4",
     ".mkv",

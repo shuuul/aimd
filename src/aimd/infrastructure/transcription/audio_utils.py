@@ -13,12 +13,16 @@ from ...errors import ProcessingFailedError
 SUPPORTED_AUDIO_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}
 
 
-def convert_to_wav_if_needed(source: Path) -> Path | None:
+def convert_to_wav_if_needed(source: Path, temp_dir: Path | None = None) -> Path | None:
     """Convert an unsupported audio file to 16 kHz mono WAV via ffmpeg.
 
     Returns the path to a temporary WAV file, or None if the format is
     already in :data:`SUPPORTED_AUDIO_FORMATS`. The caller is responsible
     for unlinking the returned path.
+
+    When *temp_dir* is provided, the temporary WAV is created inside that
+    directory so callers can redirect temp I/O to a sandbox-safe location
+    via ``AIMD_TEMP_DIR``.
     """
     if source.suffix.lower() in SUPPORTED_AUDIO_FORMATS:
         return None
@@ -31,7 +35,9 @@ def convert_to_wav_if_needed(source: Path) -> Path | None:
             f"({', '.join(sorted(SUPPORTED_AUDIO_FORMATS))})."
         )
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=".wav", delete=False, dir=str(temp_dir) if temp_dir else None
+    )
     tmp.close()
     wav_path = Path(tmp.name)
 

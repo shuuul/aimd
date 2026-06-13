@@ -104,6 +104,7 @@ async def transcribe_audio_qwen(
     file_path: Path,
     model: str | None = None,
     language: str | None = None,
+    temp_dir: Path | None = None,
 ) -> str:
     """Transcribe audio using Qwen3-ASR (requires Linux + CUDA)."""
     try:
@@ -139,7 +140,7 @@ async def transcribe_audio_qwen(
 
     wav_path: Path | None = None
     try:
-        wav_path = convert_to_wav_if_needed(file_path)
+        wav_path = convert_to_wav_if_needed(file_path, temp_dir=temp_dir)
         audio_path = wav_path or file_path
 
         def _transcribe() -> str:

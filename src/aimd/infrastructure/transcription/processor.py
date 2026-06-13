@@ -48,12 +48,14 @@ async def get_text_from_audio(
                 file_path,
                 model=model,
                 language=language,
+                temp_dir=temp_dir,
             )
         elif actual_engine == "qwen":
             transcribed_text = await transcribe_audio_qwen(
                 file_path,
                 model=model,
                 language=language,
+                temp_dir=temp_dir,
             )
         else:
             raise UnsupportedInputError(f"Unsupported engine: {actual_engine}")
