@@ -6,7 +6,6 @@ from logly import logger
 
 from ...errors import ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
-from ...utils import is_valid_url
 from .audio_download import extract_content_from_audio
 from .formatter import detect_platform, format_content, strip_subtitle_formatting
 from .subtitles import extract_subtitles
@@ -25,7 +24,7 @@ async def get_text_from_url(
     raw_transcript: bool = False,
 ) -> tuple[TextContext, str]:
     """Extract text content from video URLs using yt-dlp."""
-    if not is_valid_url(url):
+    if not url.startswith(("http://", "https://")):
         raise UnsupportedInputError(f"Invalid URL: {url}")
 
     logger.info(f"Processing video URL: {url}")

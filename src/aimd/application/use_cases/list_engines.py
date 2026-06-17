@@ -4,11 +4,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ...errors import EngineUnavailableError
-from ...infrastructure.capabilities.detector import (
-    EngineCapability,
-    get_engine_capabilities,
-    resolve_engine_with_preflight,
-)
+from ...infrastructure.capabilities.detector import EngineCapability
 
 
 @dataclass(slots=True)
@@ -21,10 +17,8 @@ class ListEnginesResult:
 class ListEnginesUseCase:
     """List available transcription engines and auto-selected preference."""
 
-    get_capabilities: Callable[[], dict[str, EngineCapability]] = (
-        get_engine_capabilities
-    )
-    resolve_engine: Callable[[str], str] = resolve_engine_with_preflight
+    get_capabilities: Callable[[], dict[str, EngineCapability]]
+    resolve_engine: Callable[[str], str]
 
     def execute(self) -> ListEnginesResult:
         capabilities = self.get_capabilities()

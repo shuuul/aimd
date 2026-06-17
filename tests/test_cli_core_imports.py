@@ -1,25 +1,16 @@
 """Ensure the default CLI stack does not pull optional HTTP/MCP dependencies."""
 
+import pytest
 
-def test_cli_import_does_not_load_fastapi() -> None:
+
+@pytest.mark.parametrize("module_name", ["fastapi", "mcp"])
+def test_cli_import_does_not_load_optional_dependencies(module_name: str) -> None:
     import sys
 
     for name in list(sys.modules):
-        if name == "fastapi" or name.startswith("fastapi."):
+        if name == module_name or name.startswith(f"{module_name}."):
             del sys.modules[name]
 
     import aimd.cli  # noqa: F401
 
-    assert "fastapi" not in sys.modules
-
-
-def test_cli_import_does_not_load_mcp() -> None:
-    import sys
-
-    for name in list(sys.modules):
-        if name == "mcp" or name.startswith("mcp."):
-            del sys.modules[name]
-
-    import aimd.cli  # noqa: F401
-
-    assert "mcp" not in sys.modules
+    assert module_name not in sys.modules

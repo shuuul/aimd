@@ -84,18 +84,6 @@ def is_url(s: str) -> bool:
         return False
 
 
-def is_valid_url(url: str) -> bool:
-    """Check if URL has valid HTTP/HTTPS scheme.
-
-    Args:
-        url: URL to check
-
-    Returns:
-        True if URL has valid scheme
-    """
-    return url.startswith(("http://", "https://"))
-
-
 def is_supported_url(url: str) -> bool:
     """Check if URL is supported by yt-dlp.
 

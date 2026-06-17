@@ -7,9 +7,9 @@ from logly import logger
 from ...const import AUDIO_EXTENSIONS
 from ...errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from ...types import TextContext
+from ..capabilities.detector import resolve_engine_with_preflight
 from .mlx_engine import transcribe_audio_mlx
 from .qwen_engine import transcribe_audio_qwen
-from .resolver import resolve_engine_with_preflight
 
 
 async def get_text_from_audio(

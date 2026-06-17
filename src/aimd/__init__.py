@@ -5,7 +5,6 @@ from .utils import (
     sanitize_filename,
     create_output_path_from_title,
     is_url,
-    is_valid_url,
     is_supported_url,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "sanitize_filename",
     "create_output_path_from_title",
     "is_url",
-    "is_valid_url",
     "is_supported_url",
 ]
