@@ -7,6 +7,7 @@ Core package organized with ports/adapters architecture.
 - `application/` — use-cases, canonical request/response models, bootstrap wiring
 - `infrastructure/` — concrete implementations (capabilities, transcription, URL, documents)
 - `adapters/` — CLI, HTTP API, MCP interface adapters
+- `platform_utils.py` — platform probes used by capability preflight
 - `cli.py`, `api.py`, `mcp.py` — runtime entrypoints
 
 ## CONVENTIONS
@@ -14,6 +15,8 @@ Core package organized with ports/adapters architecture.
 - Keep orchestration in `application/use_cases/*`.
 - Keep IO/third-party integrations in `infrastructure/*`.
 - Keep interface-specific request/response mapping in `adapters/*`.
+
+- Keep platform-dependent dependency use behind capability checks; `mlx-audio` is Darwin-only and `qwen-asr` is Linux-only.
 
 ## TEMP DIRECTORY
 
@@ -41,3 +44,10 @@ The `raw_transcript` field on `ProcessInput` (default `False`) controls this:
 The stripping is performed by `strip_subtitle_formatting()` in
 `infrastructure/url/formatter.py`, applied in `processor.py` before
 `format_content()` embeds the text into the markdown output.
+
+## TRANSCRIPTION MODELS
+
+- Engine names are fixed in `const.TRANSCRIPTION_ENGINES`: `auto`, `mlx`, `qwen`.
+- `mlx` uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
+- `qwen` uses `qwen_asr.Qwen3ASRModel` on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
+- mlx Qwen3-ASR defaults omitted language to `Chinese`; other mlx-audio STT models stay on their own default/auto language behavior.

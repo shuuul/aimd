@@ -1,6 +1,7 @@
 """mlx-audio STT transcription engine (Apple Silicon only)."""
 
 import asyncio
+import inspect
 import platform
 from pathlib import Path
 
@@ -25,10 +26,15 @@ LANGUAGE_CODE_TO_NAME = {
 }
 
 
-def _resolve_language(language: str | None) -> str:
-    """Map short language codes to full names expected by mlx-audio."""
+def _is_qwen3_asr_model(model: str) -> bool:
+    """Qwen3-ASR models expect a language hint; other mlx-audio STT models often auto-detect."""
+    return "Qwen3-ASR" in model
+
+
+def _resolve_language(model: str, language: str | None) -> str | None:
+    """Map short language codes to full names accepted by mlx-audio models."""
     if language is None:
-        return "Chinese"
+        return "Chinese" if _is_qwen3_asr_model(model) else None
     lang = language.lower()
     if lang in LANGUAGE_CODE_TO_NAME:
         return LANGUAGE_CODE_TO_NAME[lang]
@@ -68,9 +74,9 @@ async def transcribe_audio_mlx(
             f"Available: {list(MLX_AUDIO_MODELS.keys())}"
         )
 
-    resolved_language = _resolve_language(language)
+    resolved_language = _resolve_language(resolved_model, language)
     logger.info(
-        f"Transcribing with mlx-audio model: {resolved_model}, language: {resolved_language}"
+        f"Transcribing with mlx-audio model: {resolved_model}, language: {resolved_language or 'auto'}"
     )
 
     wav_path: Path | None = None
@@ -80,7 +86,12 @@ async def transcribe_audio_mlx(
 
         def _transcribe() -> str:
             stt_model = load_stt(resolved_model)
-            result = stt_model.generate(str(audio_path), language=resolved_language)
+            generate_kwargs = {}
+            if resolved_language is not None:
+                signature = inspect.signature(stt_model.generate)
+                if "language" in signature.parameters:
+                    generate_kwargs["language"] = resolved_language
+            result = stt_model.generate(str(audio_path), **generate_kwargs)
             return result.text.strip()
 
         loop = asyncio.get_event_loop()

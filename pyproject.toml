@@ -1,6 +1,6 @@
 [project]
 name = "aimd"
-version = "0.8.4"
+version = "0.8.5"
 description = "Context preparation tool for LLM workflows - Transcribe audio/video and convert documents"
 readme = "README.md"
 authors = [
@@ -19,8 +19,8 @@ dependencies = [
     "logly>=0.1.6",
     "typer>=0.20.0",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
-    "qwen-asr; sys_platform == 'linux'",
-    "mlx-audio>=0.4.2; sys_platform == 'darwin'",
+    "qwen-asr>=0.0.6; sys_platform == 'linux'",
+    "mlx-audio>=0.4.4; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

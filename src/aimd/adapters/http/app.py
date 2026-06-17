@@ -1,5 +1,6 @@
 """FastAPI adapter for aimd."""
 
+from importlib.metadata import version
 import os
 from pathlib import Path
 from typing import Literal
@@ -44,9 +45,9 @@ class ProcessRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-4bit (default), "
-        "1.7B-{6,8}bit, or 0.6B-{4,6,8}bit. "
-        "For qwen: Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
+        description="Model for transcription. mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
+        "and also supports other documented mlx-audio STT model IDs. "
+        "qwen supports Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
     )
     language: str | None = Field(
         default=None, description="Language code for transcription, e.g. zh, en, ja."
@@ -85,7 +86,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="aimd API",
         description="Context preparation API for LLM workflows",
-        version="0.8.2",
+        version=version("aimd"),
     )
     container = build_container()
 

@@ -5,13 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from aimd.const import AUDIO_EXTENSIONS
+from aimd.const import AUDIO_EXTENSIONS, MLX_AUDIO_MODELS
 from aimd.errors import ProcessingFailedError, UnsupportedInputError
 from aimd.infrastructure.transcription.audio_utils import (
     SUPPORTED_AUDIO_FORMATS,
     convert_to_wav_if_needed,
 )
 from aimd.infrastructure.transcription.processor import get_text_from_audio
+from aimd.infrastructure.transcription.mlx_engine import _resolve_language
 
 
 def _mock_ffmpeg_ok() -> MagicMock:
@@ -31,6 +32,19 @@ class TestAudioExtensions:
     def test_mp4a_not_in_supported_audio_formats(self) -> None:
         """mp4a is accepted as input but requires ffmpeg transcoding."""
         assert ".mp4a" not in SUPPORTED_AUDIO_FORMATS
+
+
+class TestMlxAudioModels:
+    """Validate mlx-audio model support metadata."""
+
+    def test_recent_mlx_audio_stt_models_are_allowed(self) -> None:
+        assert "mlx-community/parakeet-tdt-0.6b-v3" in MLX_AUDIO_MODELS
+        assert "mlx-community/VibeVoice-ASR-bf16" in MLX_AUDIO_MODELS
+        assert "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit" in MLX_AUDIO_MODELS
+
+    def test_default_language_only_applies_to_qwen3_asr(self) -> None:
+        assert _resolve_language("mlx-community/Qwen3-ASR-1.7B-4bit", None) == "Chinese"
+        assert _resolve_language("mlx-community/parakeet-tdt-0.6b-v3", None) is None
 
 
 class TestConvertToWavIfNeeded:

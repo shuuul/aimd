@@ -18,7 +18,7 @@ class _FakeProcessUseCase:
         return self._result
 
 
-def test_cli_transcript_auto_output(monkeypatch) -> None:
+def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
     class _Container:
         process_input_use_case = _FakeProcessUseCase(
             ProcessResult(
@@ -33,12 +33,12 @@ def test_cli_transcript_auto_output(monkeypatch) -> None:
         lambda _src, _checker: "transcript",
     )
 
-    with runner.isolated_filesystem():
-        result = runner.invoke(app, ["input.mp3"])
-        assert result.exit_code == 0
-        out = Path("Demo_Title_transcript.md")
-        assert out.exists()
-        assert out.read_text(encoding="utf-8") == "hello"
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["input.mp3"])
+    assert result.exit_code == 0
+    out = Path("Demo_Title_transcript.md")
+    assert out.exists()
+    assert out.read_text(encoding="utf-8") == "hello"
 
 
 def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
@@ -59,7 +59,7 @@ def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
         lambda _src, _checker: "convert",
     )
 
-    with runner.isolated_filesystem():
-        result = runner.invoke(app, [str(tmp_path / "book.epub")])
-        assert result.exit_code == 0
-        assert "Successfully converted EPUB with images" in result.stdout
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, [str(tmp_path / "book.epub")])
+    assert result.exit_code == 0
+    assert "Successfully converted EPUB with images" in result.stdout

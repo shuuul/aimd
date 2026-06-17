@@ -70,15 +70,15 @@ def process(
         "auto",
         "--engine",
         "-e",
-        help="Transcription engine: mlx (Apple Silicon, Qwen3-ASR via mlx-audio), qwen (Linux/CUDA, Qwen3-ASR via qwen-asr).",
+        help="Transcription engine: mlx (Apple Silicon, mlx-audio STT), qwen (Linux/CUDA, qwen-asr).",
     ),
     model: Optional[str] = typer.Option(
         None,
         "--model",
         "-m",
-        help="Model for transcription. For mlx: mlx-community/Qwen3-ASR-1.7B-4bit (default), "
-        "1.7B-{6,8}bit, or 0.6B-{4,6,8}bit. "
-        "For qwen: Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
+        help="Model for transcription. mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
+        "and also supports other documented mlx-audio STT model IDs. "
+        "qwen supports Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
     ),
     language: Optional[str] = typer.Option(
         None,
