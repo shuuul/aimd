@@ -3,7 +3,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from aimd.adapters.cli.app import app
-from aimd.application.models import ProcessResult
+from aimd.application.models import InputRoute, ProcessResult
 from aimd.types import TextContext
 
 
@@ -11,8 +11,13 @@ runner = CliRunner()
 
 
 class _FakeProcessUseCase:
-    def __init__(self, result):
+    def __init__(self, result, task_type="transcript"):
         self._result = result
+        self._task_type = task_type
+
+    def ensure_supported_input(self, input_source):  # noqa: ARG002
+        source_kind = "document_file" if self._task_type == "convert" else "audio_file"
+        return InputRoute(source_kind=source_kind, task_type=self._task_type)
 
     async def execute(self, request):  # noqa: ARG002
         return self._result
@@ -24,14 +29,11 @@ def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
             ProcessResult(
                 task_type="transcript",
                 text_context=TextContext(title="Demo Title", chunk_list=["hello"]),
-            )
+            ),
+            task_type="transcript",
         )
 
     monkeypatch.setattr("aimd.adapters.cli.app.build_container", lambda: _Container())
-    monkeypatch.setattr(
-        "aimd.adapters.cli.app.ensure_supported_input",
-        lambda _src, _checker: "transcript",
-    )
 
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["input.mp3"])
@@ -50,16 +52,13 @@ def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
                 task_type="convert",
                 text_context=TextContext(title="book", chunk_list=["x"]),
                 output_dir=output_dir,
-            )
+            ),
+            task_type="convert",
         )
 
     monkeypatch.setattr("aimd.adapters.cli.app.build_container", lambda: _Container())
-    monkeypatch.setattr(
-        "aimd.adapters.cli.app.ensure_supported_input",
-        lambda _src, _checker: "convert",
-    )
 
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, [str(tmp_path / "book.epub")])
     assert result.exit_code == 0
-    assert "Successfully converted EPUB with images" in result.stdout
+    assert "Successfully converted book with images" in result.stdout

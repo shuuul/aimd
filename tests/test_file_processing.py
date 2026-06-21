@@ -2,10 +2,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from aimd.infrastructure.documents.chunking import split_markdown_by_headers
-from aimd.infrastructure.documents.epub_processor import process_epub_with_images
+from aimd_book.processor import process_book_with_images
 
 
 def test_split_markdown_by_headers_fallback_without_headers() -> None:
@@ -22,25 +20,23 @@ def _fake_convert(html_file: Path, output_file: Path) -> None:
     output_file.write_text("# Chapter\n\n" + ("lorem ipsum " * 5000), encoding="utf-8")
 
 
-@pytest.mark.asyncio
-async def test_process_epub_large_content_keeps_chunk_list(tmp_path: Path) -> None:
+def test_process_epub_large_content_returns_markdown(tmp_path: Path) -> None:
     epub_path = tmp_path / "book.epub"
     with zipfile.ZipFile(epub_path, "w") as zf:
         zf.writestr("OEBPS/ch1.html", "<html><body>c1</body></html>")
         zf.writestr("OEBPS/ch2.html", "<html><body>c2</body></html>")
 
     with patch(
-        "aimd.infrastructure.documents.epub_processor._convert_html_to_markdown",
+        "aimd_book.processor._convert_html_to_markdown",
         side_effect=_fake_convert,
     ):
-        text_context, _ = await process_epub_with_images(epub_path)
+        result = process_book_with_images(epub_path)
 
-    assert text_context.chunk_list
-    assert len("".join(text_context.chunk_list)) > 40000
+    assert result.markdown
+    assert len(result.markdown) > 40000
 
 
-@pytest.mark.asyncio
-async def test_process_epub_spine_ordering(tmp_path: Path) -> None:
+def test_process_epub_spine_ordering(tmp_path: Path) -> None:
     """Chapters should follow spine order, not alphabetical."""
     epub_path = tmp_path / "ordered.epub"
     with zipfile.ZipFile(epub_path, "w") as zf:
@@ -72,11 +68,11 @@ async def test_process_epub_spine_ordering(tmp_path: Path) -> None:
         output_file.write_text(f"## {html_file.stem}\n\ncontent\n", encoding="utf-8")
 
     with patch(
-        "aimd.infrastructure.documents.epub_processor._convert_html_to_markdown",
+        "aimd_book.processor._convert_html_to_markdown",
         side_effect=_track_convert,
     ):
-        text_context, out_dir = await process_epub_with_images(epub_path)
+        result = process_book_with_images(epub_path)
 
     assert written_order == ["b", "a"], "Spine order should be b then a"
-    combined = (out_dir / "ordered.md").read_text(encoding="utf-8")
+    combined = (result.output_dir / "ordered.md").read_text(encoding="utf-8")
     assert combined.index("b") < combined.index("a")

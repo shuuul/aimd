@@ -1,1 +1,0 @@
-"""MCP adapter package."""

@@ -3,19 +3,19 @@ from pathlib import Path
 
 import pytest
 
-from aimd.errors import ProcessingFailedError
-from aimd.infrastructure.url.audio_download import (
+from aimd_media.errors import ProcessingFailedError
+from aimd_media.url.audio_download import (
+    _try_download_with_format,
     download_audio,
-    try_download_with_format,
 )
-from aimd.infrastructure.url.cookies import (
+from aimd_media.url.cookies import (
     build_cookie_sources,
     is_auth_required_error,
     parse_cookies_from_browser,
 )
-from aimd.infrastructure.url.video_info import extract_video_info
-from aimd.infrastructure.url.processor import get_text_from_url
-from aimd.infrastructure.url.subtitles import get_preferred_languages
+from aimd_media.url.video_info import extract_video_info
+from aimd_media.url.processor import get_text_from_url
+from aimd_media.url.subtitles import get_preferred_languages
 
 
 @pytest.mark.asyncio
@@ -36,16 +36,16 @@ async def test_get_text_from_url_extracts_info_once(monkeypatch) -> None:
         return "subtitle text"
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd_media.url.processor.extract_video_info", _mock_extract_video_info
     )
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
+        "aimd_media.url.processor.extract_subtitles", _mock_extract_subtitles
     )
 
-    text_context, platform = await get_text_from_url("https://example.com/video")
-    assert text_context.title == "Example"
-    assert platform == "unknown"
-    assert "**Platform:** unknown" in text_context.chunk_list[0]
+    result = await get_text_from_url("https://example.com/video")
+    assert result.title == "Example"
+    assert result.platform == "unknown"
+    assert "**Platform:** unknown" in result.markdown
     assert call_count["count"] == 1
 
 
@@ -74,18 +74,16 @@ async def test_get_text_from_url_includes_detected_platform_in_output(
         return "subtitle text"
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd_media.url.processor.extract_video_info", _mock_extract_video_info
     )
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
+        "aimd_media.url.processor.extract_subtitles", _mock_extract_subtitles
     )
 
-    text_context, platform = await get_text_from_url(
-        "https://www.youtube.com/watch?v=test"
-    )
+    result = await get_text_from_url("https://www.youtube.com/watch?v=test")
 
-    assert platform == "youtube"
-    assert "**Platform:** youtube" in text_context.chunk_list[0]
+    assert result.platform == "youtube"
+    assert "**Platform:** youtube" in result.markdown
 
 
 @pytest.mark.asyncio
@@ -107,10 +105,10 @@ async def test_get_text_from_url_cookie_isolation(monkeypatch) -> None:
         return "subtitle text"
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd_media.url.processor.extract_video_info", _mock_extract_video_info
     )
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_subtitles", _mock_extract_subtitles
+        "aimd_media.url.processor.extract_subtitles", _mock_extract_subtitles
     )
 
     await asyncio.gather(
@@ -195,7 +193,7 @@ async def test_auth_required_failure_surfaces_cookie_hint(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd_media.url.processor.extract_video_info", _mock_extract_video_info
     )
 
     with pytest.raises(
@@ -224,8 +222,8 @@ async def test_extract_video_info_surfaces_cookie_hint_after_bilibili_412(
             raise RuntimeError("could not find firefox cookies database")
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.video_info.create_ydl",
-        lambda *, platform, cookie_source, for_subtitles: _FakeYDL(  # noqa: ARG005
+        "aimd_media.url.video_info.create_info_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(  # noqa: ARG005
             cookie_source["name"]
         ),
     )
@@ -254,7 +252,7 @@ async def test_download_audio_prefers_audio_only_for_youtube(
         return out
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.try_download_with_format",
+        "aimd_media.url.audio_download._try_download_with_format",
         _mock_try_download_with_format,
     )
 
@@ -285,7 +283,7 @@ async def test_download_audio_prefers_audio_only_for_bilibili(
         return out
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.try_download_with_format",
+        "aimd_media.url.audio_download._try_download_with_format",
         _mock_try_download_with_format,
     )
 
@@ -301,7 +299,7 @@ async def test_download_audio_prefers_audio_only_for_bilibili(
 
 
 @pytest.mark.asyncio
-async def test_try_download_with_format_only_adds_postprocessor_when_codec_requested(
+async def test_download_with_format_only_adds_postprocessor_when_codec_requested(
     monkeypatch, tmp_path: Path
 ) -> None:
     seen_opts: list[dict] = []
@@ -321,18 +319,16 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
             Path(f"{self.opts['outtmpl']}.webm").write_text("x", encoding="utf-8")
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.build_cookie_sources",
+        "aimd_media.url.audio_download.build_cookie_sources",
         lambda **kwargs: [{"name": "no-cookie", "use_cookies": False}],
     )
     monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.impersonation_available",
+        "aimd_media.url.audio_download.impersonation_available",
         lambda: False,
     )
-    monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL
-    )
+    monkeypatch.setattr("aimd_media.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL)
 
-    result_no_codec = await try_download_with_format(
+    result_no_codec = await _try_download_with_format(
         url="https://example.com/video",
         download_path=tmp_path,
         audio_filename="sample_audio",
@@ -345,7 +341,7 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
     assert result_no_codec is not None
     assert "postprocessors" not in seen_opts[-1]
 
-    result_with_codec = await try_download_with_format(
+    result_with_codec = await _try_download_with_format(
         url="https://example.com/video",
         download_path=tmp_path,
         audio_filename="sample_audio_2",
@@ -360,7 +356,7 @@ async def test_try_download_with_format_only_adds_postprocessor_when_codec_reque
 
 
 @pytest.mark.asyncio
-async def test_try_download_with_format_surfaces_cookie_hint_after_bilibili_412(
+async def test_download_with_format_surfaces_cookie_hint_after_bilibili_412(
     monkeypatch, tmp_path: Path
 ) -> None:
     class _FakeYDL:
@@ -380,7 +376,7 @@ async def test_try_download_with_format_surfaces_cookie_hint_after_bilibili_412(
             raise RuntimeError("could not find firefox cookies database")
 
     monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.build_cookie_sources",
+        "aimd_media.url.audio_download.build_cookie_sources",
         lambda **kwargs: [  # noqa: ARG005
             {
                 "name": "cookiesfrombrowser:chrome:default",
@@ -397,17 +393,15 @@ async def test_try_download_with_format_surfaces_cookie_hint_after_bilibili_412(
         ],
     )
     monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.impersonation_available",
+        "aimd_media.url.audio_download.impersonation_available",
         lambda: False,
     )
-    monkeypatch.setattr(
-        "aimd.infrastructure.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL
-    )
+    monkeypatch.setattr("aimd_media.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL)
 
     with pytest.raises(
         ProcessingFailedError, match="Authenticated cookies are required"
     ):
-        await try_download_with_format(
+        await _try_download_with_format(
             url="https://www.bilibili.com/video/BV1iVoVBgERD/",
             download_path=tmp_path,
             audio_filename="sample_audio",

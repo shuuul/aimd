@@ -8,14 +8,14 @@ from aimd.types import TextContext
 
 @pytest.mark.asyncio
 async def test_mcp_healthz() -> None:
-    from aimd.mcp import healthz
+    from aimd_mcp import healthz
 
     assert await healthz() == {"status": "ok"}
 
 
 @pytest.mark.asyncio
 async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None:
-    from aimd.mcp import process_input
+    from aimd_mcp import process_input
 
     class _FakeProcessUseCase:
         async def execute(self, request):  # noqa: ARG002
@@ -31,7 +31,7 @@ async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None
     class _FakeContainer:
         process_input_use_case = _FakeProcessUseCase()
 
-    monkeypatch.setattr("aimd.adapters.mcp.server.container", _FakeContainer())
+    monkeypatch.setattr("aimd_mcp.server.container", _FakeContainer())
 
     output_file = tmp_path / "out.md"
     result = await process_input("input.mp3", output_file=str(output_file))

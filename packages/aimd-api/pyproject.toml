@@ -1,0 +1,20 @@
+[project]
+name = "aimd-api"
+version = "0.8.6"
+description = "FastAPI service for aimd."
+authors = [
+    { name = "Shu Li", email = "zetarylee@gmail.com" }
+]
+requires-python = ">=3.10, <3.13"
+dependencies = [
+    "aimd",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+]
+
+[project.scripts]
+aimd-api = "aimd_api:main"
+
+[build-system]
+requires = ["uv_build>=0.8.9,<0.9.0"]
+build-backend = "uv_build"

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/banner.png" alt="aimd">
 
-  ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+  ![Python](https://img.shields.io/badge/python-3.10--3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
   ![Version](https://img.shields.io/badge/version-0.8.6-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
@@ -9,436 +9,245 @@
 
 # aimd
 
-Context preparation tool for LLM workflows - Transcribe audio/video and convert documents to markdown.
+Prepare LLM-ready context from URLs, audio/video, and documents.
 
-## Features
+`aimd` gives you one command that auto-detects input type, extracts or transcribes the content, converts it to Markdown, and returns a chunked text context suitable for downstream AI workflows.
 
-- **Auto-Detection**: Automatically detects input type (audio, video, URL, document)
-- **Multi-Engine Audio Transcription**: Qwen3-ASR via **mlx-audio** (Apple Silicon MLX) and **qwen-asr** (Linux/CUDA)
-- **Unified Video Platform Support**: Extract content from 1000+ video platforms including YouTube, Bilibili using yt-dlp
-- **Document Conversion**: Convert EPUB, PDF, TXT, and other formats to markdown using Pandoc
+## Highlights
 
-## Architecture
+- **One input command** for URLs, audio/video files, ebooks, PDFs, Markdown, text, and other MarkItDown-supported documents.
+- **Media extraction** with `aimd-media`: yt-dlp URLs such as podcasts, YouTube, Bilibili, and local audio/video files.
+- **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or `qwen-asr`.
+- **Document conversion** through MarkItDown, with dedicated ebook chapter/image extraction in the `aimd-book` plugin.
+- **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
 
-The runtime now uses a ports/adapters layout:
+> OCR for scanned PDFs and images is planned. The monorepo now includes an `aimd-ocr` package scaffold so OCR can land without growing the transcript or document conversion code paths.
 
-- `aimd.application` for use-cases and request/response models
-- `aimd.infrastructure` for concrete transcription/URL/document processors
-- `aimd.adapters` for CLI, HTTP API, and MCP interface layers
+## Install
 
-Entrypoints are exposed via `aimd.cli`, `aimd.api`, and `aimd.mcp`, backed by the adapter/application/infrastructure layers.
-
-## Installation
-
-### Quick Install
+CLI-only install after release:
 
 ```bash
-uv tool install git+https://github.com/shuuul/aimd
-```
-
-### System Requirements
-
-**macOS**: Requires Apple Silicon (M1/M2/M3/M4) for optimal performance.
-
-**Linux/Windows**: For GPU acceleration, requires CUDA 12.x and cuDNN 9.x.
-
-### Install via uv (Recommended)
-
-```bash
-# Install from GitHub repository (CLI-only dependency set by default)
-uv tool install git+https://github.com/shuuul/aimd
-
-# Same, but include HTTP API + MCP entrypoints (`aimd-api`, `aimd-mcp`)
-pip install "git+https://github.com/shuuul/aimd.git[api,mcp]"
-
-# Verify installation
+uv tool install aimd
 aimd --help
 ```
 
-### Optional extras
-
-| Extra | Purpose | Entrypoints |
-|-------|---------|-------------|
-| `api` | FastAPI HTTP server | `aimd-api` |
-| `mcp` | MCP server (stdio) | `aimd-mcp` |
+Install API/MCP packages when needed:
 
 ```bash
-pip install 'aimd[api]'          # HTTP API only
-pip install 'aimd[mcp]'         # MCP only
-pip install 'aimd[api,mcp]'      # both
-uv sync --extra api --extra mcp  # same, in a uv project
+# HTTP API
+pip install aimd-api
+
+# MCP server
+pip install aimd-mcp
+
+# Both
+pip install aimd-api aimd-mcp
+
+# Everything published by the workspace
+pip install "aimd[all]"
 ```
 
-### Development Setup
+From a source checkout, use the workspace directly:
 
 ```bash
-# Clone and install for development
 git clone https://github.com/shuuul/aimd.git
 cd aimd
-# Dev group includes API/MCP deps for tests; core install is CLI-only
-uv sync --dev --upgrade
-
-
-## Quick Start
-
-```bash
-# Process any input - auto-detects type
-aimd audio.mp3                    # Transcribe audio
-aimd "https://youtube.com/watch?v=..."  # Extract video subtitles
-aimd book.epub                    # Convert EPUB to markdown
-aimd document.txt                 # Convert text to markdown
-
-# With options
-aimd audio.mp3 -o output.md       # Custom output file
-aimd audio.mp3 -e mlx             # Specify engine
-aimd interview.wav -l zh          # Specify language
+uv sync --dev
+uv run aimd --help
 ```
 
-## Usage
+Platform notes:
 
-### Audio/Video Transcription
+- macOS transcription is optimized for Apple Silicon through `mlx-audio`.
+- Linux transcription uses `qwen-asr` and requires a CUDA-capable GPU.
+- Local file conversion is powered by MarkItDown. Ebook conversion is handled by `aimd-book`; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
+
+## Quick start
 
 ```bash
-# Automatic engine selection (recommended)
-aimd audio.mp3 --engine auto
+# Auto-detect input type
+aimd audio.mp3
+aimd "https://youtube.com/watch?v=..."
+aimd book.epub
+aimd notes.txt
 
-# Specify transcription engine explicitly
-aimd audio.wav --engine mlx       # Apple Silicon, Qwen3-ASR via mlx-audio (default on macOS)
-aimd audio.wav --engine qwen      # Qwen3-ASR via qwen-asr (default on Linux, requires CUDA)
-
-# Select a specific model (mlx defaults to Qwen3-ASR-1.7B-4bit)
-aimd audio.wav -e mlx -m mlx-community/Qwen3-ASR-1.7B-4bit
-
-# Process with specific language
-aimd interview.m4a --language zh
-
-# Custom output file
-aimd lecture.mp3 -o meeting_notes.md
+# Common options
+aimd audio.mp3 --output transcript.md
+aimd audio.wav --engine mlx --language zh
+aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
+aimd "https://youtube.com/watch?v=..." --raw-transcript
 ```
 
-#### Available Transcription Engines
+## CLI usage
 
-- **`auto`** (default): Automatically selects the best engine for your platform
-- **`mlx`**: Apple Silicon only; [mlx-audio](https://github.com/Blaizzy/mlx-audio) running Qwen3-ASR (**default** on macOS when available).
-- **`qwen`**: Linux only; [qwen-asr](https://github.com/QwenLM/Qwen3-ASR) with native Qwen3-ASR on a CUDA-capable GPU. **Default** on Linux.
-
-#### Auto-Selection Priority
-
-| Platform | Priority |
-|----------|----------|
-| macOS (Apple Silicon) | `mlx` |
-| Linux + CUDA | `qwen` |
-
-#### MLX Model Selection
-
-The `mlx` engine supports Qwen3-ASR models via `--model` / `-m`:
-
-| Model | Description |
-|-------|-------------|
-| `mlx-community/Qwen3-ASR-1.7B-4bit` | Qwen3-ASR 1.7B (4-bit quantized) **(default)** |
-| `mlx-community/Qwen3-ASR-1.7B-6bit` | Qwen3-ASR 1.7B (6-bit quantized) |
-| `mlx-community/Qwen3-ASR-1.7B-8bit` | Qwen3-ASR 1.7B (8-bit quantized) |
-| `mlx-community/Qwen3-ASR-0.6B-4bit` | Qwen3-ASR 0.6B (4-bit quantized) |
-| `mlx-community/Qwen3-ASR-0.6B-6bit` | Qwen3-ASR 0.6B (6-bit quantized) |
-| `mlx-community/Qwen3-ASR-0.6B-8bit` | Qwen3-ASR 0.6B (8-bit quantized) |
-
-Pass `-l` with a short code (`en`, `zh`, `ja`, …); defaults to Chinese when omitted.
-
-#### Qwen Model Selection
-
-The `qwen` engine supports the same Qwen3-ASR family via `--model` / `-m`:
-
-| Model | Description |
-|-------|-------------|
-| `Qwen/Qwen3-ASR-1.7B` | Qwen3-ASR 1.7B **(default)** |
-| `Qwen/Qwen3-ASR-0.6B` | Qwen3-ASR 0.6B |
-
-The `qwen` engine requires Linux with a CUDA-capable GPU and the `qwen-asr` package.
-
-### Video URL Processing
-
-Extract content from video platforms:
+### Audio and video files
 
 ```bash
-# YouTube video
-aimd "https://www.youtube.com/watch?v=I3WUiD8HYn8"
-
-# Bilibili video
-aimd "https://www.bilibili.com/video/BV1Rz4y127jd"
-
-# Xiaoyuzhou Podcast
-aimd "https://www.xiaoyuzhoufm.com/episode/69277ae50084e2631deb56e0"
+aimd interview.m4a
+aimd lecture.mp3 --engine auto
+aimd audio.wav --engine mlx
+aimd audio.wav --engine qwen
+aimd audio.wav --model mlx-community/Qwen3-ASR-1.7B-4bit
 ```
 
-By default, downloaded subtitles are simplified to plain text (SRT/VTT timestamps and sequence numbers are stripped). Use `--raw-transcript` to preserve the original subtitle formatting:
+Engines:
+
+| Engine | Platform | Notes |
+|--------|----------|-------|
+| `auto` | macOS/Linux | Selects the best available backend. |
+| `mlx` | Apple Silicon | Uses `mlx-audio`; default local backend on macOS when available. |
+| `qwen` | Linux/CUDA | Uses `qwen-asr`; default local backend on Linux when available. |
+
+### URLs
 
 ```bash
-# Default: clean plain text output
 aimd "https://www.youtube.com/watch?v=..."
-
-# Preserve original SRT/VTT formatting
-aimd "https://www.youtube.com/watch?v=..." --raw-transcript
+aimd "https://www.bilibili.com/video/BV..."
+aimd "https://www.xiaoyuzhoufm.com/episode/..."
 ```
 
-#### Authenticated Access
+Subtitles are simplified to plain text by default. Use `--raw-transcript` to preserve SRT/VTT formatting.
 
-For premium or age-restricted content, you may need to export your browser cookies:
+For authenticated or restricted content:
 
 ```bash
-# Export Chrome cookies to a file
-yt-dlp --cookies-from-browser chrome --cookies cookies.txt
-
-# Use cookies file with aimd
 aimd "https://youtube.com/watch?v=..." --cookies cookies.txt
-
-# Or read cookies directly from browser profile
 aimd "https://www.bilibili.com/video/BV..." --cookies-from-browser "chrome:default"
 ```
 
-> **Note**: Cookie files are in Netscape format and can also be created using browser extensions like "Get cookies.txt" (Chrome) or "Cookie-Editor" (Firefox).
-
-### Document Conversion
-
-Convert documents to markdown:
+### Documents
 
 ```bash
-# Convert EPUB to markdown (extracts images and chapters)
 aimd book.epub
-
-# Convert text file
-aimd notes.txt
-
-# Convert with custom output
-aimd document.epub -o output.md
+aimd book.mobi
+aimd book.azw3
+aimd document.pdf
+aimd notes.md
+aimd document.epub --output output.md
 ```
 
-#### EPUB Output Structure
+Book files are expanded into a structured output directory:
 
-When processing EPUB files, aimd:
-- Reads the EPUB **spine** for correct chapter ordering (falls back to alphabetical if spine is unavailable)
-- Converts each chapter via pandoc (`-f html -t markdown_mmd-raw_html --wrap=none`)
-- Applies post-processing cleanup (heading normalisation, footnote conversion, image path fixup, TOC flattening)
-- Extracts all images into a flat `images/` directory
-
-Output layout:
-
-```
+```text
 book_name/
-├── book_name.md      # Combined content (chapters separated by ---)
+├── book_name.md
 ├── chapters/
-│   ├── intro.md      # Named after original HTML stems
-│   ├── chapter01.md
-│   └── ...
 └── images/
-    └── *.jpg, *.png, etc.
 ```
 
-## HTTP API (FastAPI)
+The book pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup.
 
-Run the API service:
+Current note: `aimd-book` owns the ebook converter and routes `.epub`, `.mobi`, and `.azw3` as book inputs. The implemented extraction pipeline is EPUB-compatible; non-EPUB ebook formats may still need a later format-specific conversion step before the same cleanup pipeline can succeed.
+
+### MarkItDown plugins
+
+`aimd` uses MarkItDown for local files with plugins enabled. The workspace packages `aimd-media` and `aimd-book` register standard `markitdown.plugin` entry points, so installing `aimd` also installs the ASR and ebook converters.
+
+You can also use the plugins from MarkItDown directly:
+
+```bash
+markitdown --list-plugins
+markitdown --use-plugins book.epub -o book.md
+markitdown --use-plugins audio.mp3 -o transcript.md
+```
+
+## HTTP API
+
+Run the API server:
 
 ```bash
 aimd-api
-# or: uv run uvicorn aimd.api:app --host 127.0.0.1 --port 8000
 ```
 
-Health check:
+Endpoints:
 
 ```bash
 curl http://127.0.0.1:8000/healthz
-```
-
-Inspect transcription engine availability (preflight):
-
-```bash
 curl http://127.0.0.1:8000/v1/engines
-```
 
-Process any supported input:
-
-```bash
 curl -X POST http://127.0.0.1:8000/v1/process \
   -H "Content-Type: application/json" \
   -d '{
-    "input_source": "https://www.youtube.com/watch?v=I3WUiD8HYn8",
+    "input_source": "https://www.youtube.com/watch?v=...",
     "transcribe_engine": "auto",
     "language": "en"
   }'
 ```
 
-OpenAPI docs are available at:
-- `/docs`
-- `/redoc`
+OpenAPI docs are available at `/docs` and `/redoc`.
 
-## MCP Server
+## MCP server
 
-Run an MCP server over stdio:
+Run the stdio MCP server:
 
 ```bash
 aimd-mcp
 ```
 
-Available MCP tools:
+Tools:
+
 - `healthz`
 - `list_engines`
 - `process_input`
 
-`process_input` mirrors the API/CLI behavior and supports:
-- `input_source`
-- `transcribe_engine`
-- `model` (mlx Qwen3-ASR path or qwen-asr model id)
-- `language`
-- `output_file`
-- `save_original`
-- `cookies`
-- `raw_transcript` (preserve original subtitle formatting, default: `false`)
-
-## Supported Formats
-
-### Video Platforms
-
-Thanks to yt-dlp integration, aimd supports content extraction from:
-
-- **YouTube** - Videos, subtitles, metadata
-- **Bilibili** - Chinese video platform, subtitles, metadata
-- **1000+ other platforms** - See [yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
-
-### Audio Files
-
-- **Common Formats**: MP3, WAV, M4A, FLAC, OGG, AAC
-- **Video Audio**: MP4 (extracts audio for transcription)
-- **Languages**: Multi-language transcription with auto-detection
-
-### Document Formats
-
-- **EPUB**: `.epub` ebooks
-- **Markdown**: `.md` files
-- **Plain Text**: `.txt` files
-- **And 40+ other formats** via Pandoc
-
-> **Tip**: For scanned PDFs, we recommend using [MinerU](https://github.com/opendatalab/MinerU) or the [MinerU Desktop App](https://mineru.net) for high-quality OCR and layout extraction, then pass the extracted markdown to aimd for further processing.
+`process_input` mirrors the CLI/API flow and accepts options such as `input_source`, `transcribe_engine`, `model`, `language`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`. For MCP, temporary files are controlled by the `AIMD_TEMP_DIR` environment variable.
 
 ## Configuration
 
-### Environment Variables
-
 ```bash
-# Optional: yt-dlp configuration
+# Optional yt-dlp configuration
 export YT_DLP_CONFIG_HOME="/path/to/config"
 export YT_DLP_CACHE_DIR="/path/to/cache"
 
-# Optional: custom temporary directory for intermediate files
-# Useful for sandboxed environments where /tmp is not writable
+# Optional temporary directory for downloads, transcoding, and ebook extraction
 export AIMD_TEMP_DIR="/path/to/writable/tmp"
 ```
 
-### Sandboxed Environments
-
-By default, aimd uses the system temporary directory (`/tmp`) for intermediate files such as downloaded audio and EPUB extraction. In sandboxed environments where `/tmp` may not be writable, you can redirect temp I/O:
-
-```bash
-# Via environment variable (works for CLI, MCP, and HTTP API)
-export AIMD_TEMP_DIR="/path/to/writable/tmp"
-
-# Or via CLI option
-aimd audio.mp3 --temp-dir /path/to/writable/tmp
-```
-
-The directory will be created automatically if it does not exist.
+You can also pass `--temp-dir` on the CLI.
 
 ## Development
 
-### Setup Development Environment
-
 ```bash
-# Clone from the official repository
-git clone https://github.com/shuuul/aimd.git
-cd aimd
-
-# Install dependencies (dev group includes API/MCP libs for tests)
 uv sync --dev --upgrade
-
-# Run code quality checks
-uv run ruff check --fix && uv run ruff format
 uv run prek --all-files
+uv run pytest -q
 ```
 
-### Version Management
+Useful maintenance commands:
 
 ```bash
-# Bump version
-uv version --bump patch  # or minor, major
+uv run prek autoupdate
+uv build --all-packages
+uv version --bump patch
 ```
 
-### Testing
+Project layout:
 
-```bash
-# Run tests
-uv run pytest
-
-# Test CLI functionality
-aimd --help
-```
-
-### Project Structure
-
-```
-aimd/
-├── src/aimd/
-│   ├── cli.py                    # CLI entrypoint
-│   ├── api.py                    # FastAPI entrypoint
-│   ├── mcp.py                    # MCP entrypoint
-│   ├── errors.py                 # Domain error types
-│   ├── const.py                  # Constants (extensions, engines, languages)
-│   ├── utils.py                  # URL/file utility helpers
-│   ├── types.py                  # TextContext model
-│   ├── application/              # Use-cases and dependency wiring
-│   ├── infrastructure/           # Concrete processing implementations
-│   └── adapters/                 # CLI/API/MCP interface adapters
-├── tests/
-├── docs/
-├── pyproject.toml
-└── AGENTS.md
+```text
+packages/
+├── aimd/            # Core CLI, routing, MarkItDown runner
+├── aimd-api/        # FastAPI service package
+├── aimd-mcp/        # MCP stdio server package
+├── aimd-media/      # yt-dlp URLs, subtitles, audio fallback, ASR plugin
+├── aimd-book/       # MarkItDown plugin for ebook spine/image extraction and cleanup
+├── aimd-ocr/        # OCR package scaffold for scanned PDFs/images
+└── aimd-html/        # Defuddle CLI wrapper for readable HTML extraction
 ```
 
 ## Architecture
 
-### Core Components
+`aimd` is now a uv workspace. The main package uses MarkItDown as the local-file conversion contract and follows a ports/adapters layout:
 
-- **Application Layer**: `application/use_cases/*` owns orchestration and flow decisions.
-- **Infrastructure Layer**: `infrastructure/*` contains integrations (yt-dlp, pandoc, transcription runtimes).
-- **Adapter Layer**: `adapters/*` maps CLI/API/MCP inputs to use-cases and maps outputs back.
-- **Typed Error Contract**: `AimdError` subclasses provide consistent interface behavior.
+- `application` owns orchestration and task routing.
+- `process_input.py` acts as the facade/router; local file processors call `MarkItDown(enable_plugins=True)`.
+- Feature packages register MarkItDown plugins: `aimd-media` for local audio/video ASR and `aimd-book` for ebooks. `aimd-book` is the package name for book-like formats even though the current extraction pipeline is EPUB-compatible. `aimd-ocr` is the next plugin scaffold, and `aimd-html` wraps Defuddle-backed HTML extraction.
+- `aimd-media` owns URL media extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and ASR.
+- The main `aimd.infrastructure` wraps media/MarkItDown markdown results into `TextContext` chunks.
+- CLI/API/MCP packages translate interface requests into application use-cases. Output file persistence is adapter-owned and shared through `aimd.application.services.output_writer`; it is not part of `ProcessInput`.
 
-### Processing Pipelines
-
-#### Audio/Video Processing
-
-1. **Adapter Input Mapping**: CLI/API/MCP request -> `ProcessInput`
-2. **Use-case Orchestration**: task type detection and transcript/convert routing
-3. **Infra Execution**: engine preflight + subtitle/audio/document extraction
-4. **Output Mapping**: `ProcessResult` serialized to CLI text/API JSON/MCP response
-
-#### Document Conversion
-
-1. **Format Detection**: extension + supported format checks
-2. **Pandoc Conversion**: source document -> markdown (`markdown_mmd-raw_html`, `--wrap=none`)
-3. **Title Extraction**: normalized title resolution from content
-4. **Chunking / EPUB Layout**: markdown splitting and EPUB spine-ordered chapter/image extraction with post-processing cleanup
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes following the code style
-4. Add tests for new functionality
-5. Submit a pull request
+All processing returns a shared `TextContext` shape: title, chunks, and split metadata.
 
 ## License
 
-MIT License - see LICENSE file for details.
-
-## Support
-
-- **Issues**: Report bugs and request features on GitHub
-- **Documentation**: See AGENTS.md for detailed architecture information
+MIT. See [LICENSE](LICENSE).
