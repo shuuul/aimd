@@ -7,7 +7,7 @@ from ...errors import InputNotFoundError, UnsupportedInputError
 from ...utils import is_url
 from ..models import InputRoute, TaskType
 
-from aimd.media.const import AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
+from aimd.asr.const import AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 
 FileSupportChecker = Callable[[str | Path], bool]
 

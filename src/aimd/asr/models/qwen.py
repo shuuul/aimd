@@ -6,9 +6,9 @@ from pathlib import Path
 
 from logly import logger
 
-from .const import QWEN_ASR_DEFAULT_MODEL, QWEN_ASR_MODELS
-from .errors import ProcessingFailedError, UnsupportedInputError
-from .audio_utils import convert_to_wav_if_needed
+from ..audio_utils import convert_to_wav_if_needed
+from ..const import QWEN_ASR_DEFAULT_MODEL, QWEN_ASR_MODELS
+from ..errors import ProcessingFailedError, UnsupportedInputError
 
 # Silence noisy upstream transformers generation warnings. These are benign and
 # would otherwise pollute CLI output.

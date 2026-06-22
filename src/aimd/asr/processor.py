@@ -8,8 +8,8 @@ from logly import logger
 from .capabilities import resolve_engine_with_preflight
 from .const import AUDIO_EXTENSIONS
 from .errors import ProcessingFailedError, UnsupportedInputError
-from .mlx_engine import transcribe_audio_mlx
-from .qwen_engine import transcribe_audio_qwen
+from .models.mlx import transcribe_audio_mlx
+from .models.qwen import transcribe_audio_qwen
 
 
 async def transcribe_file(

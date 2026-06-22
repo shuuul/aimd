@@ -10,7 +10,7 @@ from aimd.core.errors import (
     UnsupportedInputError,
 )
 from aimd.core.types import TextContext
-from aimd.media import EngineCapability
+from aimd.asr import EngineCapability
 
 
 class _FakeProcessUseCase:

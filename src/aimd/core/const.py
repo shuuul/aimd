@@ -4,7 +4,7 @@
 # FILE PROCESSING CONSTANTS
 # =============================================================================
 
-from aimd.media.const import AUDIO_EXTENSIONS
+from aimd.asr.const import AUDIO_EXTENSIONS
 
 # Ebook file extensions (require special handling for image extraction)
 BOOK_EXTENSIONS = {".epub", ".mobi", ".azw3"}

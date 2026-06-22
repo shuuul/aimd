@@ -8,7 +8,7 @@ from typing import Any, cast
 import yt_dlp
 from logly import logger
 
-from aimd.media import transcribe_file
+from aimd.asr import transcribe_file
 
 from ..errors import ProcessingFailedError
 from .cookies import (

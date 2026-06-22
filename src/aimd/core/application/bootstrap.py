@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from aimd.media import (
+from aimd.asr import (
     get_engine_capabilities,
     resolve_engine_with_preflight,
 )

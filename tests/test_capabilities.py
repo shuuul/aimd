@@ -1,10 +1,10 @@
 import pytest
 
-from aimd.media.capabilities import (
+from aimd.asr.capabilities import (
     EngineCapability,
     resolve_engine_with_preflight,
 )
-from aimd.media.errors import EngineUnavailableError, UnsupportedEngineError
+from aimd.asr.errors import EngineUnavailableError, UnsupportedEngineError
 
 
 def test_resolve_engine_invalid_name() -> None:
@@ -14,7 +14,7 @@ def test_resolve_engine_invalid_name() -> None:
 
 def _patch_capabilities(monkeypatch, capabilities: dict[str, EngineCapability]) -> None:
     monkeypatch.setattr(
-        "aimd.media.capabilities.get_engine_capabilities",
+        "aimd.asr.capabilities.get_engine_capabilities",
         lambda: capabilities,
     )
 
@@ -59,7 +59,7 @@ def test_resolve_engine_auto_prefers_platform_engine(
     capabilities: dict[str, EngineCapability],
     expected_engine: str,
 ) -> None:
-    monkeypatch.setattr("aimd.media.capabilities.platform.system", lambda: system)
+    monkeypatch.setattr("aimd.asr.capabilities.platform.system", lambda: system)
     _patch_capabilities(monkeypatch, capabilities)
 
     assert resolve_engine_with_preflight("auto") == expected_engine
@@ -89,7 +89,7 @@ def test_resolve_engine_auto_no_engine(
     system: str,
     capabilities: dict[str, EngineCapability],
 ) -> None:
-    monkeypatch.setattr("aimd.media.capabilities.platform.system", lambda: system)
+    monkeypatch.setattr("aimd.asr.capabilities.platform.system", lambda: system)
     _patch_capabilities(monkeypatch, capabilities)
 
     with pytest.raises(EngineUnavailableError):

@@ -13,8 +13,8 @@ from markitdown import (
     StreamInfo,
 )
 
-from .const import AUDIO_EXTENSIONS
-from .processor import transcribe_file_sync
+from aimd.asr import transcribe_file_sync
+from aimd.asr.const import AUDIO_EXTENSIONS
 
 __plugin_interface_version__ = 1
 

@@ -7,10 +7,10 @@ from pathlib import Path
 
 from logly import logger
 
-from .const import MLX_AUDIO_DEFAULT_MODEL, MLX_AUDIO_MODELS
-from .errors import ProcessingFailedError, UnsupportedInputError
-from .platform_utils import is_apple_silicon
-from .audio_utils import convert_to_wav_if_needed
+from ..audio_utils import convert_to_wav_if_needed
+from ..const import MLX_AUDIO_DEFAULT_MODEL, MLX_AUDIO_MODELS
+from ..errors import ProcessingFailedError, UnsupportedInputError
+from ..platform_utils import is_apple_silicon
 
 LANGUAGE_CODE_TO_NAME = {
     "zh": "Chinese",

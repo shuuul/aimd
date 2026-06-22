@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from aimd.media import EngineCapability
-from aimd.media.errors import EngineUnavailableError
+from aimd.asr import EngineCapability
+from aimd.asr.errors import EngineUnavailableError
 
 
 @dataclass(slots=True)
