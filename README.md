@@ -249,6 +249,16 @@ uv build --all-packages
 uv version --bump patch
 ```
 
+Release a tagged version:
+
+```bash
+# Make sure all packages have the same version, then push a v-prefixed tag.
+git tag v0.9.0
+git push origin v0.9.0
+```
+
+The release workflow builds every workspace package, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes the distributions to PyPI using the `UV_PUBLISH_TOKEN` repository secret.
+
 Project layout:
 
 ```text
