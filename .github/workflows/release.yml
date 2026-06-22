@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
@@ -11,6 +12,7 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
@@ -32,6 +34,7 @@ jobs:
           enable-cache: true
 
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           expected="${GITHUB_REF_NAME#v}"
@@ -112,6 +115,7 @@ jobs:
     needs:
       - build
       - smoke-install
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     steps:
@@ -145,12 +149,10 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Publish distributions to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
         shell: bash
         run: |
           set +e
-          output="$(uv publish dist/aimd_tool-* 2>&1)"
+          output="$(uv publish --trusted-publishing always dist/aimd_tool-* 2>&1)"
           status=$?
           echo "$output"
           if [ "$status" -eq 0 ]; then
