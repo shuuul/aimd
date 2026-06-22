@@ -20,7 +20,7 @@ torch = [
 torchaudio = [
     { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" }
 ]
-aimd = { workspace = true }
+aimd-cli = { workspace = true }
 aimd-api = { workspace = true }
 aimd-media = { workspace = true }
 aimd-mcp = { workspace = true }

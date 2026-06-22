@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.9.1-blue" alt="Version 0.9.1">
+    <img src="https://img.shields.io/badge/version-0.9.2-blue" alt="Version 0.9.2">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -42,7 +42,7 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 Install the CLI after release:
 
 ```bash
-uv tool install aimd
+uv tool install aimd-cli
 aimd --help
 ```
 
@@ -50,14 +50,14 @@ Install from GitHub `main` before a release:
 
 ```bash
 uv tool install --force \
-  "aimd @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd"
+  "aimd-cli @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd"
 ```
 
 Install the full tool set from GitHub, including the API and MCP executables:
 
 ```bash
 uv tool install --force \
-  "aimd[all] @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd" \
+  "aimd-cli[all] @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd" \
   --with-executables-from aimd-api \
   --with-executables-from aimd-mcp
 ```
@@ -72,7 +72,7 @@ uv tool install aimd-api
 uv tool install aimd-mcp
 
 # Or install into an existing Python environment
-uv pip install "aimd[all]"
+uv pip install "aimd-cli[all]"
 ```
 
 From a source checkout, use the workspace directly:
@@ -253,8 +253,8 @@ Release a tagged version:
 
 ```bash
 # Make sure all packages have the same version, then push a v-prefixed tag.
-git tag v0.9.1
-git push origin v0.9.1
+git tag v0.9.2
+git push origin v0.9.2
 ```
 
 The release workflow builds every workspace package, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes the distributions to PyPI using the `UV_PUBLISH_TOKEN` repository secret.

@@ -1,6 +1,6 @@
 [project]
 name = "aimd-media"
-version = "0.9.1"
+version = "0.9.2"
 description = "Media URL and audio/video transcription package for aimd."
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }

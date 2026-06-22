@@ -90,7 +90,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="aimd API",
         description="Context preparation API for LLM workflows",
-        version=version("aimd"),
+        version=version("aimd-cli"),
     )
     container = build_container()
 

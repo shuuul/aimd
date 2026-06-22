@@ -93,7 +93,7 @@ jobs:
       - name: Install released ref as uv tool
         run: >-
           uv tool install --force
-          "aimd[all] @ git+https://github.com/${{ github.repository }}.git@${{ github.ref_name }}#subdirectory=packages/aimd"
+          "aimd-cli[all] @ git+https://github.com/${{ github.repository }}.git@${{ github.ref_name }}#subdirectory=packages/aimd"
           --with-executables-from aimd-api
           --with-executables-from aimd-mcp
 
@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           aimd --help >/dev/null
-          python_bin="$(uv tool dir)/aimd/bin/python"
+          python_bin="$(uv tool dir)/aimd-cli/bin/python"
           "$python_bin" - <<'PY'
           import aimd
           import aimd_api

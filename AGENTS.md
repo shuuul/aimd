@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-21
-**Version:** 0.9.1
+**Version:** 0.9.2
 **Branch:** main
 
 ## OVERVIEW
@@ -180,7 +180,7 @@ uv version --bump patch  # or minor/major
 
 - Workspace members: `aimd`, `aimd-api`, `aimd-mcp`, `aimd-media`, `aimd-book`, `aimd-ocr`, `aimd-html`.
 - Core package is CLI-first: `aimd`; API and MCP are separate installable packages.
-- `aimd[all]` installs convenience package dependencies for API, MCP, OCR, and HTML helpers.
+- `aimd-cli[all]` installs convenience package dependencies for API, MCP, OCR, and HTML helpers.
 - Dev group includes API/MCP dependencies so tests run with `uv sync --dev`.
 - `torch`/`torchaudio` resolve from the PyTorch CPU wheel index on Darwin.
 - `defuddle` is a Node/TypeScript package; `aimd-html` wraps `npx defuddle parse` rather than vendoring Node code.

@@ -17,9 +17,9 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "aimd",
     "aimd-api",
     "aimd-book",
+    "aimd-cli",
     "aimd-html",
     "aimd-mcp",
     "aimd-media",
@@ -60,8 +60,40 @@ wheels = [
 ]
 
 [[package]]
-name = "aimd"
-version = "0.9.1"
+name = "aimd-api"
+version = "0.9.2"
+source = { editable = "packages/aimd-api" }
+dependencies = [
+    { name = "aimd-cli" },
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aimd-cli", editable = "packages/aimd" },
+    { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "uvicorn", specifier = ">=0.35.0" },
+]
+
+[[package]]
+name = "aimd-book"
+version = "0.9.2"
+source = { editable = "packages/aimd-book" }
+dependencies = [
+    { name = "logly" },
+    { name = "markitdown" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "logly", specifier = ">=0.1.6" },
+    { name = "markitdown", specifier = ">=0.1.1,<0.2.0" },
+]
+
+[[package]]
+name = "aimd-cli"
+version = "0.9.2"
 source = { editable = "packages/aimd" }
 dependencies = [
     { name = "aimd-book" },
@@ -100,60 +132,28 @@ requires-dist = [
 provides-extras = ["all"]
 
 [[package]]
-name = "aimd-api"
-version = "0.9.1"
-source = { editable = "packages/aimd-api" }
-dependencies = [
-    { name = "aimd" },
-    { name = "fastapi" },
-    { name = "uvicorn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aimd", editable = "packages/aimd" },
-    { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "uvicorn", specifier = ">=0.35.0" },
-]
-
-[[package]]
-name = "aimd-book"
-version = "0.9.1"
-source = { editable = "packages/aimd-book" }
-dependencies = [
-    { name = "logly" },
-    { name = "markitdown" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "logly", specifier = ">=0.1.6" },
-    { name = "markitdown", specifier = ">=0.1.1,<0.2.0" },
-]
-
-[[package]]
 name = "aimd-html"
-version = "0.9.1"
+version = "0.9.2"
 source = { editable = "packages/aimd-html" }
 
 [[package]]
 name = "aimd-mcp"
-version = "0.9.1"
+version = "0.9.2"
 source = { editable = "packages/aimd-mcp" }
 dependencies = [
-    { name = "aimd" },
+    { name = "aimd-cli" },
     { name = "mcp" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "aimd", editable = "packages/aimd" },
+    { name = "aimd-cli", editable = "packages/aimd" },
     { name = "mcp", specifier = ">=1.18.0" },
 ]
 
 [[package]]
 name = "aimd-media"
-version = "0.9.1"
+version = "0.9.2"
 source = { editable = "packages/aimd-media" }
 dependencies = [
     { name = "accelerate" },
@@ -187,7 +187,7 @@ requires-dist = [
 
 [[package]]
 name = "aimd-ocr"
-version = "0.9.1"
+version = "0.9.2"
 source = { editable = "packages/aimd-ocr" }
 
 [[package]]
