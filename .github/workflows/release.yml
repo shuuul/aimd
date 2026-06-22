@@ -101,13 +101,13 @@ jobs:
           command -v aimd-mcp >/dev/null
           python_bin="$(uv tool dir)/aimd-tool/bin/python"
           "$python_bin" - <<'PY'
-          import aimd.api
           import aimd.core
-          import aimd.mcp
+          import aimd.interfaces.api
+          import aimd.interfaces.mcp
 
           assert aimd.core.__name__ == "aimd.core"
-          assert aimd.api.create_app().__class__.__name__ == "FastAPI"
-          assert aimd.mcp.mcp.__class__.__name__ == "FastMCP"
+          assert aimd.interfaces.api.create_app().__class__.__name__ == "FastAPI"
+          assert aimd.interfaces.mcp.mcp.__class__.__name__ == "FastMCP"
           PY
 
   github-release:
