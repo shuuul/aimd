@@ -6,8 +6,10 @@ from typing import Literal
 
 from ..types import TextContext
 
-SourceKind = Literal["url", "audio_file", "video_file", "document_file", "unknown"]
-TaskType = Literal["transcript", "convert"]
+SourceKind = Literal[
+    "url", "audio_file", "video_file", "document_file", "image_file", "unknown"
+]
+TaskType = Literal["transcript", "convert", "ocr"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -23,9 +25,12 @@ class ProcessInput:
     """Canonical process request model consumed by use-cases."""
 
     input_source: str
+    task_type: TaskType | None = None
     transcribe_engine: str = "auto"
     model: str | None = None
     language: str | None = None
+    start: int | None = None
+    end: int | None = None
     save_original: Path | None = None
     cookies: Path | None = None
     cookies_from_browser: str | None = None

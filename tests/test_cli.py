@@ -45,6 +45,13 @@ def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
     assert out.read_text(encoding="utf-8") == "hello"
 
 
+def test_cli_does_not_expose_task_option() -> None:
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "--task" not in result.stdout
+
+
 def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
     output_dir = tmp_path / "book"
 

@@ -56,7 +56,7 @@ def _configure_logging(log_level: str) -> None:
 def process(
     input_source: str = typer.Argument(
         ...,
-        help="Audio file, video file, video URL, or document to process",
+        help="Audio file, video file, video URL, document, image, or scanned PDF to process",
     ),
     output_file: Optional[Path] = typer.Option(
         None,
@@ -68,13 +68,15 @@ def process(
         "auto",
         "--engine",
         "-e",
-        help="Transcription engine: mlx (Apple Silicon, mlx-audio STT), qwen (Linux/CUDA, Qwen3-ASR via Transformers).",
+        help="Engine. Transcript: mlx (Apple Silicon) or qwen (Linux/CUDA). OCR: mlx4ocr (macOS) or transformers (Linux).",
     ),
     model: Optional[str] = typer.Option(
         None,
         "--model",
         "-m",
-        help="Model for transcription. mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
+        help="Model for transcription, or OCR model: paddleocr_v6 (default), "
+        "glm_ocr, or paddleocr_vl. "
+        "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
         "and also supports other documented mlx-audio STT model IDs. "
         "qwen supports Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
     ),
@@ -82,7 +84,17 @@ def process(
         None,
         "--language",
         "-l",
-        help="Language code for transcription (e.g., zh, en, ja).",
+        help="Language code/hint for transcription or OCR (e.g., zh, en, ja).",
+    ),
+    start: Optional[int] = typer.Option(
+        None,
+        "--start",
+        help="0-based inclusive start page for OCR PDF inputs.",
+    ),
+    end: Optional[int] = typer.Option(
+        None,
+        "--end",
+        help="0-based inclusive end page for OCR PDF inputs.",
     ),
     save_original: Optional[Path] = typer.Option(
         None,
@@ -136,6 +148,8 @@ def process(
     logger.info(f"Task: {task_type}")
     if task_type == "transcript":
         logger.info(f"Transcription Engine: {transcribe_engine}")
+    elif task_type == "ocr":
+        logger.info(f"OCR Engine: {transcribe_engine}")
 
     async def run_processing() -> None:
         try:
@@ -150,6 +164,8 @@ def process(
                     transcribe_engine=transcribe_engine,
                     model=model,
                     language=language,
+                    start=start,
+                    end=end,
                     save_original=save_original,
                     cookies=cookies,
                     cookies_from_browser=cookies_from_browser,
@@ -172,9 +188,11 @@ def process(
 
             final_output_file = output_file
             if final_output_file is None:
-                suffix = (
-                    "transcript" if result.task_type == "transcript" else "converted"
-                )
+                suffix = {
+                    "transcript": "transcript",
+                    "convert": "converted",
+                    "ocr": "ocr",
+                }[result.task_type]
                 default_dir = (
                     Path.cwd()
                     if result.task_type == "transcript"
@@ -196,6 +214,9 @@ def process(
             if result.task_type == "transcript":
                 logger.info(f"Transcript saved to: {final_output_file}")
                 typer.echo("Successfully transcribed")
+            elif result.task_type == "ocr":
+                logger.info(f"OCR output saved to: {final_output_file}")
+                typer.echo("Successfully OCR processed")
             else:
                 logger.info(f"Converted file saved to: {final_output_file}")
                 typer.echo("Successfully converted")
@@ -204,7 +225,11 @@ def process(
             logger.error(str(e))
             raise typer.Exit(1)
         except Exception as e:
-            task_name = "Transcription" if task_type == "transcript" else "Conversion"
+            task_name = {
+                "transcript": "Transcription",
+                "convert": "Conversion",
+                "ocr": "OCR",
+            }.get(task_type, "Processing")
             logger.error(f"{task_name} failed: {e}")
             raise typer.Exit(1)
 

@@ -16,12 +16,14 @@ class ProcessInputUseCase:
     processors: Mapping[TaskType, TaskProcessor]
     is_supported_file: FileSupportChecker
 
-    def ensure_supported_input(self, input_source: str) -> InputRoute:
+    def ensure_supported_input(
+        self, input_source: str, task_type: TaskType | None = None
+    ) -> InputRoute:
         """Validate and return the source/task route for a source."""
-        return ensure_supported_input(input_source, self.is_supported_file)
+        return ensure_supported_input(input_source, self.is_supported_file, task_type)
 
     async def execute(self, request: ProcessInput) -> ProcessResult:
-        route = self.ensure_supported_input(request.input_source)
+        route = self.ensure_supported_input(request.input_source, request.task_type)
         task_type = route.task_type
         if task_type is None:
             raise UnsupportedInputError("Unsupported input source.")

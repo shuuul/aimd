@@ -12,9 +12,14 @@ from ..infrastructure.markitdown_processor import (
     is_supported_file,
 )
 from ..infrastructure.media_processor import get_text_context_from_media_url
+from aimd.ocr import process_ocr
 from .use_cases.list_engines import ListEnginesUseCase
 from .use_cases.process_input import ProcessInputUseCase
-from .use_cases.processors import ConvertTaskProcessor, TranscriptTaskProcessor
+from .use_cases.processors import (
+    ConvertTaskProcessor,
+    OCRTaskProcessor,
+    TranscriptTaskProcessor,
+)
 
 
 @dataclass(slots=True)
@@ -35,12 +40,16 @@ def build_container() -> AppContainer:
     convert_processor = ConvertTaskProcessor(
         process_file=convert_file_with_markitdown,
     )
+    ocr_processor = OCRTaskProcessor(
+        process_file=process_ocr,
+    )
 
     return AppContainer(
         process_input_use_case=ProcessInputUseCase(
             processors={
                 "transcript": transcript_processor,
                 "convert": convert_processor,
+                "ocr": ocr_processor,
             },
             is_supported_file=is_supported_file,
         ),

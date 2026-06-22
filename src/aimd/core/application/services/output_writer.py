@@ -8,7 +8,7 @@ from ..models import ProcessResult
 
 
 def build_output_text(
-    task_type: Literal["transcript", "convert"],
+    task_type: Literal["transcript", "convert", "ocr"],
     chunk_list: list[str],
 ) -> str:
     """Build persisted markdown text for the given task output."""
@@ -23,7 +23,7 @@ def build_output_text(
 
 def persist_output(
     output_file: Path,
-    task_type: Literal["transcript", "convert"],
+    task_type: Literal["transcript", "convert", "ocr"],
     chunk_list: list[str],
 ) -> Path:
     """Write task output to disk and return resolved path."""

@@ -3,9 +3,11 @@ from pathlib import Path
 import pytest
 
 from aimd.core.application.models import InputRoute, ProcessInput, ProcessResult
+from aimd.core.application.use_cases import input_routing
 from aimd.core.application.use_cases.input_routing import get_input_route
 from aimd.core.application.use_cases.process_input import ProcessInputUseCase
 from aimd.core.application.use_cases.processors.convert import ConvertTaskProcessor
+from aimd.core.application.use_cases.processors.ocr import OCRTaskProcessor
 from aimd.core.errors import UnsupportedInputError
 from aimd.core.types import TextContext
 
@@ -52,6 +54,42 @@ def test_input_route_classifies_audio_video_and_document(tmp_path: Path) -> None
     assert document_route.task_type == "convert"
 
 
+def test_input_route_classifies_images_and_explicit_pdf_ocr(
+    monkeypatch, tmp_path: Path
+) -> None:
+    image = tmp_path / "page.png"
+    pdf = tmp_path / "scan.pdf"
+    image.write_text("x", encoding="utf-8")
+    pdf.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(input_routing, "_pdf_has_extractable_text", lambda _: True)
+
+    image_route = get_input_route(image.as_posix(), is_supported_file=lambda _: False)
+    pdf_convert_route = get_input_route(
+        pdf.as_posix(), is_supported_file=lambda _: True
+    )
+    pdf_ocr_route = get_input_route(
+        pdf.as_posix(), is_supported_file=lambda _: True, requested_task_type="ocr"
+    )
+
+    assert image_route.source_kind == "image_file"
+    assert image_route.task_type == "ocr"
+    assert pdf_convert_route.source_kind == "document_file"
+    assert pdf_convert_route.task_type == "convert"
+    assert pdf_ocr_route.source_kind == "document_file"
+    assert pdf_ocr_route.task_type == "ocr"
+
+
+def test_input_route_classifies_scanned_pdf_as_ocr(monkeypatch, tmp_path: Path) -> None:
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(input_routing, "_pdf_has_extractable_text", lambda _: False)
+
+    route = get_input_route(pdf.as_posix(), is_supported_file=lambda _: True)
+
+    assert route.source_kind == "document_file"
+    assert route.task_type == "ocr"
+
+
 @pytest.mark.asyncio
 async def test_process_convert_passes_temp_dir_to_epub_processor(
     tmp_path: Path,
@@ -85,6 +123,49 @@ async def test_process_convert_passes_temp_dir_to_epub_processor(
 
 
 @pytest.mark.asyncio
+async def test_process_ocr_passes_request_options_to_processor(tmp_path: Path) -> None:
+    image = tmp_path / "page.png"
+    image.write_text("x", encoding="utf-8")
+    temp_dir = tmp_path / "tmp"
+
+    async def _process_file(
+        input_path: str,
+        engine: str,
+        model: str | None,
+        language: str | None,
+        start: int | None,
+        end: int | None,
+        received_temp_dir: Path | None,
+    ):
+        assert Path(input_path) == image
+        assert engine == "mlx4ocr"
+        assert model == "tiny"
+        assert language == "zh"
+        assert start == 0
+        assert end == 1
+        assert received_temp_dir == temp_dir
+        return TextContext(title="page", chunk_list=["text"])
+
+    processor = OCRTaskProcessor(process_file=_process_file)
+    result = await processor.process(
+        ProcessInput(
+            input_source=image.as_posix(),
+            task_type="ocr",
+            transcribe_engine="mlx4ocr",
+            model="tiny",
+            language="zh",
+            start=0,
+            end=1,
+            temp_dir=temp_dir,
+        ),
+        InputRoute(source_kind="image_file", task_type="ocr"),
+    )
+
+    assert result.task_type == "ocr"
+    assert result.text_context.chunk_list == ["text"]
+
+
+@pytest.mark.asyncio
 async def test_use_case_transcript_flow() -> None:
     use_case = ProcessInputUseCase(
         processors={
@@ -96,6 +177,7 @@ async def test_use_case_transcript_flow() -> None:
                 )
             ),
             "convert": _UnexpectedTaskProcessor(),
+            "ocr": _UnexpectedTaskProcessor(),
         },
         is_supported_file=lambda _: True,
     )
@@ -122,6 +204,7 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
                 )
             ),
             "convert": _UnexpectedTaskProcessor(),
+            "ocr": _UnexpectedTaskProcessor(),
         },
         is_supported_file=lambda _: True,
     )
@@ -145,6 +228,7 @@ async def test_use_case_file_convert_flow(tmp_path: Path) -> None:
                     text_context=TextContext(title="d", chunk_list=["c"]),
                 )
             ),
+            "ocr": _UnexpectedTaskProcessor(),
         },
         is_supported_file=lambda _: True,
     )
@@ -160,6 +244,7 @@ async def test_use_case_unsupported_input_raises() -> None:
         processors={
             "transcript": _UnexpectedTaskProcessor(),
             "convert": _UnexpectedTaskProcessor(),
+            "ocr": _UnexpectedTaskProcessor(),
         },
         is_supported_file=lambda _: False,
     )

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ..models import ProcessInput, ProcessResult
+from ..models import ProcessInput, ProcessResult, TaskType
 from ..use_cases.list_engines import ListEnginesResult
 
 
@@ -22,9 +22,12 @@ def get_request_temp_dir() -> Path | None:
 def build_process_input(
     *,
     input_source: str,
+    task_type: TaskType | None = None,
     transcribe_engine: str = "auto",
     model: str | None = None,
     language: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
     save_original: str | Path | None = None,
     cookies: str | Path | None = None,
     cookies_from_browser: str | None = None,
@@ -34,9 +37,12 @@ def build_process_input(
     """Build the canonical process request from adapter-level values."""
     return ProcessInput(
         input_source=input_source,
+        task_type=task_type,
         transcribe_engine=transcribe_engine,
         model=model,
         language=language,
+        start=start,
+        end=end,
         save_original=Path(save_original) if save_original else None,
         cookies=Path(cookies) if cookies else None,
         cookies_from_browser=cookies_from_browser,

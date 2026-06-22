@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.10.0-blue" alt="Version 0.10.0">
+    <img src="https://img.shields.io/badge/version-0.10.2-blue" alt="Version 0.10.2">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -29,13 +29,12 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 ## Highlights
 
-- **One input command** for URLs, audio/video files, ebooks, PDFs, Markdown, text, and other MarkItDown-supported documents.
+- **One input command** for URLs, audio/video files, ebooks, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
 - **Media extraction** through bundled `aimd.media`: yt-dlp URLs such as podcasts, YouTube, Bilibili, and local audio/video files.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated ebook chapter/image extraction in the bundled `aimd.book` plugin.
+- **OCR task** for scanned PDFs and images, with `mlx4ocr` on macOS/Apple Silicon and a Linux Transformers engine boundary for the next backend.
 - **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
-
-> OCR for scanned PDFs and images is planned. The `aimd.ocr` module scaffold is bundled in the single distribution so OCR can land without growing the transcript or document conversion code paths.
 
 ## Install
 
@@ -84,7 +83,9 @@ uv run aimd --help
 Platform notes:
 
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`.
+- macOS OCR uses `mlx4ocr` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
+- Linux OCR routing is present, but the default Transformers OCR model is not enabled yet.
 - Local file conversion is powered by MarkItDown. Ebook conversion is handled by the bundled `aimd.book` MarkItDown plugin; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
 
 ## Quick start
@@ -95,10 +96,13 @@ aimd audio.mp3
 aimd "https://youtube.com/watch?v=..."
 aimd book.epub
 aimd notes.txt
+aimd scan.pdf
+aimd page.png
 
 # Common options
 aimd audio.mp3 --output transcript.md
 aimd audio.wav --engine mlx --language zh
+aimd scan.pdf --engine mlx4ocr --model paddleocr_v6 --start 0 --end 2
 aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
 aimd "https://youtube.com/watch?v=..." --raw-transcript
 ```
@@ -164,6 +168,20 @@ The book pipeline preserves spine order, extracts images, converts chapters thro
 
 Current note: `aimd.book` owns the ebook converter and routes `.epub`, `.mobi`, and `.azw3` as book inputs. The implemented extraction pipeline is EPUB-compatible; non-EPUB ebook formats may still need a later format-specific conversion step before the same cleanup pipeline can succeed.
 
+### OCR for scanned PDFs and images
+
+```bash
+aimd page.png
+aimd scan.pdf                                  # OCR if no extractable PDF text is found
+aimd scan.pdf --engine mlx4ocr                 # macOS/Apple Silicon
+aimd scan.pdf --model paddleocr_v6             # default PP-OCRv6 detector/recognizer
+aimd scan.pdf --model glm_ocr                  # optional mlx4ocr VLM backend
+aimd scan.pdf --model paddleocr_vl             # optional mlx4ocr VLM backend
+aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
+```
+
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. On macOS, OCR `auto` resolves to `mlx4ocr`, and the default OCR model is `paddleocr_v6` (mapped to mlx4ocr `ppocrv6` with the `medium` variant). `glm_ocr` and `paddleocr_vl` require mlx4ocr's optional VLM dependencies. On Linux, OCR `auto` resolves to the Transformers OCR boundary, which currently fails fast until a default OCR-capable model is selected and smoke-tested.
+
 ### MarkItDown plugins
 
 `aimd` uses MarkItDown for local files with plugins enabled. The bundled `aimd.media` and `aimd.book` modules register standard `markitdown.plugin` entry points, so installing `aimd-tool` also installs the ASR and ebook converters.
@@ -197,6 +215,16 @@ curl -X POST http://127.0.0.1:8000/v1/process \
     "transcribe_engine": "auto",
     "language": "en"
   }'
+
+curl -X POST http://127.0.0.1:8000/v1/process \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_source": "scan.pdf",
+    "task_type": "ocr",
+    "transcribe_engine": "mlx4ocr",
+    "start": 0,
+    "end": 2
+  }'
 ```
 
 OpenAPI docs are available at `/docs` and `/redoc`.
@@ -215,7 +243,7 @@ Tools:
 - `list_engines`
 - `process_input`
 
-`process_input` mirrors the CLI/API flow and accepts options such as `input_source`, `transcribe_engine`, `model`, `language`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`. For MCP, temporary files are controlled by the `AIMD_TEMP_DIR` environment variable.
+`process_input` mirrors the CLI/API flow and accepts options such as `input_source`, `task_type`, `transcribe_engine`, `model`, `language`, `start`, `end`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`. For MCP, temporary files are controlled by the `AIMD_TEMP_DIR` environment variable.
 
 ## Configuration
 

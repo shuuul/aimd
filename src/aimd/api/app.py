@@ -40,23 +40,37 @@ class EnginesResponse(BaseModel):
 
 class ProcessRequest(BaseModel):
     input_source: str = Field(
-        ..., description="Audio/video file path, video URL, or document file path."
+        ...,
+        description="Audio/video file path, video URL, document path, image path, or scanned PDF path.",
+    )
+    task_type: TaskType | None = Field(
+        default=None,
+        description="Optional explicit task: transcript, convert, or ocr. Defaults to auto-routing.",
     )
     output_file: str | None = Field(
         default=None, description="Optional path to write resulting markdown output."
     )
     transcribe_engine: str = Field(
         default="auto",
-        description="Transcription engine: auto, mlx, qwen.",
+        description="Engine. Transcript: auto, mlx, qwen. OCR: auto, mlx4ocr, transformers.",
     )
     model: str | None = Field(
         default=None,
-        description="Model for transcription. mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
+        description="Model for transcription, or OCR model: paddleocr_v6 (default), "
+        "glm_ocr, or paddleocr_vl. "
+        "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
         "and also supports other documented mlx-audio STT model IDs. "
         "qwen supports Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
     )
     language: str | None = Field(
-        default=None, description="Language code for transcription, e.g. zh, en, ja."
+        default=None,
+        description="Language code/hint for transcription or OCR, e.g. zh, en, ja.",
+    )
+    start: int | None = Field(
+        default=None, description="0-based inclusive start page for OCR PDF inputs."
+    )
+    end: int | None = Field(
+        default=None, description="0-based inclusive end page for OCR PDF inputs."
     )
     save_original: str | None = Field(
         default=None,
@@ -113,9 +127,12 @@ def create_app() -> FastAPI:
             result = await container.process_input_use_case.execute(
                 build_process_input(
                     input_source=request.input_source,
+                    task_type=request.task_type,
                     transcribe_engine=request.transcribe_engine,
                     model=request.model,
                     language=request.language,
+                    start=request.start,
+                    end=request.end,
                     save_original=request.save_original,
                     cookies=request.cookies,
                     cookies_from_browser=request.cookies_from_browser,

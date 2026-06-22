@@ -39,9 +39,12 @@ async def list_engines() -> dict[str, Any]:
 @mcp.tool()
 async def process_input(
     input_source: str,
+    task_type: str | None = None,
     transcribe_engine: str = "auto",
     model: str | None = None,
     language: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
     output_file: str | None = None,
     save_original: str | None = None,
     cookies: str | None = None,
@@ -55,9 +58,12 @@ async def process_input(
         result = await container.process_input_use_case.execute(
             build_process_input(
                 input_source=input_source,
+                task_type=task_type,
                 transcribe_engine=transcribe_engine,
                 model=model,
                 language=language,
+                start=start,
+                end=end,
                 save_original=save_original,
                 cookies=cookies,
                 cookies_from_browser=cookies_from_browser,
