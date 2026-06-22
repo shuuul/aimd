@@ -44,7 +44,7 @@ class AimdBookConverter(DocumentConverter):
         **kwargs: Any,
     ) -> DocumentConverterResult:
         if not stream_info.local_path:
-            raise FailedConversionAttempt("aimd-book requires a local file path")
+            raise FailedConversionAttempt("aimd.book requires a local file path")
 
         try:
             result = process_book_with_images(

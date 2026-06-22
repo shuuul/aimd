@@ -43,7 +43,7 @@ class AimdMediaConverter(DocumentConverter):
         **kwargs: Any,
     ) -> DocumentConverterResult:
         if not stream_info.local_path:
-            raise FailedConversionAttempt("aimd-media requires a local file path")
+            raise FailedConversionAttempt("aimd.media requires a local file path")
 
         input_path = Path(stream_info.local_path)
         try:

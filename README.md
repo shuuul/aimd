@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white" alt="Python 3.10, 3.11, 3.12">
   </a>
   <a href="https://docs.astral.sh/uv/">
-    <img src="https://img.shields.io/badge/uv-workspace-654FF0?logo=uv&logoColor=white" alt="uv workspace">
+    <img src="https://img.shields.io/badge/uv-package-654FF0?logo=uv&logoColor=white" alt="uv package">
   </a>
   <a href="https://github.com/shuuul/aimd/actions/workflows/ci.yml">
     <img src="https://github.com/shuuul/aimd/actions/workflows/ci.yml/badge.svg" alt="CI">
@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.9.3-blue" alt="Version 0.9.3">
+    <img src="https://img.shields.io/badge/version-0.10.0-blue" alt="Version 0.10.0">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -72,7 +72,7 @@ uv pip install "aimd-tool[all]"
 
 The public PyPI release is intentionally a single distribution (`aimd-tool`). The installed command remains `aimd`.
 
-From a source checkout, use the workspace directly:
+From a source checkout, use the project directly:
 
 ```bash
 git clone https://github.com/shuuul/aimd.git
@@ -250,8 +250,8 @@ Release a tagged version:
 
 ```bash
 # Make sure the package version matches the tag, then push a v-prefixed tag.
-git tag v0.9.3
-git push origin v0.9.3
+git tag v0.10.0
+git push origin v0.10.0
 ```
 
 The release workflow builds the single `aimd-tool` distribution, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes that distribution to PyPI using the `UV_PUBLISH_TOKEN` repository secret.
