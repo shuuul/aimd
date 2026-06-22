@@ -1,10 +1,9 @@
 import pytest
 
 from pathlib import Path
-import aimd.mcp as mcp_app
+import aimd.interfaces.mcp as mcp_app
 
-from aimd.core.application.models import ProcessResult
-from aimd.core.types import TextContext
+from aimd.core.models import ProcessResult, TextContext
 
 
 @pytest.mark.asyncio
@@ -14,21 +13,17 @@ async def test_mcp_healthz() -> None:
 
 @pytest.mark.asyncio
 async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None:
-    class _FakeProcessUseCase:
-        async def execute(self, request):  # noqa: ARG002
-            return ProcessResult(
-                task_type="transcript",
-                text_context=TextContext(
-                    title="mock-title",
-                    chunk_list=["hello"],
-                    split_header_level=None,
-                ),
-            )
+    async def _fake_process_input(request):  # noqa: ARG001
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(
+                title="mock-title",
+                chunk_list=["hello"],
+                split_header_level=None,
+            ),
+        )
 
-    class _FakeContainer:
-        process_input_use_case = _FakeProcessUseCase()
-
-    monkeypatch.setattr("aimd.mcp.app.container", _FakeContainer())
+    monkeypatch.setattr("aimd.interfaces.mcp.app.process_core_input", _fake_process_input)
 
     output_file = tmp_path / "out.md"
     result = await mcp_app.process_input("input.mp3", output_file=str(output_file))

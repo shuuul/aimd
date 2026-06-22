@@ -29,11 +29,11 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 ## Highlights
 
-- **One input command** for URLs, audio/video files, ebooks, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
-- **Media extraction** through bundled `aimd.media`: yt-dlp URLs such as podcasts, YouTube, and Bilibili.
-- **ASR transcription** through bundled `aimd.asr`: local audio/video transcription with `mlx-audio` on Apple Silicon or Qwen3-ASR on Linux/CUDA.
+- **One input command** for URLs, audio/video files, EPUB documents, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
+- **URL extraction** through bundled `aimd.plugins.url`: yt-dlp transcript URLs such as podcasts, YouTube, and Bilibili, plus opt-in readable HTML extraction through Defuddle.
+- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` on Apple Silicon or Qwen3-ASR on Linux/CUDA.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
-- **Document conversion** through MarkItDown, with dedicated ebook chapter/image extraction in the bundled `aimd.book` plugin.
+- **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
 - **OCR task** for scanned PDFs and images, with `mlx4ocr` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
 - **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
 
@@ -87,7 +87,7 @@ Platform notes:
 - macOS OCR uses `mlx4ocr` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
 - Linux OCR uses the Transformers backend with CUDA.
-- Local file conversion is powered by MarkItDown. Ebook conversion is handled by the bundled `aimd.book` MarkItDown plugin; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
+- Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
 
 ## Quick start
 
@@ -95,7 +95,7 @@ Platform notes:
 # Auto-detect input type
 aimd audio.mp3
 aimd "https://youtube.com/watch?v=..."
-aimd book.epub
+aimd document.epub
 aimd notes.txt
 aimd scan.pdf
 aimd page.png
@@ -180,26 +180,22 @@ aimd "https://www.bilibili.com/video/BV..." --cookies-from-browser "chrome:defau
 ### Documents
 
 ```bash
-aimd book.epub
-aimd book.mobi
-aimd book.azw3
+aimd document.epub
 aimd document.pdf
 aimd notes.md
 aimd document.epub --output output.md
 ```
 
-Book files are expanded into a structured output directory:
+Asset-bearing documents such as EPUB are expanded into a structured output directory:
 
 ```text
-book_name/
-├── book_name.md
+document_name/
+├── document_name.md
 ├── chapters/
 └── images/
 ```
 
-The book pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup.
-
-Current note: `aimd.book` owns the ebook converter and routes `.epub`, `.mobi`, and `.azw3` as book inputs. The implemented extraction pipeline is EPUB-compatible; non-EPUB ebook formats may still need a later format-specific conversion step before the same cleanup pipeline can succeed.
+The EPUB pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup. Other Pandoc-supported formats are converted by Pandoc directly. Pandoc does not support MOBI/AZW3 as input formats, so AIMD no longer advertises them as supported document inputs.
 
 ### OCR for scanned PDFs and images
 
@@ -219,14 +215,23 @@ OCR keeps the same Markdown/TextContext output contract as transcript and conver
 
 ### MarkItDown plugins
 
-`aimd` uses MarkItDown for local files with plugins enabled. The bundled `aimd.media` and `aimd.book` modules register standard `markitdown.plugin` entry points, so installing `aimd-tool` also installs the media/ASR and ebook converters. The media plugin delegates transcription to `aimd.asr`.
+`aimd` uses MarkItDown with plugins enabled. The bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` modules register standard `markitdown.plugin` entry points, so installing `aimd-tool` also installs URL transcript/readable HTML, local audio/video ASR, Pandoc document, and OCR converters.
 
 You can also use the plugins from MarkItDown directly:
 
 ```bash
 markitdown --list-plugins
-markitdown --use-plugins book.epub -o book.md
+markitdown --use-plugins document.epub -o doc.md
 markitdown --use-plugins audio.mp3 -o transcript.md
+```
+
+The Defuddle-backed `aimd.plugins.url` readable HTML converter is opt-in so normal HTML conversion does not require Node.js/npm:
+
+```python
+from markitdown import MarkItDown
+
+result = MarkItDown(enable_plugins=True).convert("article.html", defuddle=True)
+print(result.markdown)
 ```
 
 ## HTTP API
@@ -287,7 +292,7 @@ Tools:
 export YT_DLP_CONFIG_HOME="/path/to/config"
 export YT_DLP_CACHE_DIR="/path/to/cache"
 
-# Optional temporary directory for downloads, transcoding, and ebook extraction
+# Optional temporary directory for downloads, transcoding, and document extraction
 export AIMD_TEMP_DIR="/path/to/writable/tmp"
 ```
 
@@ -323,21 +328,22 @@ Project layout:
 
 ```text
 src/
-└── aimd/            # Single aimd-tool package: CLI, API, MCP, media, book, OCR/clip modules
+└── aimd/            # core, interfaces/{cli,api,mcp,output.py}, and bundled MarkItDown plugins
 ```
 
 ## Architecture
 
 `aimd` is a single published distribution, `aimd-tool`. See [docs/architecture.md](docs/architecture.md) for the full architecture notes and [docs/performance.md](docs/performance.md) for performance expectations and measurement guidance.
 
-The package uses MarkItDown as the local-file conversion contract and follows a ports/adapters layout:
+The package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
 
-- `application` owns orchestration and task routing.
-- `process_input.py` acts as the facade/router; convert-task local file processors call `MarkItDown(enable_plugins=True)`, while OCR routes explicitly to `aimd.ocr`.
-- Bundled modules register MarkItDown plugins: `aimd.media` for local audio/video inputs and `aimd.book` for ebooks. `aimd.ocr` provides the explicit OCR task for images and scanned PDFs, and `aimd.clip` wraps Defuddle-backed HTML extraction.
-- `aimd.media` owns URL media extraction: yt-dlp metadata, subtitle download, cookie handling, and audio download fallback. `aimd.asr` owns transcription engines and model validation.
-- `aimd.core.infrastructure` wraps media/MarkItDown markdown results into `TextContext` chunks.
-- CLI/API/MCP modules translate interface requests into application use-cases. Output file persistence is adapter-owned and shared through `aimd.core.application.services.output_writer`; it is not part of `ProcessInput`.
+- `aimd.core.models`, `aimd.core.process`, and `aimd.core.router` own canonical request/response models, input routing, and processing; `aimd.plugins.asr.engines` owns transcription engine listing.
+- `aimd.core.process.process_input()` sends URL and local-file work through `MarkItDown(enable_plugins=True)`.
+- Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
+- Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
+- `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. `aimd.plugins.asr` owns transcription engines, model validation, and the local audio/video MarkItDown plugin.
+- `aimd.core.process` wraps MarkItDown markdown results into `TextContext` chunks.
+- CLI/API/MCP modules translate interface requests into core processing. Output file persistence is interface-owned and shared through `aimd.interfaces.output`; it is not part of `ProcessInput`.
 
 All processing returns a shared `TextContext` shape: title, chunks, and split metadata.
 

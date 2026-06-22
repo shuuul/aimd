@@ -1,0 +1,59 @@
+"""Core request/response models."""
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+SourceKind = Literal[
+    "url", "audio_file", "video_file", "document_file", "image_file", "unknown"
+]
+TaskType = Literal["transcript", "convert", "ocr"]
+
+
+class TextContext(BaseModel):
+    """Context for text processing with title and content."""
+
+    title: str = Field(..., description="Title of the text")
+    chunk_list: list[str] = Field(..., description="List of combined text chunks")
+    split_header_level: int | None = Field(
+        default=None,
+        description="Header level used for splitting (1-6), None if no splitting was done",
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class InputRoute:
+    """Classified input source and selected processing task."""
+
+    source_kind: SourceKind
+    task_type: TaskType | None
+
+
+@dataclass(slots=True)
+class ProcessInput:
+    """Canonical process request model consumed by use-cases."""
+
+    input_source: str
+    task_type: TaskType | None = None
+    transcribe_engine: str = "auto"
+    model: str | None = None
+    language: str | None = None
+    start: int | None = None
+    end: int | None = None
+    save_original: Path | None = None
+    cookies: Path | None = None
+    cookies_from_browser: str | None = None
+    temp_dir: Path | None = None
+    raw_transcript: bool = False
+
+
+@dataclass(slots=True)
+class ProcessResult:
+    """Canonical process response model produced by use-cases."""
+
+    task_type: TaskType
+    text_context: TextContext
+    output_dir: Path | None = None
+    platform: str | None = None

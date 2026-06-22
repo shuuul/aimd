@@ -1,41 +1,40 @@
 # src/aimd/core
 
-Core package organized with ports/adapters architecture.
+Core package organized as a small interface-independent processing service.
 
 ## STRUCTURE
 
-- `application/` — use-cases, canonical request/response models, bootstrap wiring
-- `infrastructure/` — MarkItDown runner, media package adapter, and Markdown chunking helpers
-- `adapters/` — CLI interface adapter
-- `cli.py` — runtime entrypoint
+- `models.py` — canonical request/response models
+- `router.py`, `process.py` — interface-independent processing services
+- `process.py` — processing orchestration, MarkItDown runner, and Markdown shaping helpers
 
 Feature modules are bundled in the same `aimd-tool` distribution:
 
-- `aimd.media` — yt-dlp URLs, subtitles, audio fallback, ASR plugin, and capability checks
-- `aimd.api` — FastAPI service module
-- `aimd.mcp` — MCP stdio server module
-- `aimd.book` — MarkItDown plugin for ebook extraction and cleanup
-- `aimd.ocr` — OCR plugin scaffold
-- `aimd.clip` — Defuddle CLI wrapper
+- `aimd.plugins.url` — MarkItDown plugin for URL transcript extraction, yt-dlp subtitles/cookies/audio fallback, and opt-in Defuddle readable HTML
+- `aimd.plugins.asr` — MarkItDown plugin for local audio/video transcription, ASR engines, and capability checks
+- `aimd.interfaces.api` — FastAPI service module
+- `aimd.interfaces.mcp` — MCP stdio server module
+- `aimd.plugins.doc` — MarkItDown plugin for Pandoc-backed document conversion
+- `aimd.plugins.ocr` — MarkItDown plugin for OCR extraction
 
 ## CONVENTIONS
 
-- Keep orchestration in `application/use_cases/*`.
-- Keep IO/third-party integrations in `infrastructure/*`.
-- Keep interface-specific request/response mapping in `adapters/*`.
+- Keep orchestration in `process.py` and `router.py`.
+- Keep IO/third-party integrations in `process.py` and owning feature packages.
+- Keep interface-specific request/response mapping in the interface module (`aimd.interfaces.cli`, `aimd.interfaces.api`, or `aimd.interfaces.mcp`).
 
 - Keep platform-dependent dependency use behind capability checks; `mlx-audio` is Darwin-only and Qwen3-ASR runs through Transformers on Linux/CUDA.
-- Keep heavy local-file integrations behind MarkItDown plugins; keep this package as the facade/router and `TextContext` wrapper.
-- Keep output file persistence in adapters via `application/services/output_writer.py`; `ProcessInput` and `ProcessResult` do not carry `output_file`.
-- Keep API/MCP payload mapping in `application/services/interface_payloads.py` as plain helpers with no FastAPI/MCP imports.
+- Keep URL and local-file capabilities behind MarkItDown plugins in their owning submodules (`aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, `aimd.plugins.ocr`); core should call MarkItDown instead of feature internals.
+- Keep output file persistence in interfaces via `aimd.interfaces.output`; `ProcessInput` and `ProcessResult` do not carry `output_file`.
+- Keep API/MCP payload mapping in the API/MCP modules.
 
-## BOOK CONVERSION
+## DOCUMENT CONVERSION
 
-`aimd.book` owns ebook conversion through the MarkItDown plugin entry point. Core routing treats `.epub`, `.mobi`, and `.azw3` as book inputs via `BOOK_EXTENSIONS`, but the current book pipeline is EPUB-compatible ZIP/spine extraction. Add true non-EPUB handling inside `aimd.book` rather than special-casing it in `aimd.core.infrastructure` or adapters.
+`aimd.plugins.doc` owns Pandoc-backed document conversion through the MarkItDown plugin entry point. Core sends Pandoc-supported local document extensions through MarkItDown. EPUB gets an image/chapter output directory and uses the custom ZIP/spine pipeline; DOCX/ODT may also receive an asset directory for extracted media.
 
 ## TEMP DIRECTORY
 
-All temporary file operations (audio downloads, ebook extraction) use
+All temporary file operations (audio downloads, document extraction) use
 Python's `tempfile` module with a configurable base directory:
 
 - **CLI**: `--temp-dir` option (also reads `AIMD_TEMP_DIR` env var)
@@ -45,7 +44,7 @@ Python's `tempfile` module with a configurable base directory:
 In sandboxed environments where `/tmp` may not be writable, set `AIMD_TEMP_DIR`
 to redirect temp I/O. The `temp_dir` field flows through `ProcessInput` →
 use-cases → infrastructure functions via the `dir=` parameter of
-`tempfile.TemporaryDirectory` and `tempfile.NamedTemporaryFile`. ASR temp files are implemented in `aimd.media`; ebook extraction temp files are implemented in `aimd.book`.
+`tempfile.TemporaryDirectory` and `tempfile.NamedTemporaryFile`. ASR temp files are implemented in `aimd.plugins.asr`; document extraction temp files are implemented in `aimd.plugins.doc`.
 
 ## SUBTITLE FORMATTING
 
@@ -57,12 +56,12 @@ The `raw_transcript` field on `ProcessInput` (default `False`) controls this:
 - **MCP**: `raw_transcript` parameter on `process_input` tool
 
 The stripping is performed by `strip_subtitle_formatting()` in
-`aimd.media.url.formatter`, applied in `aimd.media.url.processor` before
+`aimd.plugins.url.formatter`, applied in `aimd.plugins.url.processor` before
 `format_content()` embeds the text into the markdown output.
 
 ## TRANSCRIPTION MODELS
 
 - Engine names are fixed in `const.TRANSCRIPTION_ENGINES`: `auto`, `mlx`, `qwen`.
-- `mlx` is implemented in `aimd.media.mlx_engine` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
-- `qwen` is implemented in `aimd.media.qwen_engine` and uses a direct Transformers backend on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
+- `mlx` is implemented in `aimd.plugins.asr.models.mlx` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
+- `qwen` is implemented in `aimd.plugins.asr.models.qwen` and uses a direct Transformers backend on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
 - mlx Qwen3-ASR defaults omitted language to `Chinese`; other mlx-audio STT models stay on their own default/auto language behavior.

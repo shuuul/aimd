@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from aimd.asr.audio_utils import (
+from aimd.plugins.asr.audio_utils import (
     SUPPORTED_AUDIO_FORMATS,
     convert_to_wav_if_needed,
 )
-from aimd.asr.const import AUDIO_EXTENSIONS, MLX_AUDIO_MODELS
-from aimd.asr.errors import ProcessingFailedError, UnsupportedInputError
-from aimd.asr.models.mlx import _resolve_language
-from aimd.asr.processor import transcribe_file
+from aimd.plugins.asr.const import AUDIO_EXTENSIONS, MLX_AUDIO_MODELS
+from aimd.plugins.asr.errors import ProcessingFailedError, UnsupportedInputError
+from aimd.plugins.asr.models.mlx import _resolve_language
+from aimd.plugins.asr.processor import transcribe_file
 
 
 def _mock_ffmpeg_ok() -> MagicMock:
@@ -65,11 +65,11 @@ class TestConvertToWavIfNeeded:
         src.write_text("fake", encoding="utf-8")
         with (
             patch(
-                "aimd.asr.audio_utils.shutil.which",
+                "aimd.plugins.asr.audio_utils.shutil.which",
                 return_value="/usr/bin/ffmpeg",
             ),
             patch(
-                "aimd.asr.audio_utils.subprocess.run",
+                "aimd.plugins.asr.audio_utils.subprocess.run",
                 return_value=_mock_ffmpeg_ok(),
             ),
         ):
@@ -83,11 +83,11 @@ class TestConvertToWavIfNeeded:
         src.write_text("fake", encoding="utf-8")
         with (
             patch(
-                "aimd.asr.audio_utils.shutil.which",
+                "aimd.plugins.asr.audio_utils.shutil.which",
                 return_value="/usr/bin/ffmpeg",
             ),
             patch(
-                "aimd.asr.audio_utils.subprocess.run",
+                "aimd.plugins.asr.audio_utils.subprocess.run",
                 return_value=_mock_ffmpeg_ok(),
             ),
         ):
@@ -99,7 +99,7 @@ class TestConvertToWavIfNeeded:
         src = tmp_path / "sample.mp4a"
         src.write_text("fake", encoding="utf-8")
         with patch(
-            "aimd.asr.audio_utils.shutil.which",
+            "aimd.plugins.asr.audio_utils.shutil.which",
             return_value=None,
         ):
             with pytest.raises(ProcessingFailedError, match="ffmpeg not found"):
@@ -117,11 +117,11 @@ class TestGetTextFromAudioAcceptsMp4a:
 
         with (
             patch(
-                "aimd.asr.processor.resolve_engine_with_preflight",
+                "aimd.plugins.asr.processor.resolve_engine_with_preflight",
                 return_value="mlx",
             ),
             patch(
-                "aimd.asr.processor.transcribe_audio_mlx",
+                "aimd.plugins.asr.processor.transcribe_audio_mlx",
                 new_callable=AsyncMock,
                 return_value="transcribed text",
             ),

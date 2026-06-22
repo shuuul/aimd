@@ -8,8 +8,8 @@ This document records practical performance expectations for `aimd` processing p
 |------|--------------------|---------------------|-------|
 | URL with subtitles | Network and yt-dlp metadata/subtitle download | Usually fast after metadata is available | `aimd` prefers subtitles over ASR whenever usable subtitles are found. |
 | URL without subtitles | Media download, audio extraction, then ASR | Model reuse helps only inside the same long-running process | CLI invocations pay process startup costs each time; API/MCP can reuse loaded models. |
-| Local audio/video transcription | Audio decode/transcode in `aimd.asr` and ASR model inference | Better in API/MCP because model objects are cached in-process | Non-WAV inputs may be converted to WAV before transcription. |
-| MarkItDown document conversion | Parser/Pandoc/document structure | Mostly CPU and file I/O bound | Ebook conversion also writes chapter/image output trees. |
+| Local audio/video transcription | Audio decode/transcode in `aimd.plugins.asr` and ASR model inference | Better in API/MCP because model objects are cached in-process | Non-WAV inputs may be converted to WAV before transcription. |
+| MarkItDown document conversion | Parser/Pandoc/document structure | Mostly CPU and file I/O bound | EPUB conversion also writes chapter/image output trees. |
 | Image OCR | OCR model inference | API/MCP can reuse loaded model objects | VLM OCR models are heavier than classic detector/recognizer OCR. |
 | PDF OCR | PDF rasterization plus one or more OCR passes | Model reuse helps; page rendering still scales with page count and DPI | Linux PDF OCR currently uses `pdftoppm`; macOS mlx4ocr delegates PDF handling to the `mlx4ocr` CLI. |
 

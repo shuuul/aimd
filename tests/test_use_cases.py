@@ -2,27 +2,19 @@ from pathlib import Path
 
 import pytest
 
-from aimd.core.application.models import InputRoute, ProcessInput, ProcessResult
-from aimd.core.application.use_cases import input_routing
-from aimd.core.application.use_cases.input_routing import get_input_route
-from aimd.core.application.use_cases.process_input import ProcessInputUseCase
-from aimd.core.application.use_cases.processors.convert import ConvertTaskProcessor
-from aimd.core.application.use_cases.processors.ocr import OCRTaskProcessor
+import aimd.core.router as router
+from aimd.core.models import ProcessInput, TextContext
+from aimd.core.process import process_input
 from aimd.core.errors import UnsupportedInputError
-from aimd.core.types import TextContext
+from aimd.core.router import get_input_route
 
 
-class _FakeTaskProcessor:
-    def __init__(self, result: ProcessResult):
-        self._result = result
-
-    async def process(self, request: ProcessInput, route: InputRoute):  # noqa: ARG002
-        return self._result
+async def _unexpected_process_url(*args, **kwargs):  # noqa: ANN002, ANN003
+    raise AssertionError("should not process URL")
 
 
-class _UnexpectedTaskProcessor:
-    async def process(self, request: ProcessInput, route: InputRoute):  # noqa: ARG002
-        raise AssertionError("should not call processor")
+async def _unexpected_process_file(*args, **kwargs):  # noqa: ANN002, ANN003
+    raise AssertionError("should not process file")
 
 
 def test_input_route_classifies_url() -> None:
@@ -61,7 +53,7 @@ def test_input_route_classifies_images_and_explicit_pdf_ocr(
     pdf = tmp_path / "scan.pdf"
     image.write_text("x", encoding="utf-8")
     pdf.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(input_routing, "_pdf_has_extractable_text", lambda _: True)
+    monkeypatch.setattr(router, "_pdf_has_extractable_text", lambda _: True)
 
     image_route = get_input_route(image.as_posix(), is_supported_file=lambda _: False)
     pdf_convert_route = get_input_route(
@@ -82,7 +74,7 @@ def test_input_route_classifies_images_and_explicit_pdf_ocr(
 def test_input_route_classifies_scanned_pdf_as_ocr(monkeypatch, tmp_path: Path) -> None:
     pdf = tmp_path / "scan.pdf"
     pdf.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(input_routing, "_pdf_has_extractable_text", lambda _: False)
+    monkeypatch.setattr(router, "_pdf_has_extractable_text", lambda _: False)
 
     route = get_input_route(pdf.as_posix(), is_supported_file=lambda _: True)
 
@@ -91,13 +83,13 @@ def test_input_route_classifies_scanned_pdf_as_ocr(monkeypatch, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_process_convert_passes_temp_dir_to_epub_processor(
+async def test_use_case_convert_passes_temp_dir_to_markitdown(
     tmp_path: Path,
 ) -> None:
-    epub = tmp_path / "aimd.book.epub"
+    epub = tmp_path / "document.epub"
     epub.write_text("x", encoding="utf-8")
     temp_dir = tmp_path / "tmp"
-    output_dir = tmp_path / "book-output"
+    output_dir = tmp_path / "doc-output"
 
     async def _process_file(
         input_path: str,
@@ -105,25 +97,34 @@ async def test_process_convert_passes_temp_dir_to_epub_processor(
         language: str | None,
         model: str | None,
         received_temp_dir: Path | None,
+        task_type: str | None,
+        start: int | None,
+        end: int | None,
     ):
         assert Path(input_path) == epub
         assert engine == "auto"
         assert language is None
         assert model is None
         assert received_temp_dir == temp_dir
-        return TextContext(title="book", chunk_list=["c"]), output_dir
+        assert task_type == "convert"
+        assert start is None
+        assert end is None
+        return TextContext(title="doc", chunk_list=["c"]), output_dir
 
-    processor = ConvertTaskProcessor(process_file=_process_file)
-    result = await processor.process(
+    result = await process_input(
         ProcessInput(input_source=epub.as_posix(), temp_dir=temp_dir),
-        InputRoute(source_kind="document_file", task_type="convert"),
+        process_url=_unexpected_process_url,
+        process_file=_process_file,
+        resolve_engine=lambda engine: engine,
+        is_supported_file_fn=lambda _: True,
     )
 
+    assert result.task_type == "convert"
     assert result.output_dir == output_dir
 
 
 @pytest.mark.asyncio
-async def test_process_ocr_passes_request_options_to_processor(tmp_path: Path) -> None:
+async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None:
     image = tmp_path / "page.png"
     image.write_text("x", encoding="utf-8")
     temp_dir = tmp_path / "tmp"
@@ -131,23 +132,24 @@ async def test_process_ocr_passes_request_options_to_processor(tmp_path: Path) -
     async def _process_file(
         input_path: str,
         engine: str,
-        model: str | None,
         language: str | None,
+        model: str | None,
+        received_temp_dir: Path | None,
+        task_type: str | None,
         start: int | None,
         end: int | None,
-        received_temp_dir: Path | None,
     ):
         assert Path(input_path) == image
         assert engine == "mlx4ocr"
-        assert model == "tiny"
         assert language == "zh"
+        assert model == "tiny"
+        assert received_temp_dir == temp_dir
+        assert task_type == "ocr"
         assert start == 0
         assert end == 1
-        assert received_temp_dir == temp_dir
-        return TextContext(title="page", chunk_list=["text"])
+        return TextContext(title="page", chunk_list=["text"]), None
 
-    processor = OCRTaskProcessor(process_file=_process_file)
-    result = await processor.process(
+    result = await process_input(
         ProcessInput(
             input_source=image.as_posix(),
             task_type="ocr",
@@ -158,7 +160,10 @@ async def test_process_ocr_passes_request_options_to_processor(tmp_path: Path) -
             end=1,
             temp_dir=temp_dir,
         ),
-        InputRoute(source_kind="image_file", task_type="ocr"),
+        process_url=_unexpected_process_url,
+        process_file=_process_file,
+        resolve_engine=lambda engine: engine,
+        is_supported_file_fn=lambda _: True,
     )
 
     assert result.task_type == "ocr"
@@ -167,23 +172,15 @@ async def test_process_ocr_passes_request_options_to_processor(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_use_case_transcript_flow() -> None:
-    use_case = ProcessInputUseCase(
-        processors={
-            "transcript": _FakeTaskProcessor(
-                ProcessResult(
-                    task_type="transcript",
-                    text_context=TextContext(title="a", chunk_list=["t"]),
-                    platform="youtube",
-                )
-            ),
-            "convert": _UnexpectedTaskProcessor(),
-            "ocr": _UnexpectedTaskProcessor(),
-        },
-        is_supported_file=lambda _: True,
-    )
+    async def _process_url(*args):  # noqa: ANN002
+        return TextContext(title="a", chunk_list=["t"]), "youtube"
 
-    result = await use_case.execute(
-        ProcessInput(input_source="https://example.com/video")
+    result = await process_input(
+        ProcessInput(input_source="https://example.com/video"),
+        process_url=_process_url,
+        process_file=_unexpected_process_file,
+        resolve_engine=lambda engine: engine,
+        is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "transcript"
     assert result.text_context.chunk_list == ["t"]
@@ -195,21 +192,16 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
     audio = tmp_path / "a.mp3"
     audio.write_text("x", encoding="utf-8")
 
-    use_case = ProcessInputUseCase(
-        processors={
-            "transcript": _FakeTaskProcessor(
-                ProcessResult(
-                    task_type="transcript",
-                    text_context=TextContext(title="a", chunk_list=["t"]),
-                )
-            ),
-            "convert": _UnexpectedTaskProcessor(),
-            "ocr": _UnexpectedTaskProcessor(),
-        },
-        is_supported_file=lambda _: True,
-    )
+    async def _process_file(*args):  # noqa: ANN002
+        return TextContext(title="a", chunk_list=["t"]), None
 
-    result = await use_case.execute(ProcessInput(input_source=str(audio)))
+    result = await process_input(
+        ProcessInput(input_source=str(audio)),
+        process_url=_unexpected_process_url,
+        process_file=_process_file,
+        resolve_engine=lambda engine: engine,
+        is_supported_file_fn=lambda _: True,
+    )
     assert result.task_type == "transcript"
     assert result.platform is None
 
@@ -219,35 +211,27 @@ async def test_use_case_file_convert_flow(tmp_path: Path) -> None:
     doc = tmp_path / "a.txt"
     doc.write_text("x", encoding="utf-8")
 
-    use_case = ProcessInputUseCase(
-        processors={
-            "transcript": _UnexpectedTaskProcessor(),
-            "convert": _FakeTaskProcessor(
-                ProcessResult(
-                    task_type="convert",
-                    text_context=TextContext(title="d", chunk_list=["c"]),
-                )
-            ),
-            "ocr": _UnexpectedTaskProcessor(),
-        },
-        is_supported_file=lambda _: True,
-    )
+    async def _process_file(*args):  # noqa: ANN002
+        return TextContext(title="d", chunk_list=["c"]), None
 
-    result = await use_case.execute(ProcessInput(input_source=str(doc)))
+    result = await process_input(
+        ProcessInput(input_source=str(doc)),
+        process_url=_unexpected_process_url,
+        process_file=_process_file,
+        resolve_engine=lambda engine: engine,
+        is_supported_file_fn=lambda _: True,
+    )
     assert result.task_type == "convert"
     assert result.output_dir is None
 
 
 @pytest.mark.asyncio
 async def test_use_case_unsupported_input_raises() -> None:
-    use_case = ProcessInputUseCase(
-        processors={
-            "transcript": _UnexpectedTaskProcessor(),
-            "convert": _UnexpectedTaskProcessor(),
-            "ocr": _UnexpectedTaskProcessor(),
-        },
-        is_supported_file=lambda _: False,
-    )
-
     with pytest.raises(UnsupportedInputError):
-        await use_case.execute(ProcessInput(input_source="not_supported"))
+        await process_input(
+            ProcessInput(input_source="not_supported"),
+            process_url=_unexpected_process_url,
+            process_file=_unexpected_process_file,
+            resolve_engine=lambda engine: engine,
+            is_supported_file_fn=lambda _: False,
+        )

@@ -3,53 +3,55 @@
 ## Overview
 
 The repository has one published distribution, `aimd-tool`, with source code under `src/aimd`.
-The `aimd` package uses MarkItDown as the local-file conversion contract and follows a ports/adapters structure:
+The `aimd` package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
 
-- `aimd.core.application`: use-cases, canonical request/response models, and bootstrap wiring.
-- `aimd.core.infrastructure`: the MarkItDown runner, media package adapter, and Markdown chunking helpers.
-- `aimd.core.adapters`: CLI interface layer.
-- `aimd.api`: FastAPI-backed HTTP API module.
-- `aimd.mcp`: MCP stdio server module.
-- `aimd.asr`: local audio/video transcription, audio preprocessing, ASR model validation, and engine capability preflight.
-- `aimd.media`: yt-dlp URL extraction, subtitle-first/audio fallback, and MarkItDown plugin wiring for local audio/video inputs.
-- `aimd.book`: MarkItDown plugin for ebook spine/image extraction and Markdown cleanup. The current implementation is EPUB-compatible and routes `.epub`, `.mobi`, and `.azw3` as book inputs for future format-specific handling.
-- `aimd.ocr`: explicit OCR task for images and scanned PDFs, with `mlx4ocr` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
-- `aimd.clip`: Python wrapper around the Defuddle CLI.
+- `aimd.core.models`: canonical request/response models.
+- `aimd.core.router` and `aimd.core.process`: input routing and processing.
+- `aimd.plugins.asr.engines`: transcription engine listing.
+- `aimd.core.process`: processing orchestration, MarkItDown runner, and Markdown shaping helpers.
+- `aimd.interfaces.output`: shared output persistence helper for interfaces.
+- `aimd.interfaces.cli`: Typer CLI interface (`aimd.interfaces.cli:main`).
+- `aimd.interfaces.api`: FastAPI-backed HTTP API module (`aimd.interfaces.api:main`).
+- `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
+- `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction.
+- `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, ASR model validation, and engine capability preflight.
+- `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents. EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
+- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs, with `mlx4ocr` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
+
+Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 
 ## Dependency Rules
 
-- Interface modules/adapters depend on application use-cases, not infrastructure processing modules.
-- Convert-task local-file processing should go through `MarkItDown(enable_plugins=True)` rather than calling bundled plugin processors directly. OCR-task local-file processing is routed explicitly to `aimd.ocr`.
-- Infrastructure does not import adapters.
-- Feature modules that are MarkItDown extensions should follow MarkItDown's plugin/converter contract. Explicit task modules such as `aimd.ocr` expose application-facing processor functions instead.
-- Output destinations are interface concerns. `ProcessInput` does not carry `output_file`; CLI/API/MCP persist requested outputs through shared helpers in `aimd.core.application.services.output_writer`.
-- API/MCP response/request payload shaping lives in `aimd.core.application.services.interface_payloads` as plain mapping helpers; it must not depend on FastAPI or MCP types.
+- Interface modules depend on the core processing service, not plugin implementation internals.
+- URL and local-file processing should go through `MarkItDown(enable_plugins=True)` rather than calling bundled plugin processors directly.
+- Plugins and core processing do not import interfaces.
+- Feature modules that handle local files should follow MarkItDown's plugin/converter contract.
+- Output destinations are interface concerns. `ProcessInput` does not carry `output_file`; CLI/API/MCP persist requested outputs through `aimd.interfaces.output`.
+- API/MCP response/request payload shaping lives in the API/MCP modules, not in core.
 
 ## Primary Flow
 
-1. CLI/API/MCP adapter receives request payload/options.
-2. Adapter builds `ProcessInput` with shared mapping helpers and calls `ProcessInputUseCase.execute`.
-3. Use-case routes request by `InputRoute(source_kind, task_type)` to a task processor.
-4. Transcript URL tasks call `aimd.media`; transcript local audio/video conversion delegates to `aimd.asr` through the media MarkItDown plugin; convert tasks call MarkItDown plus bundled plugins; OCR tasks call `aimd.ocr`.
-5. Adapter maps `ProcessResult` to interface-specific response/output and persists `output_file` if requested.
+1. CLI/API/MCP receives request payload/options.
+2. The interface builds `ProcessInput` with shared mapping helpers and calls `aimd.core.process.process_input()`.
+3. Core routes request by `InputRoute(source_kind, task_type)`.
+4. URL and local-file tasks go through MarkItDown plus bundled plugins (`aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, `aimd.plugins.ocr`).
+5. The interface maps `ProcessResult` to interface-specific response/output and persists `output_file` if requested.
 
 ```diagram
 ╭──────────────╮     ╭──────────────────────╮     ╭──────────────────────╮
-│ CLI/API/MCP  │────▶│ ProcessInputUseCase  │────▶│ TaskProcessor        │
-│ adapters     │     │ route + dispatch     │     │ transcript/convert/ │
-╰──────┬───────╯     ╰──────────────────────╯     │ ocr                  │
-       │                                          ╰──────────┬───────────╯
+│ CLI/API/MCP  │────▶│ process_input()      │────▶│ MarkItDown plugins  │
+│ interfaces   │     │ route + dispatch     │     │ URL/local conversion│
+╰──────┬───────╯     ╰──────────────────────╯     ╰──────────┬───────────╯
        │                                                     │
        │                                                     ▼
        │                                          ╭──────────────────────╮
-       │                                          │ aimd.media/aimd.asr, │
-       │                                          │ MarkItDown plugins, │
-       │                                          │ or aimd.ocr          │
+       │                                          │ aimd.plugins.url, aimd.plugins.asr, │
+       │                                          │ aimd.plugins.doc, aimd.plugins.ocr │
        │                                          ╰──────────┬───────────╯
        ▼                                                     ▼
 ╭────────────────────╮                           ╭──────────────────────╮
-│ output_writer +    │◀──────────────────────────│ ProcessResult        │
-│ interface_payloads │                           │ TextContext shape    │
+│ aimd.interfaces.output +      │◀──────────────────────────│ ProcessResult        │
+│ interface mapping  │                           │ TextContext shape    │
 ╰────────────────────╯                           ╰──────────────────────╯
 ```
 
@@ -59,11 +61,11 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 
 | Task | Engine boundary | Supported model source |
 |------|-----------------|------------------------|
-| Transcript | `aimd.media` for URL/subtitle/audio fallback, `aimd.asr` for transcription | `mlx-audio` STT models on Apple Silicon; Qwen3-ASR Transformers models on Linux/CUDA. |
-| Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.media` and `aimd.book` plugin entry points. |
-| OCR | `aimd.ocr` | `mlx4ocr` models on macOS/Apple Silicon; CUDA Transformers OCR aliases and explicit Hugging Face model IDs on Linux. |
+| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | `mlx-audio` STT models on Apple Silicon; Qwen3-ASR Transformers models on Linux/CUDA. |
+| Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` plugin entry points. |
+| OCR | MarkItDown + `aimd.plugins.ocr` plugin | `mlx4ocr` models on macOS/Apple Silicon; CUDA Transformers OCR aliases and explicit Hugging Face model IDs on Linux. |
 
-The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.asr.const`, `aimd.ocr.mlx4ocr_engine`, and `aimd.ocr.transformers_engine`.
+The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.plugins.asr.const` and `aimd.plugins.ocr.engines`.
 
 For performance expectations and benchmarking guidance, see [Performance](performance.md).
 
@@ -71,7 +73,7 @@ For performance expectations and benchmarking guidance, see [Performance](perfor
 
 Domain errors in `aimd.core.errors` are preserved and used end-to-end:
 
-- `UnsupportedInputError` -> 400 in HTTP adapter
-- `EngineUnavailableError` -> 422 in HTTP adapter
-- `InputNotFoundError` -> 404 in HTTP adapter
-- `ProcessingFailedError` -> 500 in HTTP adapter
+- `UnsupportedInputError` -> 400 in HTTP API
+- `EngineUnavailableError` -> 422 in HTTP API
+- `InputNotFoundError` -> 404 in HTTP API
+- `ProcessingFailedError` -> 500 in HTTP API

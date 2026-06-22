@@ -24,79 +24,98 @@ Published distribution:
 
 ```text
 src/aimd/
-├── core/           # CLI, use-cases, routing, shared contracts, infrastructure wrappers
-├── api/            # FastAPI HTTP API, entrypoint aimd-api
-├── mcp/            # MCP stdio server, entrypoint aimd-mcp
-├── media/          # yt-dlp URLs, subtitles, audio fallback, ASR plugin
-├── book/           # MarkItDown plugin: ebook extraction and Markdown cleanup
-├── ocr/            # OCR scaffold for scanned PDFs/images
-└── clip/           # Defuddle CLI wrapper for readable HTML extraction
+├── interfaces/     # Typer CLI, FastAPI HTTP API, MCP stdio server, output.py persistence
+│   ├── cli/        # aimd.interfaces.cli:main
+│   ├── api/        # aimd.interfaces.api:main
+│   ├── mcp/        # aimd.interfaces.mcp.app:main
+│   └── output.py   # Shared interface-owned markdown persistence
+├── core/           # Interface-independent routing, models, MarkItDown wrapping
+└── plugins/        # Bundled MarkItDown plugins and implementations
+    ├── url/        # URL transcript/readable HTML extraction
+    ├── asr/        # Local audio/video transcription
+    ├── doc/        # Pandoc-backed document conversion
+    └── ocr/        # OCR for scanned PDFs/images
 ```
 
 Tests live under `tests/`; architecture notes live in `docs/architecture.md`.
+
+## ARCHITECTURE DIAGRAM
+
+```mermaid
+flowchart TD
+    CLI["aimd.interfaces.cli\nTyper CLI"]
+    API["aimd.interfaces.api\nFastAPI HTTP"]
+    MCP["aimd.interfaces.mcp\nMCP stdio"]
+
+    Models["aimd.core.models\nProcessInput / ProcessResult / InputRoute"]
+    Router["aimd.core.router\nsource_kind + task_type"]
+    Process["aimd.core.process\ninterface-independent orchestration"]
+
+    MID["aimd.core.process\nMarkItDown(enable_plugins=True) -> TextContext"]
+    Markdown["aimd.core.process\nchunk + title shaping"]
+
+    URLPlugin["aimd.plugins.url MarkItDown plugin\nURL transcript + Defuddle HTML"]
+    ASRPlugin["aimd.plugins.asr MarkItDown plugin\nlocal audio/video transcription"]
+    ASR["aimd.plugins.asr engines\nmlx/qwen preflight + transcription"]
+    DocPlugin["aimd.plugins.doc MarkItDown plugin\nPandoc docs + EPUB assets"]
+    OCRPlugin["aimd.plugins.ocr MarkItDown plugin\nimages/scanned PDFs"]
+    MarkItDown["MarkItDown\nbuilt-ins + markitdown.plugin entry points"]
+
+    CLI --> Models
+    API --> Models
+    MCP --> Models
+    CLI --> Process
+    API --> Process
+    MCP --> Process
+    Process --> Router
+    Process -->|URL transcript or local file| MID --> MarkItDown
+    MarkItDown --> URLPlugin --> ASR
+    MarkItDown --> ASRPlugin --> ASR
+    MarkItDown --> DocPlugin
+    MarkItDown --> OCRPlugin
+    MID --> Markdown
+    CLI --> Output["aimd.interfaces.output\noptional markdown persistence"]
+    API --> Output
+    MCP --> Output
+```
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Input routing | `src/aimd/core/application/use_cases/input_routing.py` | Maps source_kind + task_type into an `InputRoute`. |
-| Core facade/router | `src/aimd/core/application/use_cases/process_input.py` | Dispatches `InputRoute` to configured task processors. |
-| Local file conversion | `src/aimd/core/infrastructure/markitdown_processor.py` | Calls `MarkItDown(enable_plugins=True)` and wraps Markdown into `TextContext`. |
-| Transcript task | `src/aimd/core/application/use_cases/processors/transcript.py` | URL/audio transcript flow and engine resolution. |
-| Convert task | `src/aimd/core/application/use_cases/processors/convert.py` | Local document conversion through MarkItDown. |
-| Request/result models | `src/aimd/core/application/models.py` | `ProcessInput`, `ProcessResult`, `TaskType`; output files are adapter-owned. |
-| Interface mapping helpers | `src/aimd/core/application/services/interface_payloads.py` | Shared API/MCP request/result/engine payload mapping and request-time `AIMD_TEMP_DIR`. |
-| Output persistence | `src/aimd/core/application/services/output_writer.py` | Shared CLI/API/MCP markdown persistence helpers. |
-| Dependency wiring | `src/aimd/core/application/bootstrap.py` | Binds use-cases to infrastructure callables. |
-| CLI adapter | `src/aimd/core/adapters/cli/app.py` | Typer command, user output, local file persistence. |
-| HTTP API | `src/aimd/api/app.py` | `/healthz`, `/v1/engines`, `/v1/process`. |
-| MCP server | `src/aimd/mcp/app.py` | `healthz`, `list_engines`, `process_input`. |
-| Engine preflight | `src/aimd/media/capabilities.py` | Audio engine availability and auto-resolution. |
-| Media processing | `src/aimd/media/` | yt-dlp URLs, subtitles, audio fallback, ASR, ffmpeg transcoding. |
-| URL extraction | `src/aimd/media/url/` | yt-dlp cookies/subtitles/audio fallback. |
-| Markdown chunking | `src/aimd/core/infrastructure/documents/` | Chunking and title extraction for MarkItDown output. |
-| Book conversion | `src/aimd/book/` | MarkItDown plugin, EPUB-compatible ebook pipeline, cleanup, image extraction. |
-| OCR scaffold | `src/aimd/ocr/` | Placeholder OCR entrypoint for next feature. |
-| HTML clipping | `src/aimd/clip/` | Defuddle CLI wrapper. |
-
-## NEXT MAJOR FEATURE: OCR
-
-The next planned package capability is OCR for scanned PDFs/images.
-
-Recommended smallest pre-OCR changes:
-
-1. Extend `TaskType` with an explicit OCR path, e.g. `"ocr"`, and `SourceKind` with OCR-relevant sources such as `"image_file"` if OCR will support images/scanned PDFs or OCR-specific options.
-2. Implement OCR as a MarkItDown `DocumentConverter` in `src/aimd/ocr/`.
-3. Register OCR via `[project.entry-points."markitdown.plugin"]` when implemented.
-4. Extend centralized support/routing in `input_routing.py` for OCR inputs if MarkItDown extension coverage is insufficient.
-5. Keep `aimd.core` as the router/facade; local OCR conversion should go through MarkItDown.
-6. Keep `/v1/engines` transcription-oriented for now; add OCR capability reporting later only if needed.
-
-OCR non-goals for the first pass:
-
-- No custom aimd plugin registry; use MarkItDown entry points.
-- No rewrite of `ProcessInput` unless OCR introduces multiple user-facing options.
-- No changes to URL subtitle/audio fallback ordering.
-- No changes to the `TextContext(title, chunk_list, split_header_level)` contract.
+| Input routing | `src/aimd/core/router.py` | Maps source_kind + task_type into an `InputRoute`. |
+| Core processing | `src/aimd/core/process.py` | Sends URL and local-file work through MarkItDown and wraps Markdown into `TextContext`. |
+| Local file conversion | `src/aimd/core/process.py` | Calls `MarkItDown(enable_plugins=True)` and wraps Markdown into `TextContext`. |
+| URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in Defuddle readable HTML extraction. |
+| Request/result models | `src/aimd/core/models.py` | `ProcessInput`, `ProcessResult`, `TaskType`; output files are interface-owned. |
+| Output persistence | `src/aimd/interfaces/output.py` | Shared CLI/API/MCP markdown persistence helpers. |
+| CLI | `src/aimd/interfaces/cli/app.py` | Typer command, user output, local file persistence. |
+| HTTP API | `src/aimd/interfaces/api/app.py` | `/healthz`, `/v1/engines`, `/v1/process`. |
+| MCP server | `src/aimd/interfaces/mcp/app.py` | `healthz`, `list_engines`, `process_input`. |
+| Engine preflight | `src/aimd/plugins/asr/capabilities.py` | Audio engine availability and auto-resolution. |
+| ASR processing | `src/aimd/plugins/asr/` | MarkItDown plugin for local audio/video transcription, model validation, ffmpeg transcoding. |
+| Markdown shaping | `src/aimd/core/process.py` | Chunking and title extraction for MarkItDown/URL output. |
+| Document conversion | `src/aimd/plugins/doc/` | MarkItDown plugin, Pandoc-supported formats, EPUB cleanup/image extraction. |
+| OCR conversion | `src/aimd/plugins/ocr/` | MarkItDown plugin, OCR engines, image/scanned PDF processing. |
 
 ## CONVENTIONS
 
-- **Async-first**: processing paths are async through use-cases and infrastructure.
-- **Use-case centric orchestration**: routing belongs in `aimd.core.application.use_cases`, not adapters.
+- **Async-first**: processing paths are async through core and feature modules.
+- **Core is interface-independent**: CLI/API/MCP live in `aimd.interfaces.cli`, `aimd.interfaces.api`, and `aimd.interfaces.mcp`; `aimd.core` must not import them.
 - **Route model**: classify inputs with `InputRoute(source_kind, task_type)`; `source_kind` is the supplied input kind, `task_type` selects processing logic.
-- **MarkItDown contract**: local file conversion goes through `MarkItDown(enable_plugins=True)`; bundled feature modules register MarkItDown plugins.
-- **Output ownership**: `output_file` belongs to CLI/API/MCP adapters, not `ProcessInput` or `ProcessResult`; use `aimd.core.application.services.output_writer` for shared persistence.
+- **MarkItDown contract**: URL and local-file conversion go through `MarkItDown(enable_plugins=True)`; bundled feature modules register MarkItDown plugins.
+- **Output ownership**: `output_file` belongs to CLI/API/MCP interfaces, not `ProcessInput` or `ProcessResult`; use `aimd.interfaces.output` for shared persistence.
 - **Fail-fast preflight**: validate selected engines before expensive work.
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.
-- **Stable output contract**: processors return `TextContext(title, chunk_list, split_header_level)`.
+- **Stable output contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
 - **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on Linux/CUDA.
-- **Module boundaries**: `aimd.core` owns interface adapters, routing, and `TextContext` wrapping; `aimd.media` owns media URL/local audio-video extraction; `aimd.book` and future OCR follow MarkItDown plugin contracts.
+- **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.
 
 ## ANTI-PATTERNS
 
-- Embedding orchestration directly in adapters.
-- Importing infrastructure from adapters when an application-level dependency would work.
+- Embedding core routing/orchestration directly in interfaces.
+- Importing interface modules from `aimd.core` or feature packages.
 - Raising generic exceptions where a domain error exists.
 - Changing URL subtitle/cookie/audio fallback ordering without explicit tests.
 - Hard-coding stale audio model allow-lists or help text that blocks newer `mlx-audio` STT models.
@@ -123,7 +142,7 @@ uv build
 # CLI examples
 aimd audio.mp3
 aimd "https://youtube.com/..."
-aimd book.epub
+aimd document.epub
 aimd audio.mp3 --engine mlx --model mlx-community/parakeet-tdt-0.6b-v3
 aimd "https://youtube.com/..." --cookies-from-browser chrome --raw-transcript
 aimd audio.mp3 --temp-dir ./tmp --log-level DEBUG
@@ -168,13 +187,15 @@ uv version --bump patch  # or minor/major
 - Single PyPI distribution: `aimd-tool`.
 - Import namespace: `aimd`.
 - Console scripts: `aimd`, `aimd-api`, `aimd-mcp`.
+- Console entry points: `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, `aimd.interfaces.mcp.app:main`.
+- MarkItDown plugin entry points: `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, `aimd.plugins.ocr`.
 - `aimd-tool[all]` installs API/MCP runtime dependencies.
 - Dev group includes API/MCP dependencies so tests run with `uv sync --dev`.
 - `torch`/`torchaudio` resolve from the PyTorch CPU wheel index on Darwin.
-- `defuddle` is a Node/TypeScript package; `aimd.clip` wraps `npx defuddle parse` rather than vendoring Node code.
+- `defuddle` is a Node/TypeScript package; `aimd.plugins.url` registers the opt-in readable HTML converter and wraps `npx defuddle parse` rather than vendoring Node code.
 - URL extraction supports Netscape cookie files and browser cookie sources.
 - `--raw-transcript` preserves original SRT/VTT subtitle formatting; default strips subtitles to plain text.
-- `--temp-dir` and `AIMD_TEMP_DIR` redirect temporary downloads, transcoding, and ebook extraction.
-- Local file conversion uses MarkItDown and installed `markitdown.plugin` entry points.
-- Ebook pipeline lives in the `aimd.book` MarkItDown plugin and uses spine ordering, Pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing cleanup, and flat image extraction.
-- `aimd.book` currently implements an EPUB-compatible ZIP/spine extraction pipeline while routing `.epub`, `.mobi`, and `.azw3` as book inputs; true non-EPUB handling should be added inside `aimd.book`, not in the core router.
+- `--temp-dir` and `AIMD_TEMP_DIR` redirect temporary downloads, transcoding, and document extraction.
+- URL and local file conversion use MarkItDown and installed `markitdown.plugin` entry points.
+- Document conversion lives in the `aimd.plugins.doc` MarkItDown plugin. EPUB uses spine ordering, Pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing cleanup, and flat image extraction; other Pandoc-supported formats use direct Pandoc conversion.
+- Pandoc does not support MOBI/AZW3 as input formats, so AIMD does not route them as document inputs.

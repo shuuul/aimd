@@ -4,30 +4,35 @@ import subprocess
 import pytest
 
 from aimd.core.errors import EngineUnavailableError, ProcessingFailedError
-from aimd.ocr.engines import OCRPage, OCRResult, resolve_ocr_engine
-from aimd.ocr.mlx4ocr_engine import MLX4OCREngine, _resolve_mlx4ocr_model
-from aimd.ocr.models import create_transformers_ocr_model, resolve_transformers_ocr_model
-from aimd.ocr.models.generic import GenericTransformersOCRModel
-from aimd.ocr.models.got import GOTOCRModel
-from aimd.ocr.models.unlimited import (
+from aimd.plugins.ocr.engines import (
+    MLX4OCREngine,
+    OCRPage,
+    OCRResult,
+    TransformersOCREngine,
+    _resolve_mlx4ocr_model,
+    resolve_ocr_engine,
+)
+from aimd.plugins.ocr.models import create_transformers_ocr_model, resolve_transformers_ocr_model
+from aimd.plugins.ocr.models.generic import GenericTransformersOCRModel
+from aimd.plugins.ocr.models.got import GOTOCRModel
+from aimd.plugins.ocr.models.unlimited import (
     UnlimitedOCRModel,
     normalize_unlimited_ocr_output,
     read_unlimited_ocr_output_files,
 )
-from aimd.ocr.processor import process_ocr
-from aimd.ocr.transformers_engine import TransformersOCREngine
+from aimd.plugins.ocr.processor import process_ocr
 
 
 def test_resolve_ocr_engine_selects_platform_defaults(monkeypatch) -> None:
-    monkeypatch.setattr("aimd.ocr.engines.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("aimd.plugins.ocr.engines.platform.system", lambda: "Darwin")
     assert resolve_ocr_engine("auto") == "mlx4ocr"
 
-    monkeypatch.setattr("aimd.ocr.engines.platform.system", lambda: "Linux")
+    monkeypatch.setattr("aimd.plugins.ocr.engines.platform.system", lambda: "Linux")
     assert resolve_ocr_engine("auto") == "transformers"
 
 
 def test_resolve_ocr_engine_rejects_wrong_platform(monkeypatch) -> None:
-    monkeypatch.setattr("aimd.ocr.engines.platform.system", lambda: "Linux")
+    monkeypatch.setattr("aimd.plugins.ocr.engines.platform.system", lambda: "Linux")
     with pytest.raises(EngineUnavailableError):
         resolve_ocr_engine("mlx4ocr")
 
@@ -77,8 +82,8 @@ def test_mlx4ocr_pdf_command_uses_default_paddleocr_v6(monkeypatch, tmp_path: Pa
         assert kwargs["text"] is True
         return subprocess.CompletedProcess(command, 0, stdout="recognized", stderr="")
 
-    monkeypatch.setattr("aimd.ocr.mlx4ocr_engine.shutil.which", lambda _: "mlx4ocr")
-    monkeypatch.setattr("aimd.ocr.mlx4ocr_engine.subprocess.run", _run)
+    monkeypatch.setattr("aimd.plugins.ocr.engines.shutil.which", lambda _: "mlx4ocr")
+    monkeypatch.setattr("aimd.plugins.ocr.engines.subprocess.run", _run)
 
     text = MLX4OCREngine()._recognize_pdf_or_document(
         pdf,
@@ -111,8 +116,8 @@ def test_mlx4ocr_pdf_command_maps_vlm_models(
         captured["command"] = command
         return subprocess.CompletedProcess(command, 0, stdout="recognized", stderr="")
 
-    monkeypatch.setattr("aimd.ocr.mlx4ocr_engine.shutil.which", lambda _: "mlx4ocr")
-    monkeypatch.setattr("aimd.ocr.mlx4ocr_engine.subprocess.run", _run)
+    monkeypatch.setattr("aimd.plugins.ocr.engines.shutil.which", lambda _: "mlx4ocr")
+    monkeypatch.setattr("aimd.plugins.ocr.engines.subprocess.run", _run)
 
     text = MLX4OCREngine()._recognize_pdf_or_document(
         pdf,
@@ -150,7 +155,7 @@ def test_transformers_engine_ocr_image_uses_resolved_model(
         return _FakeModel()
 
     monkeypatch.setattr(
-        "aimd.ocr.transformers_engine.create_transformers_ocr_model", _create_model
+        "aimd.plugins.ocr.engines.create_transformers_ocr_model", _create_model
     )
 
     result = TransformersOCREngine().recognize(
@@ -185,7 +190,7 @@ def test_transformers_engine_unlimited_ocr_image_uses_model_infer(
             return "recognized markdown"
 
     monkeypatch.setattr(
-        "aimd.ocr.models.unlimited.get_cached_model_and_processor",
+        "aimd.plugins.ocr.models.unlimited.get_cached_model_and_processor",
         lambda model_name, loader: (_FakeModel(), "tokenizer"),  # noqa: ARG005
     )
 
@@ -221,7 +226,7 @@ def test_transformers_engine_unlimited_ocr_pdf_uses_infer_multi(
             return ["page one", "page two"]
 
     monkeypatch.setattr(
-        "aimd.ocr.models.unlimited.get_cached_model_and_processor",
+        "aimd.plugins.ocr.models.unlimited.get_cached_model_and_processor",
         lambda model_name, loader: (_FakeModel(), "tokenizer"),  # noqa: ARG005
     )
 
@@ -285,7 +290,7 @@ async def test_process_ocr_wraps_engine_result_as_text_context(
             )
 
     monkeypatch.setattr(
-        "aimd.ocr.processor.create_ocr_engine", lambda engine: _FakeEngine()
+        "aimd.plugins.ocr.processor.create_ocr_engine", lambda engine: _FakeEngine()
     )
 
     result = await process_ocr(

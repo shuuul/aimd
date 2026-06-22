@@ -1,6 +1,6 @@
 [project]
 name = "aimd-tool"
-version = "0.10.3"
+version = "0.11.0"
 description = "Context preparation tool for LLM workflows."
 readme = { text = "Prepare LLM-ready context from URLs, audio/video, and documents.", content-type = "text/markdown" }
 authors = [
@@ -46,13 +46,15 @@ all = [
 ]
 
 [project.scripts]
-aimd = "aimd.core.cli:main"
-aimd-api = "aimd.api:main"
-aimd-mcp = "aimd.mcp.app:main"
+aimd = "aimd.interfaces.cli:main"
+aimd-api = "aimd.interfaces.api:main"
+aimd-mcp = "aimd.interfaces.mcp.app:main"
 
 [project.entry-points."markitdown.plugin"]
-book = "aimd.book"
-media = "aimd.media"
+asr = "aimd.plugins.asr"
+doc = "aimd.plugins.doc"
+ocr = "aimd.plugins.ocr"
+url = "aimd.plugins.url"
 
 [dependency-groups]
 dev = [
@@ -64,6 +66,7 @@ dev = [
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
     "mcp>=1.18.0",
+    "httpx2>=2.4.0",
 ]
 
 [tool.uv.sources]

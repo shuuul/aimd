@@ -2,46 +2,40 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aimd.api.app import create_app
-from aimd.core.application.models import ProcessResult
+from aimd.interfaces.api.app import create_app
+from aimd.core.models import ProcessResult, TextContext
 from aimd.core.errors import (
     EngineUnavailableError,
     ProcessingFailedError,
     UnsupportedInputError,
 )
-from aimd.core.types import TextContext
-from aimd.asr import EngineCapability
+from aimd.plugins.asr import EngineCapability
 
 
-class _FakeProcessUseCase:
-    def __init__(self, result=None, exc=None):
-        self._result = result
-        self._exc = exc
+def _fake_list_transcription_engines():
+    class _Result:
+        auto_selected_engine = "qwen"
+        engines = {
+            "mlx": EngineCapability("mlx", False, "unsupported", None),
+            "qwen": EngineCapability("qwen", True, None, None),
+        }
 
-    async def execute(self, request):  # noqa: ARG002
-        if self._exc:
-            raise self._exc
-        return self._result
-
-
-class _FakeListEnginesUseCase:
-    def execute(self):
-        class _Result:
-            auto_selected_engine = "qwen"
-            engines = {
-                "mlx": EngineCapability("mlx", False, "unsupported", None),
-                "qwen": EngineCapability("qwen", True, None, None),
-            }
-
-        return _Result()
+    return _Result()
 
 
 def _make_client(monkeypatch, process_result=None, process_exc=None) -> TestClient:
-    class _Container:
-        process_input_use_case = _FakeProcessUseCase(process_result, process_exc)
-        list_engines_use_case = _FakeListEnginesUseCase()
+    async def _fake_process_input(request):  # noqa: ARG001
+        if process_exc:
+            raise process_exc
+        return process_result
 
-    monkeypatch.setattr("aimd.api.app.build_container", lambda: _Container())
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.process_core_input",
+        _fake_process_input,
+    )
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.list_transcription_engines", _fake_list_transcription_engines
+    )
     return TestClient(create_app())
 
 

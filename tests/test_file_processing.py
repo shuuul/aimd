@@ -2,13 +2,13 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from aimd.core.infrastructure.documents.chunking import split_markdown_by_headers
-from aimd.book.processor import process_book_with_images
+from aimd.core.process import _split_markdown_by_headers
+from aimd.plugins.doc.processor import PANDOC_INPUT_FORMAT_BY_EXTENSION, process_doc_with_assets
 
 
 def test_split_markdown_by_headers_fallback_without_headers() -> None:
     markdown = "Paragraph " * 6000
-    sections, header_level = split_markdown_by_headers(markdown, max_chunk_size=4000)
+    sections, header_level = _split_markdown_by_headers(markdown, max_chunk_size=4000)
 
     assert header_level is None
     assert len(sections) > 1
@@ -21,16 +21,16 @@ def _fake_convert(html_file: Path, output_file: Path) -> None:
 
 
 def test_process_epub_large_content_returns_markdown(tmp_path: Path) -> None:
-    epub_path = tmp_path / "aimd.book.epub"
+    epub_path = tmp_path / "document.epub"
     with zipfile.ZipFile(epub_path, "w") as zf:
         zf.writestr("OEBPS/ch1.html", "<html><body>c1</body></html>")
         zf.writestr("OEBPS/ch2.html", "<html><body>c2</body></html>")
 
     with patch(
-        "aimd.book.processor._convert_html_to_markdown",
+        "aimd.plugins.doc.processor._convert_html_to_markdown",
         side_effect=_fake_convert,
     ):
-        result = process_book_with_images(epub_path)
+        result = process_doc_with_assets(epub_path)
 
     assert result.markdown
     assert len(result.markdown) > 40000
@@ -68,11 +68,62 @@ def test_process_epub_spine_ordering(tmp_path: Path) -> None:
         output_file.write_text(f"## {html_file.stem}\n\ncontent\n", encoding="utf-8")
 
     with patch(
-        "aimd.book.processor._convert_html_to_markdown",
+        "aimd.plugins.doc.processor._convert_html_to_markdown",
         side_effect=_track_convert,
     ):
-        result = process_book_with_images(epub_path)
+        result = process_doc_with_assets(epub_path)
 
     assert written_order == ["b", "a"], "Spine order should be b then a"
     combined = (result.output_dir / "ordered.md").read_text(encoding="utf-8")
     assert combined.index("b") < combined.index("a")
+
+
+def test_pandoc_extension_map_includes_supported_document_families() -> None:
+    expected_extensions = {
+        ".adoc",
+        ".bib",
+        ".csv",
+        ".docbook",
+        ".docx",
+        ".epub",
+        ".fb2",
+        ".html",
+        ".ipynb",
+        ".jats",
+        ".json",
+        ".md",
+        ".odt",
+        ".opml",
+        ".org",
+        ".ris",
+        ".rst",
+        ".rtf",
+        ".tex",
+        ".textile",
+        ".tsv",
+        ".typ",
+        ".vimwiki",
+    }
+
+    assert expected_extensions <= set(PANDOC_INPUT_FORMAT_BY_EXTENSION)
+    assert ".mobi" not in PANDOC_INPUT_FORMAT_BY_EXTENSION
+    assert ".azw3" not in PANDOC_INPUT_FORMAT_BY_EXTENSION
+
+
+def test_process_pandoc_document_uses_detected_reader(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "paper.rst"
+    source.write_text("Title\n=====\n", encoding="utf-8")
+    seen: dict[str, object] = {}
+
+    def _fake_run_pandoc(**kwargs):  # noqa: ANN003
+        seen.update(kwargs)
+        kwargs["output_file"].write_text("# Paper\n\nBody", encoding="utf-8")
+
+    monkeypatch.setattr("aimd.plugins.doc.processor._run_pandoc", _fake_run_pandoc)
+
+    result = process_doc_with_assets(source)
+
+    assert seen["input_file"] == source
+    assert seen["input_format"] == "rst"
+    assert result.title == "Paper"
+    assert result.markdown == "# Paper\n\nBody"

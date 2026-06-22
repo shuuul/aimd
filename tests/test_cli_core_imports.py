@@ -11,6 +11,6 @@ def test_cli_import_does_not_load_optional_dependencies(module_name: str) -> Non
         if name == module_name or name.startswith(f"{module_name}."):
             del sys.modules[name]
 
-    import aimd.core.cli  # noqa: F401
+    import aimd.interfaces.cli  # noqa: F401
 
     assert module_name not in sys.modules
