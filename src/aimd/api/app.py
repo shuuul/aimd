@@ -157,4 +157,4 @@ def main() -> None:
 
     host = os.getenv("AIMD_HTTP_HOST", "127.0.0.1")
     port = int(os.getenv("AIMD_HTTP_PORT", "8000"))
-    uvicorn.run("api:app", host=host, port=port, reload=False)
+    uvicorn.run("aimd.api.app:app", host=host, port=port, reload=False)
