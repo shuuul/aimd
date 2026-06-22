@@ -31,8 +31,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install workspace dependencies
-        run: uv sync --locked --all-packages --all-extras --dev
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -57,8 +57,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install workspace dependencies
-        run: uv sync --locked --all-packages --all-extras --dev
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
 
       - name: Run tests
         run: uv run pytest -q

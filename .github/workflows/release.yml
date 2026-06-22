@@ -31,32 +31,27 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Verify tag matches package versions
+      - name: Verify tag matches package version
         shell: bash
         run: |
           expected="${GITHUB_REF_NAME#v}"
           python - <<'PY' "$expected"
-          from pathlib import Path
           import sys
           import tomllib
 
           expected = sys.argv[1]
-          mismatches = []
-          for path in sorted(Path("packages").glob("*/pyproject.toml")):
-              data = tomllib.loads(path.read_text())
-              name = data["project"]["name"]
-              actual = data["project"]["version"]
-              if actual != expected:
-                  mismatches.append(f"{name}: {actual}")
+          with open("pyproject.toml", "rb") as f:
+              data = tomllib.load(f)
+          name = data["project"]["name"]
+          actual = data["project"]["version"]
 
-          if mismatches:
-              print(f"Tag {expected!r} does not match package versions:")
-              print("\n".join(mismatches))
+          if actual != expected:
+              print(f"Tag {expected!r} does not match {name} version {actual!r}")
               raise SystemExit(1)
           PY
 
-      - name: Build all workspace packages
-        run: uv build --all-packages --out-dir dist
+      - name: Build aimd-tool distribution
+        run: uv build --out-dir dist
 
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
@@ -93,23 +88,23 @@ jobs:
       - name: Install released ref as uv tool
         run: >-
           uv tool install --force
-          "aimd-cli[all] @ git+https://github.com/${{ github.repository }}.git@${{ github.ref_name }}#subdirectory=packages/aimd"
-          --with-executables-from aimd-api
-          --with-executables-from aimd-mcp
+          "aimd-tool[all] @ git+https://github.com/${{ github.repository }}.git@${{ github.ref_name }}"
 
       - name: Verify installed executables
         shell: bash
         run: |
           aimd --help >/dev/null
-          python_bin="$(uv tool dir)/aimd-cli/bin/python"
+          command -v aimd-api >/dev/null
+          command -v aimd-mcp >/dev/null
+          python_bin="$(uv tool dir)/aimd-tool/bin/python"
           "$python_bin" - <<'PY'
-          import aimd
-          import aimd_api
-          import aimd_mcp
+          import aimd.api
+          import aimd.core
+          import aimd.mcp
 
-          assert aimd.__name__ == "aimd"
-          assert aimd_api.create_app().__class__.__name__ == "FastAPI"
-          assert aimd_mcp.mcp.__class__.__name__ == "FastMCP"
+          assert aimd.core.__name__ == "aimd.core"
+          assert aimd.api.create_app().__class__.__name__ == "FastAPI"
+          assert aimd.mcp.mcp.__class__.__name__ == "FastMCP"
           PY
 
   github-release:
@@ -155,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          output="$(uv publish 2>&1)"
+          output="$(uv publish dist/aimd_tool-* 2>&1)"
           status=$?
           echo "$output"
           if [ "$status" -eq 0 ]; then

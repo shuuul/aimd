@@ -2,15 +2,15 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aimd_api.app import create_app
-from aimd.application.models import ProcessResult
-from aimd.errors import (
+from aimd.api.app import create_app
+from aimd.core.application.models import ProcessResult
+from aimd.core.errors import (
     EngineUnavailableError,
     ProcessingFailedError,
     UnsupportedInputError,
 )
-from aimd_media import EngineCapability
-from aimd.types import TextContext
+from aimd.core.types import TextContext
+from aimd.media import EngineCapability
 
 
 class _FakeProcessUseCase:
@@ -41,7 +41,7 @@ def _make_client(monkeypatch, process_result=None, process_exc=None) -> TestClie
         process_input_use_case = _FakeProcessUseCase(process_result, process_exc)
         list_engines_use_case = _FakeListEnginesUseCase()
 
-    monkeypatch.setattr("aimd_api.app.build_container", lambda: _Container())
+    monkeypatch.setattr("aimd.api.app.build_container", lambda: _Container())
     return TestClient(create_app())
 
 

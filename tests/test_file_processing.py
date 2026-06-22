@@ -2,8 +2,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from aimd.infrastructure.documents.chunking import split_markdown_by_headers
-from aimd_book.processor import process_book_with_images
+from aimd.core.infrastructure.documents.chunking import split_markdown_by_headers
+from aimd.book.processor import process_book_with_images
 
 
 def test_split_markdown_by_headers_fallback_without_headers() -> None:
@@ -21,13 +21,13 @@ def _fake_convert(html_file: Path, output_file: Path) -> None:
 
 
 def test_process_epub_large_content_returns_markdown(tmp_path: Path) -> None:
-    epub_path = tmp_path / "book.epub"
+    epub_path = tmp_path / "aimd.book.epub"
     with zipfile.ZipFile(epub_path, "w") as zf:
         zf.writestr("OEBPS/ch1.html", "<html><body>c1</body></html>")
         zf.writestr("OEBPS/ch2.html", "<html><body>c2</body></html>")
 
     with patch(
-        "aimd_book.processor._convert_html_to_markdown",
+        "aimd.book.processor._convert_html_to_markdown",
         side_effect=_fake_convert,
     ):
         result = process_book_with_images(epub_path)
@@ -68,7 +68,7 @@ def test_process_epub_spine_ordering(tmp_path: Path) -> None:
         output_file.write_text(f"## {html_file.stem}\n\ncontent\n", encoding="utf-8")
 
     with patch(
-        "aimd_book.processor._convert_html_to_markdown",
+        "aimd.book.processor._convert_html_to_markdown",
         side_effect=_track_convert,
     ):
         result = process_book_with_images(epub_path)

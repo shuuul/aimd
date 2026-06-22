@@ -2,9 +2,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from aimd.adapters.cli.app import app
-from aimd.application.models import InputRoute, ProcessResult
-from aimd.types import TextContext
+from aimd.core.adapters.cli.app import app
+from aimd.core.application.models import InputRoute, ProcessResult
+from aimd.core.types import TextContext
 
 
 runner = CliRunner()
@@ -33,7 +33,9 @@ def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
             task_type="transcript",
         )
 
-    monkeypatch.setattr("aimd.adapters.cli.app.build_container", lambda: _Container())
+    monkeypatch.setattr(
+        "aimd.core.adapters.cli.app.build_container", lambda: _Container()
+    )
 
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["input.mp3"])
@@ -56,9 +58,11 @@ def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
             task_type="convert",
         )
 
-    monkeypatch.setattr("aimd.adapters.cli.app.build_container", lambda: _Container())
+    monkeypatch.setattr(
+        "aimd.core.adapters.cli.app.build_container", lambda: _Container()
+    )
 
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, [str(tmp_path / "book.epub")])
+    result = runner.invoke(app, [str(tmp_path / "aimd.book.epub")])
     assert result.exit_code == 0
     assert "Successfully converted book with images" in result.stdout

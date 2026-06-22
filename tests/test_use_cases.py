@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from aimd.application.models import InputRoute, ProcessInput, ProcessResult
-from aimd.application.use_cases.input_routing import get_input_route
-from aimd.application.use_cases.process_input import ProcessInputUseCase
-from aimd.application.use_cases.processors.convert import ConvertTaskProcessor
-from aimd.errors import UnsupportedInputError
-from aimd.types import TextContext
+from aimd.core.application.models import InputRoute, ProcessInput, ProcessResult
+from aimd.core.application.use_cases.input_routing import get_input_route
+from aimd.core.application.use_cases.process_input import ProcessInputUseCase
+from aimd.core.application.use_cases.processors.convert import ConvertTaskProcessor
+from aimd.core.errors import UnsupportedInputError
+from aimd.core.types import TextContext
 
 
 class _FakeTaskProcessor:
@@ -56,7 +56,7 @@ def test_input_route_classifies_audio_video_and_document(tmp_path: Path) -> None
 async def test_process_convert_passes_temp_dir_to_epub_processor(
     tmp_path: Path,
 ) -> None:
-    epub = tmp_path / "book.epub"
+    epub = tmp_path / "aimd.book.epub"
     epub.write_text("x", encoding="utf-8")
     temp_dir = tmp_path / "tmp"
     output_dir = tmp_path / "book-output"

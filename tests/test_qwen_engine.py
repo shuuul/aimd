@@ -1,4 +1,4 @@
-from aimd_media.qwen_engine import (
+from aimd.media.qwen_engine import (
     _parse_qwen_output,
     _resolve_language,
 )

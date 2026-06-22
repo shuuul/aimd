@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.9.2-blue" alt="Version 0.9.2">
+    <img src="https://img.shields.io/badge/version-0.9.3-blue" alt="Version 0.9.3">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -30,19 +30,19 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 ## Highlights
 
 - **One input command** for URLs, audio/video files, ebooks, PDFs, Markdown, text, and other MarkItDown-supported documents.
-- **Media extraction** with `aimd-media`: yt-dlp URLs such as podcasts, YouTube, Bilibili, and local audio/video files.
+- **Media extraction** through bundled `aimd.media`: yt-dlp URLs such as podcasts, YouTube, Bilibili, and local audio/video files.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
-- **Document conversion** through MarkItDown, with dedicated ebook chapter/image extraction in the `aimd-book` plugin.
+- **Document conversion** through MarkItDown, with dedicated ebook chapter/image extraction in the bundled `aimd.book` plugin.
 - **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
 
-> OCR for scanned PDFs and images is planned. The monorepo now includes an `aimd-ocr` package scaffold so OCR can land without growing the transcript or document conversion code paths.
+> OCR for scanned PDFs and images is planned. The `aimd.ocr` module scaffold is bundled in the single distribution so OCR can land without growing the transcript or document conversion code paths.
 
 ## Install
 
 Install the CLI after release:
 
 ```bash
-uv tool install aimd-cli
+uv tool install aimd-tool
 aimd --help
 ```
 
@@ -50,30 +50,27 @@ Install from GitHub `main` before a release:
 
 ```bash
 uv tool install --force \
-  "aimd-cli @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd"
+  "aimd-tool @ git+https://github.com/shuuul/aimd.git@main"
 ```
 
-Install the full tool set from GitHub, including the API and MCP executables:
+Install the full tool set from GitHub, including the API and MCP runtime dependencies:
 
 ```bash
 uv tool install --force \
-  "aimd-cli[all] @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd" \
-  --with-executables-from aimd-api \
-  --with-executables-from aimd-mcp
+  "aimd-tool[all] @ git+https://github.com/shuuul/aimd.git@main"
 ```
 
-Install API/MCP packages separately when needed:
+Install API/MCP dependencies from PyPI when needed:
 
 ```bash
-# HTTP API
-uv tool install aimd-api
-
-# MCP server
-uv tool install aimd-mcp
+# HTTP API + MCP server
+uv tool install "aimd-tool[all]"
 
 # Or install into an existing Python environment
-uv pip install "aimd-cli[all]"
+uv pip install "aimd-tool[all]"
 ```
+
+The public PyPI release is intentionally a single distribution (`aimd-tool`). The installed command remains `aimd`.
 
 From a source checkout, use the workspace directly:
 
@@ -88,7 +85,7 @@ Platform notes:
 
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
-- Local file conversion is powered by MarkItDown. Ebook conversion is handled by `aimd-book`; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
+- Local file conversion is powered by MarkItDown. Ebook conversion is handled by the bundled `aimd.book` MarkItDown plugin; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
 
 ## Quick start
 
@@ -165,11 +162,11 @@ book_name/
 
 The book pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup.
 
-Current note: `aimd-book` owns the ebook converter and routes `.epub`, `.mobi`, and `.azw3` as book inputs. The implemented extraction pipeline is EPUB-compatible; non-EPUB ebook formats may still need a later format-specific conversion step before the same cleanup pipeline can succeed.
+Current note: `aimd.book` owns the ebook converter and routes `.epub`, `.mobi`, and `.azw3` as book inputs. The implemented extraction pipeline is EPUB-compatible; non-EPUB ebook formats may still need a later format-specific conversion step before the same cleanup pipeline can succeed.
 
 ### MarkItDown plugins
 
-`aimd` uses MarkItDown for local files with plugins enabled. The workspace packages `aimd-media` and `aimd-book` register standard `markitdown.plugin` entry points, so installing `aimd` also installs the ASR and ebook converters.
+`aimd` uses MarkItDown for local files with plugins enabled. The bundled `aimd.media` and `aimd.book` modules register standard `markitdown.plugin` entry points, so installing `aimd-tool` also installs the ASR and ebook converters.
 
 You can also use the plugins from MarkItDown directly:
 
@@ -245,43 +242,37 @@ Useful maintenance commands:
 
 ```bash
 uv run prek autoupdate
-uv build --all-packages
+uv build
 uv version --bump patch
 ```
 
 Release a tagged version:
 
 ```bash
-# Make sure all packages have the same version, then push a v-prefixed tag.
-git tag v0.9.2
-git push origin v0.9.2
+# Make sure the package version matches the tag, then push a v-prefixed tag.
+git tag v0.9.3
+git push origin v0.9.3
 ```
 
-The release workflow builds every workspace package, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes the distributions to PyPI using the `UV_PUBLISH_TOKEN` repository secret.
+The release workflow builds the single `aimd-tool` distribution, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes that distribution to PyPI using the `UV_PUBLISH_TOKEN` repository secret.
 
 Project layout:
 
 ```text
-packages/
-├── aimd/            # Core CLI, routing, MarkItDown runner
-├── aimd-api/        # FastAPI service package
-├── aimd-mcp/        # MCP stdio server package
-├── aimd-media/      # yt-dlp URLs, subtitles, audio fallback, ASR plugin
-├── aimd-book/       # MarkItDown plugin for ebook spine/image extraction and cleanup
-├── aimd-ocr/        # OCR package scaffold for scanned PDFs/images
-└── aimd-html/        # Defuddle CLI wrapper for readable HTML extraction
+src/
+└── aimd/            # Single aimd-tool package: CLI, API, MCP, media, book, OCR/clip modules
 ```
 
 ## Architecture
 
-`aimd` is now a uv workspace. The main package uses MarkItDown as the local-file conversion contract and follows a ports/adapters layout:
+`aimd` is a single published distribution, `aimd-tool`. The package uses MarkItDown as the local-file conversion contract and follows a ports/adapters layout:
 
 - `application` owns orchestration and task routing.
 - `process_input.py` acts as the facade/router; local file processors call `MarkItDown(enable_plugins=True)`.
-- Feature packages register MarkItDown plugins: `aimd-media` for local audio/video ASR and `aimd-book` for ebooks. `aimd-book` is the package name for book-like formats even though the current extraction pipeline is EPUB-compatible. `aimd-ocr` is the next plugin scaffold, and `aimd-html` wraps Defuddle-backed HTML extraction.
-- `aimd-media` owns URL media extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and ASR.
-- The main `aimd.infrastructure` wraps media/MarkItDown markdown results into `TextContext` chunks.
-- CLI/API/MCP packages translate interface requests into application use-cases. Output file persistence is adapter-owned and shared through `aimd.application.services.output_writer`; it is not part of `ProcessInput`.
+- Bundled modules register MarkItDown plugins: `aimd.media` for local audio/video ASR and `aimd.book` for ebooks. `aimd.ocr` is the next plugin scaffold, and `aimd.clip` wraps Defuddle-backed HTML extraction.
+- `aimd.media` owns URL media extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and ASR.
+- `aimd.core.infrastructure` wraps media/MarkItDown markdown results into `TextContext` chunks.
+- CLI/API/MCP modules translate interface requests into application use-cases. Output file persistence is adapter-owned and shared through `aimd.core.application.services.output_writer`; it is not part of `ProcessInput`.
 
 All processing returns a shared `TextContext` shape: title, chunks, and split metadata.
 
