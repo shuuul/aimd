@@ -1,227 +1,177 @@
 ---
 name: aimd
-description: Runs and develops the aimd context-preparation toolkit. Use when extracting LLM-ready Markdown from URLs, audio/video, documents, PDFs, scanned images, or when working on the aimd CLI/API/MCP codebase.
+description: Converts URLs, audio/video, documents, PDFs, and images into LLM-ready Markdown with the aimd CLI. Use when an agent needs to prepare readable text context from local files or web/media sources.
 license: MIT
-compatibility: Requires Python >=3.10,<3.13 and uv. Platform-specific inference: mlx-audio/mlx4ocr on macOS Apple Silicon; Transformers OCR/ASR expects Linux with CUDA. Local development should use uv commands, not pip or poetry.
+compatibility: Requires uv and local file or network access for the requested input. macOS Apple Silicon uses MLX backends for local ASR/OCR; Linux ASR/OCR expects CUDA-capable Transformers backends.
 metadata:
   source: https://github.com/shuuul/aimd
 ---
 
 # aimd
 
-Use this skill to guide agents through local context extraction and development with the `aimd` toolkit.
+Use this skill when you need to turn source material into Markdown context for an agent or LLM workflow.
 
 ## Constraints
 
-- Prefer the packaged CLI/API/MCP entry points instead of ad hoc Python scripts.
-- Use `uv` for all project commands: `uv run`, `uv sync`, `uv build`, and `uv tool install`.
-- Validate local input paths before running long OCR or ASR jobs.
-- Treat `aimd.core` as interface-independent; do not import CLI/API/MCP modules from core.
-- Keep URL, ASR, document, and OCR integrations behind MarkItDown plugins in `aimd.plugins.*`.
-- Keep output persistence in interfaces through `aimd.interfaces.output`; `ProcessInput` and `ProcessResult` do not own `output_file`.
-- Do not promise unsupported platform behavior: macOS local ML uses MLX; Linux local ASR/OCR expects CUDA-capable Transformers backends.
+- Use the `aimd` CLI as the primary interface.
+- Prefer `uvx --from aimd-tool aimd ...` for one-off runs when `aimd` is not installed.
+- Validate local input paths before running OCR, document conversion, or transcription.
+- Save output with `--output` when the generated Markdown will be reused by another agent step.
+- Choose `--raw-transcript` only when timestamps/cues from subtitles are useful; otherwise use the default cleaned text.
+- For sandboxed environments, set `AIMD_TEMP_DIR` or pass `--temp-dir` to a writable directory.
+- Do not claim unsupported local inference: macOS local ML uses MLX; Linux local ASR/OCR expects CUDA.
 
-## One-off use from PyPI or GitHub
+## Recommended command shape
 
-Run the released CLI:
+If `aimd` is installed:
 
 ```bash
-uvx --from aimd-tool aimd --help
-uvx --from aimd-tool aimd /path/to/input
+aimd INPUT --output output.md
 ```
 
-Run the current GitHub `main` before a release:
+For one-off use without installing:
+
+```bash
+uvx --from aimd-tool aimd INPUT --output output.md
+```
+
+For the latest GitHub version before a release:
 
 ```bash
 uvx --from "aimd-tool @ git+https://github.com/shuuul/aimd.git@main" \
-  aimd /path/to/input
+  aimd INPUT --output output.md
 ```
 
-Install the full API/MCP runtime when needed:
-
-```bash
-uvx --from "aimd-tool[all]" aimd-api
-uvx --from "aimd-tool[all]" aimd-mcp
-```
-
-## Repeated use with uv tool
-
-Install once:
+Install for repeated use:
 
 ```bash
 uv tool install aimd-tool
 aimd --help
 ```
 
-Install API/MCP extras:
-
-```bash
-uv tool install "aimd-tool[all]"
-```
-
-Upgrade or remove later:
-
-```bash
-uv tool upgrade aimd-tool
-uv tool uninstall aimd-tool
-```
-
-## Source checkout workflow
-
-From this repository:
-
-```bash
-uv sync --dev
-uv run aimd --help
-uv run aimd /path/to/input
-```
-
-Targeted checks:
-
-```bash
-uv run pytest -q
-uv run ruff check
-uv run ruff format --check
-```
-
-Maintenance checks:
-
-```bash
-uv run prek --all-files
-uv build
-```
-
-## Common CLI tasks
+## Prepare Markdown from common inputs
 
 Auto-detect input type:
 
 ```bash
-aimd audio.mp3
-aimd "https://youtube.com/watch?v=..."
-aimd document.epub
-aimd scan.pdf
-aimd page.png
-```
-
-Save Markdown output:
-
-```bash
-aimd document.epub --output output.md
 aimd audio.mp3 --output transcript.md
+aimd video.mp4 --output transcript.md
+aimd "https://youtube.com/watch?v=..." --output page.md
+aimd document.epub --output document.md
+aimd document.pdf --output document.md
+aimd scan.pdf --output scan.md
+aimd page.png --output page.md
+aimd notes.txt --output notes.md
 ```
 
-Use URL cookies or preserve raw subtitles:
+Use `uvx` by prefixing the same command:
 
 ```bash
-aimd "https://youtube.com/watch?v=..." --cookies cookies.txt
-aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
-aimd "https://youtube.com/watch?v=..." --raw-transcript
+uvx --from aimd-tool aimd document.pdf --output document.md
 ```
 
-Redirect temporary downloads, transcoding, and document extraction:
+## URL and transcript sources
+
+Extract readable Markdown or subtitles from supported URLs:
 
 ```bash
-AIMD_TEMP_DIR=/path/to/writable/tmp aimd audio.mp3
-aimd audio.mp3 --temp-dir /path/to/writable/tmp
+aimd "https://youtube.com/watch?v=..." --output transcript.md
+aimd "https://www.bilibili.com/video/BV..." --output transcript.md
+aimd "https://www.xiaoyuzhoufm.com/episode/..." --output episode.md
+```
+
+For authenticated or restricted media:
+
+```bash
+aimd "https://youtube.com/watch?v=..." --cookies cookies.txt --output transcript.md
+aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome --output transcript.md
+```
+
+Preserve original subtitle formatting only when needed:
+
+```bash
+aimd "https://youtube.com/watch?v=..." --raw-transcript --output subtitles.md
 ```
 
 ## Audio and video transcription
 
-Use `auto` unless the user asks for a specific backend:
+Use `auto` unless a platform-specific backend is required:
 
 ```bash
-aimd lecture.mp3 --engine auto
-aimd lecture.mp3 --engine mlx      # macOS Apple Silicon
-aimd lecture.mp3 --engine qwen     # Linux/CUDA Transformers
-aimd lecture.mp3 --language zh
+aimd lecture.mp3 --engine auto --output lecture.md
+aimd interview.m4a --language zh --output interview.md
+aimd video.mp4 --output video.md
 ```
 
-Common models:
+Backend-specific examples:
 
 ```bash
-aimd audio.wav --engine mlx --model mlx-community/Qwen3-ASR-1.7B-4bit
-aimd audio.wav --engine qwen --model Qwen/Qwen3-ASR-1.7B
+aimd audio.wav --engine mlx --output transcript.md      # macOS Apple Silicon
+aimd audio.wav --engine qwen --output transcript.md     # Linux/CUDA
 ```
+
+Model examples:
+
+```bash
+aimd audio.wav --engine mlx --model mlx-community/Qwen3-ASR-1.7B-4bit --output transcript.md
+aimd audio.wav --engine qwen --model Qwen/Qwen3-ASR-1.7B --output transcript.md
+```
+
+## Documents, PDFs, and text files
+
+Convert documents to Markdown:
+
+```bash
+aimd document.epub --output document.md
+aimd document.pdf --output document.md
+aimd notes.md --output notes.md
+aimd notes.txt --output notes.md
+```
+
+EPUB and asset-bearing documents may produce a structured output directory with Markdown plus extracted assets. Use an explicit output path so later agent steps know where to read from.
 
 ## OCR for scanned PDFs and images
 
-Images route to OCR automatically. PDFs with extractable text route to document conversion; scanned PDFs route to OCR when text-layer detection is available.
+Images route to OCR automatically. PDFs with a text layer are converted as documents; scanned PDFs route to OCR when text-layer detection is available.
 
 ```bash
-aimd page.png
-aimd scan.pdf --engine mlx4ocr                 # macOS Apple Silicon
-aimd scan.pdf --engine transformers --model got_ocr       # Linux/CUDA
-aimd scan.pdf --model paddleocr_v6             # default mlx4ocr PP-OCRv6 alias
-aimd scan.pdf --model glm_ocr
-aimd scan.pdf --model paddleocr_vl
-aimd scan.pdf --start 0 --end 2                # zero-based inclusive PDF page range
+aimd page.png --output page.md
+aimd scan.pdf --output scan.md
+aimd scan.pdf --start 0 --end 2 --output scan-pages.md
 ```
 
-## Document and MarkItDown plugin use
-
-Local files and URLs flow through MarkItDown with bundled plugins enabled.
+Backend-specific OCR examples:
 
 ```bash
-aimd document.epub
-aimd document.pdf
-aimd notes.md
-markitdown --list-plugins
-markitdown --use-plugins document.epub -o doc.md
-markitdown --use-plugins audio.mp3 -o transcript.md
+aimd scan.pdf --engine mlx4ocr --model paddleocr_v6 --output scan.md       # macOS Apple Silicon
+aimd scan.pdf --engine transformers --model got_ocr --output scan.md       # Linux/CUDA
+aimd scan.pdf --engine transformers --model unlimited_ocr --output scan.md # Linux/CUDA
 ```
 
-Readable HTML extraction through Defuddle is opt-in:
+## Temporary directory handling
 
-```python
-from markitdown import MarkItDown
-
-result = MarkItDown(enable_plugins=True).convert("article.html", defuddle=True)
-print(result.markdown)
-```
-
-## API and MCP interfaces
-
-Run the HTTP API:
+Use a writable temp directory when processing large media, sandboxed filesystems, or environments where `/tmp` may be restricted:
 
 ```bash
-aimd-api
-curl http://127.0.0.1:8000/healthz
-curl http://127.0.0.1:8000/v1/engines
+AIMD_TEMP_DIR=/path/to/writable/tmp aimd audio.mp3 --output transcript.md
+aimd scan.pdf --temp-dir /path/to/writable/tmp --output scan.md
 ```
 
-Process input through the API:
+## Before running
 
-```bash
-curl -X POST http://127.0.0.1:8000/v1/process \
-  -H "Content-Type: application/json" \
-  -d '{"input_source":"https://www.youtube.com/watch?v=...","transcribe_engine":"auto"}'
-```
+1. Confirm `uv` or `aimd` is available:
 
-Run the MCP stdio server:
+   ```bash
+   uv --version
+   aimd --help
+   ```
 
-```bash
-aimd-mcp
-```
+2. For local files, confirm the input exists:
 
-MCP tools are `healthz`, `list_engines`, and `process_input`. `process_input` accepts `input_source`, `task_type`, `transcribe_engine`, `model`, `language`, `start`, `end`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`.
+   ```bash
+   test -e /path/to/input
+   ```
 
-## Development map
-
-- CLI: `src/aimd/interfaces/cli/app.py`
-- HTTP API: `src/aimd/interfaces/api/app.py`
-- MCP server: `src/aimd/interfaces/mcp/app.py`
-- Shared output persistence: `src/aimd/interfaces/output.py`
-- Models and routing: `src/aimd/core/models.py`, `src/aimd/core/router.py`
-- Processing and Markdown shaping: `src/aimd/core/process.py`
-- URL extraction plugin: `src/aimd/plugins/url/`
-- Audio/video ASR plugin: `src/aimd/plugins/asr/`
-- Document conversion plugin: `src/aimd/plugins/doc/`
-- OCR plugin: `src/aimd/plugins/ocr/`
-
-## Recommended checks before running
-
-1. Confirm `uv` is installed: `uv --version`.
-2. For local files, confirm the input exists: `test -e /path/to/input`.
-3. For ASR/OCR, pick a backend compatible with the platform.
-4. For sandboxed environments, set `AIMD_TEMP_DIR` to a writable directory.
-5. For code changes, run the narrowest relevant pytest/ruff check, then broaden only when shared contracts changed.
+3. Pick the smallest useful output target, usually a Markdown file via `--output`.
+4. For ASR/OCR, choose a backend compatible with the current machine.
+5. After the command completes, pass the saved Markdown path to the next agent step.
