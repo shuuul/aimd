@@ -15,7 +15,7 @@ This document records practical performance expectations for `aimd` processing p
 
 ## Model/runtime tradeoffs
 
-| Task | Engine | Model family | Expected performance profile |
+| Task | Backend | Model family | Expected performance profile |
 |------|--------|--------------|------------------------------|
 | Transcription | `mlx` | Quantized Qwen3-ASR | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
 | Transcription | `mlx` | Whisper, Distil-Whisper, Parakeet, Nemotron, Voxtral, VibeVoice, Qwen2-Audio | Performance is delegated to `mlx-audio`; model size and upstream generation behavior dominate. |
@@ -32,7 +32,7 @@ The following is a functional smoke test, not a benchmark. It verifies that the 
 
 | Date | Hardware | Command/path | Input | Observed result |
 |------|----------|--------------|-------|-----------------|
-| 2026-06-22 | NVIDIA GeForce RTX 5090, Linux/WSL2 | `process_ocr(..., engine="transformers", model="unlimited_ocr")` | Generated 512×160 PNG containing `Hello OCR 123` | Returned `HelloOCR 123` after first loading `baidu/Unlimited-OCR`. |
+| 2026-06-22 | NVIDIA GeForce RTX 5090, Linux/WSL2 | `process_ocr(..., model="unlimited_ocr")` | Generated 512×160 PNG containing `Hello OCR 123` | Returned `HelloOCR 123` after first loading `baidu/Unlimited-OCR`. |
 
 ## Measurement guidance
 
@@ -47,8 +47,8 @@ When comparing models, measure warm and cold runs separately:
 A minimal local timing harness can wrap the public CLI:
 
 ```bash
-/usr/bin/time -p aimd input.mp3 --engine qwen --model Qwen/Qwen3-ASR-0.6B --output /tmp/out.md
-/usr/bin/time -p aimd scan.pdf --engine transformers --model unlimited_ocr --output /tmp/ocr.md
+/usr/bin/time -p aimd input.mp3 --model Qwen/Qwen3-ASR-0.6B --output /tmp/out.md
+/usr/bin/time -p aimd scan.pdf --model unlimited_ocr --output /tmp/ocr.md
 ```
 
 For API/MCP model-reuse measurements, start the server once and send repeated requests against the same process.

@@ -6,7 +6,7 @@ from pathlib import Path
 from aimd.core.errors import InputNotFoundError, ProcessingFailedError
 from aimd.core.models import TextContext
 
-from .engines import OCRPage, create_ocr_engine
+from .backends import OCRPage, create_ocr_backend
 
 
 def _page_to_markdown(page: OCRPage, total_pages: int) -> str:
@@ -18,7 +18,6 @@ def _page_to_markdown(page: OCRPage, total_pages: int) -> str:
 
 async def process_ocr(
     input_path: str | Path,
-    engine: str = "auto",
     model: str | None = None,
     language: str | None = None,
     start: int | None = None,
@@ -40,7 +39,7 @@ async def process_ocr(
             "OCR start page must be less than or equal to end page."
         )
 
-    backend = create_ocr_engine(engine)
+    backend = create_ocr_backend()
     result = await asyncio.to_thread(
         backend.recognize,
         path,
@@ -59,7 +58,6 @@ async def process_ocr(
 
 def process_ocr_sync(
     input_path: str | Path,
-    engine: str = "auto",
     model: str | None = None,
     language: str | None = None,
     start: int | None = None,
@@ -70,7 +68,6 @@ def process_ocr_sync(
     return asyncio.run(
         process_ocr(
             input_path,
-            engine=engine,
             model=model,
             language=language,
             start=start,

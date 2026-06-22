@@ -56,7 +56,6 @@ class AimdUrlTranscriptConverter(DocumentConverter):
             result = asyncio.run(
                 get_text_from_url(
                     stream_info.url,
-                    transcribe_engine=kwargs.get("transcribe_engine", "auto"),
                     language=kwargs.get("language"),
                     model=kwargs.get("model"),
                     save_original_path=kwargs.get("save_original_path"),
@@ -67,7 +66,9 @@ class AimdUrlTranscriptConverter(DocumentConverter):
                 )
             )
         except Exception as exc:
-            raise FailedConversionAttempt(f"AIMD URL transcript conversion failed: {exc}") from exc
+            raise FailedConversionAttempt(
+                f"AIMD URL transcript conversion failed: {exc}"
+            ) from exc
 
         return DocumentConverterResult(
             title=result.title,
@@ -84,7 +85,10 @@ class AimdReadableHtmlConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> bool:
-        if kwargs.get("task_type") != "readable_html" and kwargs.get("defuddle") is not True:
+        if (
+            kwargs.get("task_type") != "readable_html"
+            and kwargs.get("defuddle") is not True
+        ):
             return False
 
         if stream_info.url and stream_info.url.startswith(("http://", "https://")):
@@ -101,7 +105,9 @@ class AimdReadableHtmlConverter(DocumentConverter):
     ) -> DocumentConverterResult:
         source = stream_info.url or stream_info.local_path
         if not source:
-            raise FailedConversionAttempt("aimd.plugins.url Defuddle conversion requires a URL or local file path")
+            raise FailedConversionAttempt(
+                "aimd.plugins.url Defuddle conversion requires a URL or local file path"
+            )
 
         try:
             result = extract_html_with_defuddle(

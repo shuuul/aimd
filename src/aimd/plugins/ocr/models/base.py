@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from aimd.core.errors import EngineUnavailableError
+from aimd.core.errors import BackendUnavailableError
 
 _cached_model = None
 _cached_processor = None
@@ -12,7 +12,7 @@ _cached_model_name: str | None = None
 
 
 class TransformersOCRModel(Protocol):
-    """Model-specific adapter used by the Linux/CUDA Transformers OCR engine."""
+    """Model-specific adapter used by the Linux/CUDA Transformers OCR backend."""
 
     model_id: str
 
@@ -70,7 +70,7 @@ def get_cuda_dtype():
     try:
         import torch
     except ImportError as exc:
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             "Transformers OCR requires torch and transformers. Install project "
             "dependencies with `uv sync`, then retry."
         ) from exc
@@ -98,13 +98,13 @@ def _ensure_cuda_runtime() -> None:
         import torch
         import transformers  # type: ignore[import-untyped]  # noqa: F401
     except ImportError as exc:
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             "Transformers OCR requires torch and transformers. Install project "
             "dependencies with `uv sync`, then retry."
         ) from exc
 
     if not torch.cuda.is_available():
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             "CUDA is not available. The Transformers OCR backend requires a "
             "CUDA-capable GPU for practical inference."
         )

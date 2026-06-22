@@ -117,7 +117,7 @@ class TestGetTextFromAudioAcceptsMp4a:
 
         with (
             patch(
-                "aimd.plugins.asr.processor.resolve_engine_with_preflight",
+                "aimd.plugins.asr.processor.select_transcription_backend",
                 return_value="mlx",
             ),
             patch(
@@ -126,7 +126,7 @@ class TestGetTextFromAudioAcceptsMp4a:
                 return_value="transcribed text",
             ),
         ):
-            result = await transcribe_file(src, engine="mlx", temp_dir=tmp_path)
+            result = await transcribe_file(src, temp_dir=tmp_path)
         assert result == "transcribed text"
 
     @pytest.mark.asyncio
@@ -134,4 +134,4 @@ class TestGetTextFromAudioAcceptsMp4a:
         src = tmp_path / "sample.xyz"
         src.write_text("fake", encoding="utf-8")
         with pytest.raises(UnsupportedInputError, match="Unsupported file format"):
-            await transcribe_file(src, engine="mlx", temp_dir=tmp_path)
+            await transcribe_file(src, temp_dir=tmp_path)

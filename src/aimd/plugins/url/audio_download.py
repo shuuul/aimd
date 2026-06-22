@@ -45,7 +45,6 @@ def _truncate_to_bytes(name: str, max_bytes: int = _MAX_FILENAME_BYTES) -> str:
 async def extract_content_from_audio(
     info_dict: dict[str, Any],
     url: str,
-    transcribe_engine: str,
     language: str | None,
     model: str | None = None,
     save_original_path: Path | None = None,
@@ -66,7 +65,6 @@ async def extract_content_from_audio(
             info_dict=info_dict,
             url=url,
             download_path=download_dir,
-            transcribe_engine=transcribe_engine,
             language=language,
             model=model,
             save_original_path=save_original_path,
@@ -80,7 +78,6 @@ async def extract_content_from_audio(
             info_dict=info_dict,
             url=url,
             download_path=Path(tmp),
-            transcribe_engine=transcribe_engine,
             language=language,
             model=model,
             save_original_path=save_original_path,
@@ -95,7 +92,6 @@ async def _download_and_transcribe_audio(
     info_dict: dict[str, Any],
     url: str,
     download_path: Path,
-    transcribe_engine: str,
     language: str | None,
     model: str | None,
     save_original_path: Path | None,
@@ -118,7 +114,6 @@ async def _download_and_transcribe_audio(
 
         transcribed_text = await transcribe_file(
             audio_file_path,
-            engine=transcribe_engine,
             language=language,
             model=model,
             temp_dir=temp_dir,

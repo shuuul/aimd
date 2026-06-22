@@ -49,7 +49,6 @@ class AimdASRConverter(DocumentConverter):
         try:
             transcript = transcribe_file_sync(
                 input_path,
-                engine=kwargs.get("transcribe_engine", "auto"),
                 language=kwargs.get("language"),
                 model=kwargs.get("model"),
                 temp_dir=kwargs.get("temp_dir"),

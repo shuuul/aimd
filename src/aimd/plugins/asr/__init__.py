@@ -2,9 +2,9 @@
 
 from ._plugin import AimdASRConverter, __plugin_interface_version__, register_converters
 from .capabilities import (
-    EngineCapability,
-    get_engine_capabilities,
-    resolve_engine_with_preflight,
+    BackendCapability,
+    get_backend_capabilities,
+    select_transcription_backend,
 )
 from .const import (
     AUDIO_EXTENSIONS,
@@ -13,24 +13,20 @@ from .const import (
     QWEN_ASR_MODELS,
     VIDEO_FILE_EXTENSIONS,
 )
-from .engines import ListEnginesResult, list_engines, list_transcription_engines
 from .processor import transcribe_file, transcribe_file_sync
 
 __all__ = [
     "AUDIO_EXTENSIONS",
     "AUDIO_FILE_EXTENSIONS",
     "AimdASRConverter",
-    "EngineCapability",
-    "ListEnginesResult",
+    "BackendCapability",
     "MLX_AUDIO_MODELS",
     "QWEN_ASR_MODELS",
     "VIDEO_FILE_EXTENSIONS",
     "__plugin_interface_version__",
-    "get_engine_capabilities",
-    "list_engines",
-    "list_transcription_engines",
+    "get_backend_capabilities",
     "register_converters",
-    "resolve_engine_with_preflight",
+    "select_transcription_backend",
     "transcribe_file",
     "transcribe_file_sync",
 ]

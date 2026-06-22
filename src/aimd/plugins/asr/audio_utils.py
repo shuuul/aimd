@@ -1,4 +1,4 @@
-"""Shared audio preprocessing helpers for transcription engines."""
+"""Shared audio preprocessing helpers for transcription backends."""
 
 import shutil
 import subprocess
@@ -41,7 +41,7 @@ def convert_to_wav_if_needed(source: Path, temp_dir: Path | None = None) -> Path
     tmp.close()
     wav_path = Path(tmp.name)
 
-    logger.info(f"Converting {source.suffix} to WAV for transcription engine")
+    logger.info(f"Converting {source.suffix} to WAV for transcription backend")
     result = subprocess.run(
         [ffmpeg, "-y", "-i", str(source), "-ar", "16000", "-ac", "1", wav_path.name],
         capture_output=True,

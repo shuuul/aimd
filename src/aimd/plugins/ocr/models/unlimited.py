@@ -3,7 +3,7 @@
 from pathlib import Path
 import tempfile
 
-from aimd.core.errors import EngineUnavailableError, ProcessingFailedError
+from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 
 from .base import TransformersOCRModel, get_cached_model_and_processor, get_cuda_dtype
 
@@ -65,9 +65,13 @@ class UnlimitedOCRModel(TransformersOCRModel):
                         save_results=True,
                     )
             except Exception as exc:  # noqa: BLE001 - remote model errors are model-specific
-                raise ProcessingFailedError(f"Unlimited-OCR inference failed: {exc}") from exc
+                raise ProcessingFailedError(
+                    f"Unlimited-OCR inference failed: {exc}"
+                ) from exc
 
-            texts = normalize_unlimited_ocr_output(result, expected_pages=len(image_paths))
+            texts = normalize_unlimited_ocr_output(
+                result, expected_pages=len(image_paths)
+            )
             if texts is None:
                 texts = read_unlimited_ocr_output_files(
                     Path(output_dir), expected_pages=len(image_paths)
@@ -102,7 +106,9 @@ def normalize_unlimited_ocr_output(
             texts = []
             for page in pages:
                 if isinstance(page, dict):
-                    text = page.get("text") or page.get("markdown") or page.get("content")
+                    text = (
+                        page.get("text") or page.get("markdown") or page.get("content")
+                    )
                     if text is not None:
                         texts.append(str(text).strip())
                 else:
@@ -134,7 +140,7 @@ def _load_unlimited_ocr_model(model_name: str) -> tuple[object, object]:
     try:
         from transformers import AutoModel, AutoTokenizer
     except ImportError as exc:
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             "Transformers OCR requires torch and transformers. Install project "
             "dependencies with `uv sync`, then retry."
         ) from exc
@@ -144,14 +150,18 @@ def _load_unlimited_ocr_model(model_name: str) -> tuple[object, object]:
             model_name,
             trust_remote_code=True,
         )
-        model = AutoModel.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-            use_safetensors=True,
-            torch_dtype=get_cuda_dtype(),
-        ).eval().to("cuda")
+        model = (
+            AutoModel.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+                use_safetensors=True,
+                torch_dtype=get_cuda_dtype(),
+            )
+            .eval()
+            .to("cuda")
+        )
     except Exception as exc:  # noqa: BLE001 - upstream model errors vary widely
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             f"Unable to load Transformers OCR model {model_name!r}: {exc} "
             "Unlimited-OCR requires CUDA and trusted remote model code."
         ) from exc

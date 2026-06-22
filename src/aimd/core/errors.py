@@ -17,14 +17,8 @@ class UnsupportedInputError(AimdError):
     status_code = 400
 
 
-class UnsupportedEngineError(AimdError):
-    """Raised when an unknown transcription engine is requested."""
-
-    status_code = 400
-
-
-class EngineUnavailableError(AimdError):
-    """Raised when a known engine cannot run on current environment."""
+class BackendUnavailableError(AimdError):
+    """Raised when no backend can run on the current environment."""
 
     status_code = 422
 

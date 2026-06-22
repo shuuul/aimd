@@ -52,7 +52,6 @@ class AimdOCRConverter(DocumentConverter):
         try:
             result = process_ocr_sync(
                 Path(stream_info.local_path),
-                engine=kwargs.get("transcribe_engine", "auto"),
                 model=kwargs.get("model"),
                 language=kwargs.get("language"),
                 start=kwargs.get("start"),

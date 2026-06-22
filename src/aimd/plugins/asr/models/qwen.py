@@ -1,4 +1,4 @@
-"""Qwen3-ASR transcription engine implementation (Linux/CUDA)."""
+"""Qwen3-ASR transcription backend implementation (Linux/CUDA)."""
 
 import asyncio
 import warnings
@@ -59,7 +59,7 @@ def _resolve_language(language: str | None) -> str | None:
         if lang == full_name.lower():
             return full_name
     raise UnsupportedInputError(
-        f"Unsupported language for qwen engine: '{language}'. "
+        f"Unsupported language for qwen backend: '{language}'. "
         f"Supported: {list(LANGUAGE_CODE_TO_NAME.keys())}"
     )
 
@@ -185,12 +185,12 @@ async def transcribe_audio_qwen(
         import torch  # type: ignore
     except ImportError:
         raise ProcessingFailedError(
-            "PyTorch is not installed. Required for qwen engine."
+            "PyTorch is not installed. Required for qwen backend."
         )
 
     if not torch.cuda.is_available():
         raise ProcessingFailedError(
-            "CUDA is not available. qwen engine requires a CUDA-capable GPU."
+            "CUDA is not available. qwen backend requires a CUDA-capable GPU."
         )
 
     try:
@@ -198,7 +198,7 @@ async def transcribe_audio_qwen(
         import transformers  # type: ignore[import-untyped]  # noqa: F401
     except ImportError:
         raise ProcessingFailedError(
-            "transformers and torchaudio are required for qwen engine."
+            "transformers and torchaudio are required for qwen backend."
         )
 
     resolved_model = model or QWEN_ASR_DEFAULT_MODEL

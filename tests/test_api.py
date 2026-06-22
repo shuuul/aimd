@@ -5,22 +5,10 @@ from fastapi.testclient import TestClient
 from aimd.interfaces.api.app import create_app
 from aimd.core.models import ProcessResult, TextContext
 from aimd.core.errors import (
-    EngineUnavailableError,
+    BackendUnavailableError,
     ProcessingFailedError,
     UnsupportedInputError,
 )
-from aimd.plugins.asr import EngineCapability
-
-
-def _fake_list_transcription_engines():
-    class _Result:
-        auto_selected_engine = "qwen"
-        engines = {
-            "mlx": EngineCapability("mlx", False, "unsupported", None),
-            "qwen": EngineCapability("qwen", True, None, None),
-        }
-
-    return _Result()
 
 
 def _make_client(monkeypatch, process_result=None, process_exc=None) -> TestClient:
@@ -32,9 +20,6 @@ def _make_client(monkeypatch, process_result=None, process_exc=None) -> TestClie
     monkeypatch.setattr(
         "aimd.interfaces.api.app.process_core_input",
         _fake_process_input,
-    )
-    monkeypatch.setattr(
-        "aimd.interfaces.api.app.list_transcription_engines", _fake_list_transcription_engines
     )
     return TestClient(create_app())
 
@@ -53,19 +38,6 @@ def test_process_rejects_unknown_input(monkeypatch) -> None:
     )
     response = client.post("/v1/process", json={"input_source": "x"})
     assert response.status_code == 400
-
-
-def test_engines_endpoint(monkeypatch) -> None:
-    client = _make_client(monkeypatch)
-    response = client.get("/v1/engines")
-    assert response.status_code == 200
-    body = response.json()
-    assert "engines" in body
-    assert len(body["engines"]) == 2
-    assert {engine["name"] for engine in body["engines"]} == {
-        "mlx",
-        "qwen",
-    }
 
 
 def test_process_transcript_success_with_output_file(
@@ -101,7 +73,7 @@ def test_process_transcript_success_with_output_file(
 
 def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
     client = _make_client(
-        monkeypatch, process_exc=EngineUnavailableError("unavailable")
+        monkeypatch, process_exc=BackendUnavailableError("unavailable")
     )
     response = client.post("/v1/process", json={"input_source": "audio.wav"})
     assert response.status_code == 422

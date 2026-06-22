@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from aimd.core.errors import EngineUnavailableError, ProcessingFailedError
+from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 
 from .base import (
     TransformersOCRModel,
@@ -97,7 +97,7 @@ def _load_generic_model(model_name: str) -> tuple[object, object]:
     try:
         from transformers import AutoModelForImageTextToText, AutoProcessor
     except ImportError as exc:
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             "Transformers OCR requires torch and transformers. Install project "
             "dependencies with `uv sync`, then retry."
         ) from exc
@@ -118,7 +118,7 @@ def _load_generic_model(model_name: str) -> tuple[object, object]:
             extra = " GLM-OCR currently requires installing Transformers from GitHub."
         elif model_name == "PaddlePaddle/PaddleOCR-VL-1.5":
             extra = " PaddleOCR-VL may require torchvision with the current model code."
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             f"Unable to load Transformers OCR model {model_name!r}: {exc}{extra}"
         ) from exc
     return model, processor

@@ -1,4 +1,4 @@
-"""OCR engine contracts, platform resolution, and backend adapters."""
+"""OCR backend contracts, platform resolution, and backend adapters."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,9 +10,8 @@ import tempfile
 from typing import Protocol
 
 from aimd.core.errors import (
-    EngineUnavailableError,
+    BackendUnavailableError,
     ProcessingFailedError,
-    UnsupportedEngineError,
 )
 
 from .models import create_transformers_ocr_model
@@ -32,13 +31,13 @@ class OCRPage:
 
 @dataclass(frozen=True, slots=True)
 class OCRResult:
-    """Normalized OCR result returned by engine adapters."""
+    """Normalized OCR result returned by backend adapters."""
 
     title: str
     pages: tuple[OCRPage, ...]
 
 
-class OCREngine(Protocol):
+class OCRBackend(Protocol):
     """OCR backend adapter."""
 
     def recognize(
@@ -55,35 +54,21 @@ class OCREngine(Protocol):
         ...
 
 
-def resolve_ocr_engine(engine: str) -> str:
-    """Resolve and validate an OCR engine name for the current platform."""
-    normalized = engine.lower().strip() if engine else "auto"
-    if normalized == "auto":
-        system = platform.system().lower()
-        if system == "darwin":
-            return "mlx4ocr"
-        if system == "linux":
-            return "transformers"
-        raise EngineUnavailableError(
-            "OCR auto engine is unavailable on this platform. "
-            "Supported OCR platforms are macOS (mlx4ocr) and Linux (transformers)."
-        )
-
-    if normalized not in {"mlx4ocr", "transformers"}:
-        raise UnsupportedEngineError(
-            "Unsupported OCR engine. Supported OCR engines: auto, mlx4ocr, transformers."
-        )
-
+def select_ocr_backend() -> str:
+    """Select the platform OCR backend."""
     system = platform.system().lower()
-    if normalized == "mlx4ocr" and system != "darwin":
-        raise EngineUnavailableError("mlx4ocr OCR is only available on macOS.")
-    if normalized == "transformers" and system != "linux":
-        raise EngineUnavailableError("Transformers OCR is only available on Linux.")
-    return normalized
+    if system == "darwin":
+        return "mlx4ocr"
+    if system == "linux":
+        return "transformers"
+    raise BackendUnavailableError(
+        "OCR is unavailable on this platform. Supported OCR platforms are macOS "
+        "with mlx4ocr and Linux with CUDA-capable Transformers."
+    )
 
 
 def _resolve_mlx4ocr_model(model: str | None) -> tuple[str, str | None]:
-    """Map aimd OCR model names to mlx4ocr engine/variant options."""
+    """Map aimd OCR model names to mlx4ocr backend/variant options."""
     normalized = (model or DEFAULT_OCR_MODEL).lower().replace("-", "_")
     if normalized in {"paddleocr_v6", "ppocrv6", "pp_ocrv6"}:
         return "ppocrv6", "medium"
@@ -100,7 +85,7 @@ def _resolve_mlx4ocr_model(model: str | None) -> tuple[str, str | None]:
     )
 
 
-class MLX4OCREngine:
+class MLX4OCRBackend:
     """Run OCR through the mlx4ocr macOS runtime."""
 
     def recognize(
@@ -130,15 +115,17 @@ class MLX4OCREngine:
         )
 
     def _recognize_image(self, input_path: Path, *, model: str | None) -> str:
-        mlx4ocr_engine, variant = _resolve_mlx4ocr_model(model)
-        if mlx4ocr_engine != "ppocrv6":
-            return self._recognize_image_with_vlm(input_path, engine=mlx4ocr_engine)
+        mlx4ocr_backend, variant = _resolve_mlx4ocr_model(model)
+        if mlx4ocr_backend != "ppocrv6":
+            return self._recognize_image_with_vlm(
+                input_path, mlx4ocr_backend=mlx4ocr_backend
+            )
 
         try:
             import cv2
             from mlx4ocr import PP_OCRv6
         except ImportError as exc:
-            raise EngineUnavailableError(
+            raise BackendUnavailableError(
                 "mlx4ocr is not installed. Install OCR dependencies with `uv sync` "
                 "on macOS/Python 3.12+, then retry."
             ) from exc
@@ -154,16 +141,18 @@ class MLX4OCREngine:
         finally:
             ocr.close()
 
-    def _recognize_image_with_vlm(self, input_path: Path, *, engine: str) -> str:
+    def _recognize_image_with_vlm(
+        self, input_path: Path, *, mlx4ocr_backend: str
+    ) -> str:
         try:
             from mlx4ocr import VLMOCR
         except ImportError as exc:
-            raise EngineUnavailableError(
+            raise BackendUnavailableError(
                 "mlx4ocr VLM OCR requires the optional mlx4ocr[vlm] dependencies. "
                 "Install them before using glm_ocr or paddleocr_vl."
             ) from exc
 
-        ocr = VLMOCR.from_hub(engine=engine)
+        ocr = VLMOCR.from_hub(engine=mlx4ocr_backend)
         try:
             result = ocr.predict_path(input_path.as_posix())
             return str(result.text).strip()
@@ -184,11 +173,11 @@ class MLX4OCREngine:
             executable.as_posix() if executable.exists() else shutil.which("mlx4ocr")
         )
         if mlx4ocr_command is None:
-            raise EngineUnavailableError(
+            raise BackendUnavailableError(
                 "mlx4ocr is not installed. Install OCR dependencies with `uv sync` "
                 "on macOS/Python 3.12+, then retry."
             )
-        mlx4ocr_engine, variant = _resolve_mlx4ocr_model(model)
+        mlx4ocr_backend, variant = _resolve_mlx4ocr_model(model)
 
         with tempfile.TemporaryDirectory(
             prefix="aimd-ocr-", dir=temp_dir
@@ -202,7 +191,7 @@ class MLX4OCREngine:
                 "--output",
                 output_root,
             ]
-            command.extend(["--engine", mlx4ocr_engine])
+            command.extend(["--engine", mlx4ocr_backend])
             if variant:
                 command.extend(["--variant", variant])
             if start is not None:
@@ -219,7 +208,7 @@ class MLX4OCREngine:
             if completed.returncode != 0:
                 stderr = completed.stderr.strip() or completed.stdout.strip()
                 if "No module named mlx4ocr" in stderr:
-                    raise EngineUnavailableError(
+                    raise BackendUnavailableError(
                         "mlx4ocr is not installed. Install OCR dependencies with `uv sync` "
                         "on macOS/Python 3.12+, then retry."
                     )
@@ -243,7 +232,7 @@ def _render_pdf_with_pdftoppm(
     """Render a PDF to PNG pages with poppler's pdftoppm when available."""
     pdftoppm = shutil.which("pdftoppm")
     if pdftoppm is None:
-        raise EngineUnavailableError(
+        raise BackendUnavailableError(
             "PDF OCR on Linux requires the `pdftoppm` executable from poppler. "
             "Install poppler-utils, or OCR image files directly."
         )
@@ -272,7 +261,7 @@ def _render_pdf_with_pdftoppm(
     return pages
 
 
-class TransformersOCREngine:
+class TransformersOCRBackend:
     """Run OCR through CUDA-capable Hugging Face Transformers VLM models."""
 
     def recognize(
@@ -320,10 +309,10 @@ class TransformersOCREngine:
         return OCRResult(title=input_path.stem, pages=pages)
 
 
-def create_ocr_engine(engine: str) -> OCREngine:
-    """Create an OCR backend adapter after platform resolution."""
-    resolved = resolve_ocr_engine(engine)
+def create_ocr_backend() -> OCRBackend:
+    """Create the OCR backend adapter for the current platform."""
+    resolved = select_ocr_backend()
     if resolved == "mlx4ocr":
-        return MLX4OCREngine()
+        return MLX4OCRBackend()
 
-    return TransformersOCREngine()
+    return TransformersOCRBackend()

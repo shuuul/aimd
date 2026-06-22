@@ -1,4 +1,4 @@
-"""mlx-audio STT transcription engine (Apple Silicon only)."""
+"""mlx-audio STT transcription backend (Apple Silicon only)."""
 
 import asyncio
 import inspect
@@ -42,7 +42,7 @@ def _resolve_language(model: str, language: str | None) -> str | None:
         if lang == full_name.lower():
             return full_name
     raise UnsupportedInputError(
-        f"Unsupported language for mlx engine: '{language}'. "
+        f"Unsupported language for mlx backend: '{language}'. "
         f"Supported: {list(LANGUAGE_CODE_TO_NAME.keys())}"
     )
 
@@ -55,10 +55,10 @@ async def transcribe_audio_mlx(
 ) -> str:
     """Transcribe audio using mlx-audio STT (Apple Silicon only)."""
     if platform.system() != "Darwin":
-        raise ProcessingFailedError("mlx engine is only available on macOS")
+        raise ProcessingFailedError("mlx backend is only available on macOS")
 
     if not is_apple_silicon():
-        raise ProcessingFailedError("mlx engine requires Apple Silicon (M1/M2/M3/M4)")
+        raise ProcessingFailedError("mlx backend requires Apple Silicon (M1/M2/M3/M4)")
 
     try:
         from mlx_audio.stt import load as load_stt

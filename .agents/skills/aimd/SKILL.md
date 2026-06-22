@@ -95,26 +95,19 @@ aimd "https://youtube.com/watch?v=..." --raw-transcript --output subtitles.md
 
 ## Audio and video transcription
 
-Use `auto` unless a platform-specific backend is required:
+Transcription backend selection is automatic based on the current platform:
 
 ```bash
-aimd lecture.mp3 --engine auto --output lecture.md
+aimd lecture.mp3 --output lecture.md
 aimd interview.m4a --language zh --output interview.md
 aimd video.mp4 --output video.md
-```
-
-Backend-specific examples:
-
-```bash
-aimd audio.wav --engine mlx --output transcript.md      # macOS Apple Silicon
-aimd audio.wav --engine qwen --output transcript.md     # Linux/CUDA
 ```
 
 Model examples:
 
 ```bash
-aimd audio.wav --engine mlx --model mlx-community/Qwen3-ASR-1.7B-4bit --output transcript.md
-aimd audio.wav --engine qwen --model Qwen/Qwen3-ASR-1.7B --output transcript.md
+aimd audio.wav --model mlx-community/Qwen3-ASR-1.7B-4bit --output transcript.md # macOS Apple Silicon
+aimd audio.wav --model Qwen/Qwen3-ASR-1.7B --output transcript.md               # Linux/CUDA
 ```
 
 ## Documents, PDFs, and text files
@@ -140,12 +133,12 @@ aimd scan.pdf --output scan.md
 aimd scan.pdf --start 0 --end 2 --output scan-pages.md
 ```
 
-Backend-specific OCR examples:
+OCR backend selection is automatic based on the current platform:
 
 ```bash
-aimd scan.pdf --engine mlx4ocr --model paddleocr_v6 --output scan.md       # macOS Apple Silicon
-aimd scan.pdf --engine transformers --model got_ocr --output scan.md       # Linux/CUDA
-aimd scan.pdf --engine transformers --model unlimited_ocr --output scan.md # Linux/CUDA
+aimd scan.pdf --model paddleocr_v6 --output scan.md       # macOS Apple Silicon
+aimd scan.pdf --model got_ocr --output scan.md            # Linux/CUDA
+aimd scan.pdf --model unlimited_ocr --output scan.md      # Linux/CUDA
 ```
 
 ## Temporary directory handling

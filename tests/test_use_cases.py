@@ -93,7 +93,6 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
 
     async def _process_file(
         input_path: str,
-        engine: str,
         language: str | None,
         model: str | None,
         received_temp_dir: Path | None,
@@ -102,7 +101,6 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
         end: int | None,
     ):
         assert Path(input_path) == epub
-        assert engine == "auto"
         assert language is None
         assert model is None
         assert received_temp_dir == temp_dir
@@ -115,7 +113,6 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
         ProcessInput(input_source=epub.as_posix(), temp_dir=temp_dir),
         process_url=_unexpected_process_url,
         process_file=_process_file,
-        resolve_engine=lambda engine: engine,
         is_supported_file_fn=lambda _: True,
     )
 
@@ -131,7 +128,6 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
 
     async def _process_file(
         input_path: str,
-        engine: str,
         language: str | None,
         model: str | None,
         received_temp_dir: Path | None,
@@ -140,7 +136,6 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
         end: int | None,
     ):
         assert Path(input_path) == image
-        assert engine == "mlx4ocr"
         assert language == "zh"
         assert model == "tiny"
         assert received_temp_dir == temp_dir
@@ -153,7 +148,6 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
         ProcessInput(
             input_source=image.as_posix(),
             task_type="ocr",
-            transcribe_engine="mlx4ocr",
             model="tiny",
             language="zh",
             start=0,
@@ -162,7 +156,6 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
         ),
         process_url=_unexpected_process_url,
         process_file=_process_file,
-        resolve_engine=lambda engine: engine,
         is_supported_file_fn=lambda _: True,
     )
 
@@ -179,7 +172,6 @@ async def test_use_case_transcript_flow() -> None:
         ProcessInput(input_source="https://example.com/video"),
         process_url=_process_url,
         process_file=_unexpected_process_file,
-        resolve_engine=lambda engine: engine,
         is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "transcript"
@@ -199,7 +191,6 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
         ProcessInput(input_source=str(audio)),
         process_url=_unexpected_process_url,
         process_file=_process_file,
-        resolve_engine=lambda engine: engine,
         is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "transcript"
@@ -218,7 +209,6 @@ async def test_use_case_file_convert_flow(tmp_path: Path) -> None:
         ProcessInput(input_source=str(doc)),
         process_url=_unexpected_process_url,
         process_file=_process_file,
-        resolve_engine=lambda engine: engine,
         is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "convert"
@@ -232,6 +222,5 @@ async def test_use_case_unsupported_input_raises() -> None:
             ProcessInput(input_source="not_supported"),
             process_url=_unexpected_process_url,
             process_file=_unexpected_process_file,
-            resolve_engine=lambda engine: engine,
             is_supported_file_fn=lambda _: False,
         )

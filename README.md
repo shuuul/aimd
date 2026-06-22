@@ -102,8 +102,8 @@ aimd page.png
 
 # Common options
 aimd audio.mp3 --output transcript.md
-aimd audio.wav --engine mlx --language zh
-aimd scan.pdf --engine mlx4ocr --model paddleocr_v6 --start 0 --end 2
+aimd audio.wav --language zh
+aimd scan.pdf --model paddleocr_v6 --start 0 --end 2
 aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
 aimd "https://youtube.com/watch?v=..." --raw-transcript
 ```
@@ -114,51 +114,49 @@ aimd "https://youtube.com/watch?v=..." --raw-transcript
 
 ```bash
 aimd interview.m4a
-aimd lecture.mp3 --engine auto
-aimd audio.wav --engine mlx
-aimd audio.wav --engine qwen
+aimd lecture.mp3
+aimd audio.wav --language zh
 aimd audio.wav --model mlx-community/Qwen3-ASR-1.7B-4bit
 ```
 
-Engines:
+Backend selection is automatic:
 
-| Engine | Platform | Notes |
+| Platform | Backend | Notes |
 |--------|----------|-------|
-| `auto` | macOS/Linux | Selects the best available backend. |
-| `mlx` | Apple Silicon | Uses `mlx-audio`; default local backend on macOS when available. |
-| `qwen` | Linux/CUDA | Uses Qwen3-ASR through Transformers; default local backend on Linux when available. |
+| macOS Apple Silicon | MLX | Uses `mlx-audio` when available. |
+| Linux/CUDA | Transformers | Uses Qwen3-ASR through Transformers when CUDA is available. |
 
 ### Supported models
 
-`--model` is interpreted by the selected task engine. The table below lists the model aliases and model IDs that `aimd` validates directly. Linux/CUDA OCR also accepts an explicit Hugging Face model ID, but only the listed aliases have model-specific handling.
+`--model` is interpreted by the platform-selected backend. The table below lists the model aliases and model IDs that `aimd` validates directly. Linux/CUDA OCR also accepts an explicit Hugging Face model ID, but only the listed aliases have model-specific handling.
 
-| Task | Engine | Platform | `--model` value | Upstream model / runtime | Default | Notes |
-|------|--------|----------|-----------------|--------------------------|---------|-------|
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen3-ASR-1.7B-4bit` | mlx-audio STT | Yes | Qwen3-ASR 1.7B, 4-bit quantized. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen3-ASR-1.7B-6bit` | mlx-audio STT | No | Qwen3-ASR 1.7B, 6-bit quantized. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen3-ASR-1.7B-8bit` | mlx-audio STT | No | Qwen3-ASR 1.7B, 8-bit quantized. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen3-ASR-0.6B-4bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 4-bit quantized. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen3-ASR-0.6B-6bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 6-bit quantized. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen3-ASR-0.6B-8bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 8-bit quantized. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/whisper-large-v3-turbo-asr-fp16` | mlx-audio STT | No | Whisper large-v3-turbo ASR, fp16. |
-| Transcription | `mlx` | macOS Apple Silicon | `distil-whisper/distil-large-v3` | mlx-audio STT | No | Distil-Whisper large-v3. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/parakeet-tdt-0.6b-v3` | mlx-audio STT | No | NVIDIA Parakeet TDT 0.6B v3. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/nemotron-3.5-asr-streaming-0.6b` | mlx-audio STT | No | NVIDIA Nemotron 3.5 ASR streaming 0.6B. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Voxtral-Mini-3B-2507-bf16` | mlx-audio STT | No | Voxtral Mini 3B, bf16. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit` | mlx-audio STT | No | Voxtral Mini 4B Realtime, 4-bit. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` | mlx-audio STT | No | Voxtral Mini 4B Realtime, fp16. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/VibeVoice-ASR-bf16` | mlx-audio STT | No | VibeVoice-ASR, bf16; upstream model may include diarization/timestamps. |
-| Transcription | `mlx` | macOS Apple Silicon | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
-| Transcription | `qwen` | Linux/CUDA | `Qwen/Qwen3-ASR-1.7B` | Transformers | Yes | Default Linux/CUDA ASR model. |
-| Transcription | `qwen` | Linux/CUDA | `Qwen/Qwen3-ASR-0.6B` | Transformers | No | Lower-memory Qwen3-ASR option. |
-| OCR | `mlx4ocr` | macOS Apple Silicon | `paddleocr_v6`, `ppocrv6`, `pp_ocrv6` | mlx4ocr `ppocrv6` | Yes | Uses the `medium` PP-OCRv6 variant by default. |
-| OCR | `mlx4ocr` | macOS Apple Silicon | `tiny`, `small`, `medium` | mlx4ocr `ppocrv6` | No | Explicit PP-OCRv6 variants. |
-| OCR | `mlx4ocr` | macOS Apple Silicon | `glm_ocr` | mlx4ocr `glm-ocr` | No | Optional mlx4ocr VLM backend. |
-| OCR | `mlx4ocr` | macOS Apple Silicon | `paddleocr_vl` | mlx4ocr `paddleocr-vl` | No | Optional mlx4ocr VLM backend. |
-| OCR | `transformers` | Linux/CUDA | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | Yes | Default Linux/CUDA OCR model. |
-| OCR | `transformers` | Linux/CUDA | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | No | Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
-| OCR | `transformers` | Linux/CUDA | `glm_ocr`, `glm-ocr`, `zai-org/GLM-OCR` | `zai-org/GLM-OCR` | No | May require a newer Transformers build than the PyPI baseline. |
-| OCR | `transformers` | Linux/CUDA | `paddleocr_vl`, `paddleocr-vl`, `PaddlePaddle/PaddleOCR-VL-1.5` | `PaddlePaddle/PaddleOCR-VL-1.5` | No | May require optional runtime packages expected by upstream model code. |
+| Task | Platform/backend | `--model` value | Upstream model / runtime | Default | Notes |
+|------|------------------|-----------------|--------------------------|---------|-------|
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-4bit` | mlx-audio STT | Yes | Qwen3-ASR 1.7B, 4-bit quantized. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-6bit` | mlx-audio STT | No | Qwen3-ASR 1.7B, 6-bit quantized. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-8bit` | mlx-audio STT | No | Qwen3-ASR 1.7B, 8-bit quantized. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-4bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 4-bit quantized. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-6bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 6-bit quantized. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-8bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 8-bit quantized. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/whisper-large-v3-turbo-asr-fp16` | mlx-audio STT | No | Whisper large-v3-turbo ASR, fp16. |
+| Transcription | macOS Apple Silicon / MLX | `distil-whisper/distil-large-v3` | mlx-audio STT | No | Distil-Whisper large-v3. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/parakeet-tdt-0.6b-v3` | mlx-audio STT | No | NVIDIA Parakeet TDT 0.6B v3. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/nemotron-3.5-asr-streaming-0.6b` | mlx-audio STT | No | NVIDIA Nemotron 3.5 ASR streaming 0.6B. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-3B-2507-bf16` | mlx-audio STT | No | Voxtral Mini 3B, bf16. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit` | mlx-audio STT | No | Voxtral Mini 4B Realtime, 4-bit. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` | mlx-audio STT | No | Voxtral Mini 4B Realtime, fp16. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/VibeVoice-ASR-bf16` | mlx-audio STT | No | VibeVoice-ASR, bf16; upstream model may include diarization/timestamps. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
+| Transcription | Linux/CUDA / Transformers | `Qwen/Qwen3-ASR-1.7B` | Transformers | Yes | Default Linux/CUDA ASR model. |
+| Transcription | Linux/CUDA / Transformers | `Qwen/Qwen3-ASR-0.6B` | Transformers | No | Lower-memory Qwen3-ASR option. |
+| OCR | macOS Apple Silicon / mlx4ocr | `paddleocr_v6`, `ppocrv6`, `pp_ocrv6` | mlx4ocr `ppocrv6` | Yes | Uses the `medium` PP-OCRv6 variant by default. |
+| OCR | macOS Apple Silicon / mlx4ocr | `tiny`, `small`, `medium` | mlx4ocr `ppocrv6` | No | Explicit PP-OCRv6 variants. |
+| OCR | macOS Apple Silicon / mlx4ocr | `glm_ocr` | mlx4ocr `glm-ocr` | No | Optional mlx4ocr VLM backend. |
+| OCR | macOS Apple Silicon / mlx4ocr | `paddleocr_vl` | mlx4ocr `paddleocr-vl` | No | Optional mlx4ocr VLM backend. |
+| OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | Yes | Default Linux/CUDA OCR model. |
+| OCR | Linux/CUDA / Transformers | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | No | Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
+| OCR | Linux/CUDA / Transformers | `glm_ocr`, `glm-ocr`, `zai-org/GLM-OCR` | `zai-org/GLM-OCR` | No | May require a newer Transformers build than the PyPI baseline. |
+| OCR | Linux/CUDA / Transformers | `paddleocr_vl`, `paddleocr-vl`, `PaddlePaddle/PaddleOCR-VL-1.5` | `PaddlePaddle/PaddleOCR-VL-1.5` | No | May require optional runtime packages expected by upstream model code. |
 
 ### URLs
 
@@ -202,16 +200,15 @@ The EPUB pipeline preserves spine order, extracts images, converts chapters thro
 ```bash
 aimd page.png
 aimd scan.pdf                                  # OCR if no extractable PDF text is found
-aimd scan.pdf --engine mlx4ocr                 # macOS/Apple Silicon
-aimd scan.pdf --engine transformers --model got_ocr       # Linux/CUDA VLM OCR
-aimd scan.pdf --engine transformers --model unlimited_ocr # Linux/CUDA Baidu Unlimited-OCR
+aimd scan.pdf --model got_ocr                  # Linux/CUDA VLM OCR
+aimd scan.pdf --model unlimited_ocr            # Linux/CUDA Baidu Unlimited-OCR
 aimd scan.pdf --model paddleocr_v6             # default PP-OCRv6 detector/recognizer
 aimd scan.pdf --model glm_ocr                  # optional mlx4ocr VLM backend
 aimd scan.pdf --model paddleocr_vl             # optional mlx4ocr VLM backend
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. On macOS, OCR `auto` resolves to `mlx4ocr`, and the default OCR model is `paddleocr_v6` (mapped to mlx4ocr `ppocrv6` with the `medium` variant). `glm_ocr` and `paddleocr_vl` require mlx4ocr's optional VLM dependencies. On Linux, OCR `auto` resolves to the CUDA Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed, and `paddleocr_vl` maps to `PaddlePaddle/PaddleOCR-VL-1.5` when its optional runtime requirements are present. Traditional PP-OCRv6/`paddleocr_v6` is intentionally not routed through Transformers. PDF OCR on Linux uses the system `pdftoppm` executable from poppler when available.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. macOS uses mlx4ocr, where the default OCR model is `paddleocr_v6` (mapped to mlx4ocr `ppocrv6` with the `medium` variant). `glm_ocr` and `paddleocr_vl` require mlx4ocr's optional VLM dependencies. Linux/CUDA uses the Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed, and `paddleocr_vl` maps to `PaddlePaddle/PaddleOCR-VL-1.5` when its optional runtime requirements are present. Traditional PP-OCRv6/`paddleocr_v6` is intentionally not routed through Transformers. PDF OCR on Linux uses the system `pdftoppm` executable from poppler when available.
 
 ### MarkItDown plugins
 
@@ -246,13 +243,11 @@ Endpoints:
 
 ```bash
 curl http://127.0.0.1:8000/healthz
-curl http://127.0.0.1:8000/v1/engines
 
 curl -X POST http://127.0.0.1:8000/v1/process \
   -H "Content-Type: application/json" \
   -d '{
     "input_source": "https://www.youtube.com/watch?v=...",
-    "transcribe_engine": "auto",
     "language": "en"
   }'
 
@@ -261,7 +256,6 @@ curl -X POST http://127.0.0.1:8000/v1/process \
   -d '{
     "input_source": "scan.pdf",
     "task_type": "ocr",
-    "transcribe_engine": "mlx4ocr",
     "start": 0,
     "end": 2
   }'
@@ -280,10 +274,9 @@ aimd-mcp
 Tools:
 
 - `healthz`
-- `list_engines`
 - `process_input`
 
-`process_input` mirrors the CLI/API flow and accepts options such as `input_source`, `task_type`, `transcribe_engine`, `model`, `language`, `start`, `end`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`. For MCP, temporary files are controlled by the `AIMD_TEMP_DIR` environment variable.
+`process_input` mirrors the CLI/API flow and accepts options such as `input_source`, `task_type`, `model`, `language`, `start`, `end`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`. For MCP, temporary files are controlled by the `AIMD_TEMP_DIR` environment variable.
 
 ## Configuration
 
@@ -337,11 +330,11 @@ src/
 
 The package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
 
-- `aimd.core.models`, `aimd.core.process`, and `aimd.core.router` own canonical request/response models, input routing, and processing; `aimd.plugins.asr.engines` owns transcription engine listing.
+- `aimd.core.models`, `aimd.core.process`, and `aimd.core.router` own canonical request/response models, input routing, and processing; ASR/OCR backends are selected internally from the current platform.
 - `aimd.core.process.process_input()` sends URL and local-file work through `MarkItDown(enable_plugins=True)`.
 - Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
 - Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
-- `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. `aimd.plugins.asr` owns transcription engines, model validation, and the local audio/video MarkItDown plugin.
+- `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. `aimd.plugins.asr` owns transcription backend selection, model validation, and the local audio/video MarkItDown plugin.
 - `aimd.core.process` wraps MarkItDown markdown results into `TextContext` chunks.
 - CLI/API/MCP modules translate interface requests into core processing. Output file persistence is interface-owned and shared through `aimd.interfaces.output`; it is not part of `ProcessInput`.
 

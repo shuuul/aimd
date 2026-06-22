@@ -28,17 +28,17 @@ def test_asr_plugin_converts_audio_with_markitdown(
 
     def _transcribe_file_sync(*args, **kwargs):  # noqa: ANN002, ANN003
         assert args[0] == audio
-        assert kwargs["engine"] == "qwen"
         assert kwargs["model"] == "tiny"
         assert kwargs["language"] == "zh"
         assert kwargs["temp_dir"] == tmp_path
         return "transcript text"
 
-    monkeypatch.setattr("aimd.plugins.asr._plugin.transcribe_file_sync", _transcribe_file_sync)
+    monkeypatch.setattr(
+        "aimd.plugins.asr._plugin.transcribe_file_sync", _transcribe_file_sync
+    )
 
     result = MarkItDown(enable_plugins=True).convert(
         audio,
-        transcribe_engine="qwen",
         model="tiny",
         language="zh",
         temp_dir=tmp_path,
@@ -57,7 +57,6 @@ def test_ocr_plugin_converts_when_markitdown_requests_ocr(
 
     def _process_ocr_sync(*args, **kwargs):  # noqa: ANN002, ANN003
         assert args[0] == image
-        assert kwargs["engine"] == "transformers"
         assert kwargs["model"] == "tiny"
         assert kwargs["language"] == "zh"
         assert kwargs["start"] == 0
@@ -70,7 +69,6 @@ def test_ocr_plugin_converts_when_markitdown_requests_ocr(
     result = MarkItDown(enable_plugins=True).convert(
         image,
         task_type="ocr",
-        transcribe_engine="transformers",
         model="tiny",
         language="zh",
         start=0,
@@ -112,7 +110,6 @@ def test_doc_plugin_converts_pandoc_document_with_markitdown(
 def test_url_plugin_converts_transcript_url_with_markitdown(monkeypatch) -> None:
     async def _get_text_from_url(*args, **kwargs):  # noqa: ANN002, ANN003
         assert args[0] == "https://example.com/video"
-        assert kwargs["transcribe_engine"] == "qwen"
         assert kwargs["language"] == "zh"
         assert kwargs["model"] == "tiny"
         assert kwargs["raw_transcript"] is True
@@ -122,13 +119,14 @@ def test_url_plugin_converts_transcript_url_with_markitdown(monkeypatch) -> None
             platform="unknown",
         )
 
-    monkeypatch.setattr("aimd.plugins.url._plugin.get_text_from_url", _get_text_from_url)
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.get_text_from_url", _get_text_from_url
+    )
 
     result = MarkItDown(enable_plugins=True).convert_stream(
         io.BytesIO(),
         stream_info=StreamInfo(url="https://example.com/video"),
         task_type="transcript",
-        transcribe_engine="qwen",
         model="tiny",
         language="zh",
         raw_transcript=True,

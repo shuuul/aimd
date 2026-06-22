@@ -1,68 +1,52 @@
 import pytest
 
 from aimd.plugins.asr.capabilities import (
-    EngineCapability,
-    resolve_engine_with_preflight,
+    BackendCapability,
+    select_transcription_backend,
 )
-from aimd.plugins.asr.errors import EngineUnavailableError, UnsupportedEngineError
+from aimd.plugins.asr.errors import BackendUnavailableError
 
 
-def test_resolve_engine_invalid_name() -> None:
-    with pytest.raises(UnsupportedEngineError):
-        resolve_engine_with_preflight("bad-engine")
-
-
-def _patch_capabilities(monkeypatch, capabilities: dict[str, EngineCapability]) -> None:
+def _patch_capabilities(
+    monkeypatch, capabilities: dict[str, BackendCapability]
+) -> None:
     monkeypatch.setattr(
-        "aimd.plugins.asr.capabilities.get_engine_capabilities",
+        "aimd.plugins.asr.capabilities.get_backend_capabilities",
         lambda: capabilities,
     )
 
 
-def test_resolve_engine_explicit_unavailable(monkeypatch) -> None:
-    _patch_capabilities(
-        monkeypatch,
-        {
-            "mlx": EngineCapability("mlx", False, "unsupported", None),
-            "qwen": EngineCapability("qwen", True, None, None),
-        },
-    )
-
-    with pytest.raises(EngineUnavailableError):
-        resolve_engine_with_preflight("mlx")
-
-
 @pytest.mark.parametrize(
-    ("system", "capabilities", "expected_engine"),
+    ("system", "capabilities", "expected_backend"),
     [
         (
             "Linux",
             {
-                "mlx": EngineCapability("mlx", False, "unsupported", None),
-                "qwen": EngineCapability("qwen", True, None, None),
+                "mlx": BackendCapability("mlx", False, "unsupported", None),
+                "qwen": BackendCapability("qwen", True, None, None),
             },
             "qwen",
         ),
         (
             "Darwin",
             {
-                "mlx": EngineCapability("mlx", True, None, None),
-                "qwen": EngineCapability("qwen", False, "linux only", None),
+                "mlx": BackendCapability("mlx", True, None, None),
+                "qwen": BackendCapability("qwen", False, "linux only", None),
             },
             "mlx",
         ),
     ],
 )
-def test_resolve_engine_auto_prefers_platform_engine(
+def test_select_transcription_backend_prefers_platform_backend(
     monkeypatch,
     system: str,
-    capabilities: dict[str, EngineCapability],
-    expected_engine: str,
+    capabilities: dict[str, BackendCapability],
+    expected_backend: str,
 ) -> None:
     monkeypatch.setattr("aimd.plugins.asr.capabilities.platform.system", lambda: system)
     _patch_capabilities(monkeypatch, capabilities)
 
-    assert resolve_engine_with_preflight("auto") == expected_engine
+    assert select_transcription_backend() == expected_backend
 
 
 @pytest.mark.parametrize(
@@ -71,26 +55,26 @@ def test_resolve_engine_auto_prefers_platform_engine(
         (
             "Linux",
             {
-                "mlx": EngineCapability("mlx", False, "unsupported", None),
-                "qwen": EngineCapability("qwen", False, "no qwen", None),
+                "mlx": BackendCapability("mlx", False, "unsupported", None),
+                "qwen": BackendCapability("qwen", False, "no qwen", None),
             },
         ),
         (
             "Darwin",
             {
-                "mlx": EngineCapability("mlx", False, "unsupported", None),
-                "qwen": EngineCapability("qwen", False, "linux only", None),
+                "mlx": BackendCapability("mlx", False, "unsupported", None),
+                "qwen": BackendCapability("qwen", False, "linux only", None),
             },
         ),
     ],
 )
-def test_resolve_engine_auto_no_engine(
+def test_select_transcription_backend_no_backend(
     monkeypatch,
     system: str,
-    capabilities: dict[str, EngineCapability],
+    capabilities: dict[str, BackendCapability],
 ) -> None:
     monkeypatch.setattr("aimd.plugins.asr.capabilities.platform.system", lambda: system)
     _patch_capabilities(monkeypatch, capabilities)
 
-    with pytest.raises(EngineUnavailableError):
-        resolve_engine_with_preflight("auto")
+    with pytest.raises(BackendUnavailableError):
+        select_transcription_backend()

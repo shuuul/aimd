@@ -1,17 +1,16 @@
-"""Environment capability detection for transcription engines."""
+"""Environment capability detection for transcription backends."""
 
 from dataclasses import dataclass
 from functools import lru_cache
 import importlib.util
 import platform
 
-from .const import TRANSCRIPTION_ENGINES
-from .errors import EngineUnavailableError, UnsupportedEngineError
+from .errors import BackendUnavailableError
 from .platform_utils import is_apple_silicon
 
 
 @dataclass
-class EngineCapability:
+class BackendCapability:
     name: str
     available: bool
     reason: str | None = None
@@ -32,8 +31,8 @@ def _torch_cuda_available() -> bool:
     return bool(torch.cuda.is_available())
 
 
-def get_engine_capabilities() -> dict[str, EngineCapability]:
-    """Return availability details for each supported transcription engine."""
+def get_backend_capabilities() -> dict[str, BackendCapability]:
+    """Return availability details for each supported transcription backend."""
     is_macos = platform.system() == "Darwin"
     is_linux = platform.system() == "Linux"
     apple_silicon = is_apple_silicon() if is_macos else False
@@ -43,7 +42,7 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     has_transformers = _module_available("transformers")
     torch_cuda_available = _torch_cuda_available() if has_torch else False
 
-    capabilities: dict[str, EngineCapability] = {}
+    capabilities: dict[str, BackendCapability] = {}
 
     mlx_available = is_macos and apple_silicon and has_mlx_audio
     mlx_reason = None
@@ -54,7 +53,7 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     elif not has_mlx_audio:
         mlx_reason = "mlx_audio module is not installed."
 
-    capabilities["mlx"] = EngineCapability(
+    capabilities["mlx"] = BackendCapability(
         name="mlx",
         available=mlx_available,
         reason=mlx_reason,
@@ -70,7 +69,7 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     )
     qwen_reason = None
     if not is_linux:
-        qwen_reason = "qwen engine is only supported on Linux."
+        qwen_reason = "qwen backend is only supported on Linux."
     elif not has_torch:
         qwen_reason = "torch module is not installed."
     elif not has_torchaudio:
@@ -80,7 +79,7 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     elif not torch_cuda_available:
         qwen_reason = "CUDA is not available in the current PyTorch runtime."
 
-    capabilities["qwen"] = EngineCapability(
+    capabilities["qwen"] = BackendCapability(
         name="qwen",
         available=qwen_available,
         reason=qwen_reason,
@@ -94,25 +93,9 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     return capabilities
 
 
-def resolve_engine_with_preflight(engine: str) -> str:
-    """Resolve requested engine with fail-fast capability checks."""
-    if engine not in TRANSCRIPTION_ENGINES:
-        raise UnsupportedEngineError(
-            f"Invalid engine '{engine}'. Valid options: {sorted(TRANSCRIPTION_ENGINES)}"
-        )
-
-    capabilities = get_engine_capabilities()
-
-    if engine != "auto":
-        capability = capabilities[engine]
-        if not capability.available:
-            reason = capability.reason or "Engine unavailable."
-            fix_hint = f" {capability.fix_hint}" if capability.fix_hint else ""
-            raise EngineUnavailableError(
-                f"Engine '{engine}' unavailable: {reason}{fix_hint}"
-            )
-        return engine
-
+def select_transcription_backend() -> str:
+    """Select the platform transcription backend with fail-fast capability checks."""
+    capabilities = get_backend_capabilities()
     if platform.system() == "Darwin":
         priority = ("mlx",)
     else:
@@ -125,6 +108,6 @@ def resolve_engine_with_preflight(engine: str) -> str:
     reasons = "; ".join(
         f"{name}: {capabilities[name].reason or 'unavailable'}" for name in priority
     )
-    raise EngineUnavailableError(
-        f"No available transcription engine for this environment. {reasons}"
+    raise BackendUnavailableError(
+        f"No available transcription backend for this environment. {reasons}"
     )

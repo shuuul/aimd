@@ -80,12 +80,6 @@ def process(
         "-o",
         help="Output file path. If not specified, auto-generated from input",
     ),
-    transcribe_engine: str = typer.Option(
-        "auto",
-        "--engine",
-        "-e",
-        help="Engine. Transcript: mlx (Apple Silicon) or qwen (Linux/CUDA). OCR: mlx4ocr (macOS) or transformers (Linux).",
-    ),
     model: Optional[str] = typer.Option(
         None,
         "--model",
@@ -162,10 +156,6 @@ def process(
     logger.info(f"Input: {input_source}")
     logger.info(f"Source: {route.source_kind}")
     logger.info(f"Task: {task_type}")
-    if task_type == "transcript":
-        logger.info(f"Transcription Engine: {transcribe_engine}")
-    elif task_type == "ocr":
-        logger.info(f"OCR Engine: {transcribe_engine}")
 
     async def run_processing() -> None:
         try:
@@ -177,7 +167,6 @@ def process(
             result = await process_input(
                 ProcessInput(
                     input_source=input_source,
-                    transcribe_engine=transcribe_engine,
                     model=model,
                     language=language,
                     start=start,

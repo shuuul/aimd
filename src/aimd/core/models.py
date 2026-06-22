@@ -37,7 +37,6 @@ class ProcessInput:
 
     input_source: str
     task_type: TaskType | None = None
-    transcribe_engine: str = "auto"
     model: str | None = None
     language: str | None = None
     start: int | None = None

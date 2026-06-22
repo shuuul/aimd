@@ -23,7 +23,6 @@ class UrlTextResult:
 
 async def get_text_from_url(
     url: str,
-    transcribe_engine: str = "auto",
     language: str | None = None,
     model: str | None = None,
     save_original_path: Path | None = None,
@@ -65,7 +64,6 @@ async def get_text_from_url(
         audio_content = await extract_content_from_audio(
             info_dict=info_dict,
             url=url,
-            transcribe_engine=transcribe_engine,
             language=language,
             model=model,
             save_original_path=save_original_path,

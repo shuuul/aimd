@@ -3,16 +3,19 @@ import subprocess
 
 import pytest
 
-from aimd.core.errors import EngineUnavailableError, ProcessingFailedError
-from aimd.plugins.ocr.engines import (
-    MLX4OCREngine,
+from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
+from aimd.plugins.ocr.backends import (
+    MLX4OCRBackend,
     OCRPage,
     OCRResult,
-    TransformersOCREngine,
+    TransformersOCRBackend,
     _resolve_mlx4ocr_model,
-    resolve_ocr_engine,
+    select_ocr_backend,
 )
-from aimd.plugins.ocr.models import create_transformers_ocr_model, resolve_transformers_ocr_model
+from aimd.plugins.ocr.models import (
+    create_transformers_ocr_model,
+    resolve_transformers_ocr_model,
+)
 from aimd.plugins.ocr.models.generic import GenericTransformersOCRModel
 from aimd.plugins.ocr.models.got import GOTOCRModel
 from aimd.plugins.ocr.models.unlimited import (
@@ -23,18 +26,18 @@ from aimd.plugins.ocr.models.unlimited import (
 from aimd.plugins.ocr.processor import process_ocr
 
 
-def test_resolve_ocr_engine_selects_platform_defaults(monkeypatch) -> None:
-    monkeypatch.setattr("aimd.plugins.ocr.engines.platform.system", lambda: "Darwin")
-    assert resolve_ocr_engine("auto") == "mlx4ocr"
+def test_select_ocr_backend_selects_platform_defaults(monkeypatch) -> None:
+    monkeypatch.setattr("aimd.plugins.ocr.backends.platform.system", lambda: "Darwin")
+    assert select_ocr_backend() == "mlx4ocr"
 
-    monkeypatch.setattr("aimd.plugins.ocr.engines.platform.system", lambda: "Linux")
-    assert resolve_ocr_engine("auto") == "transformers"
+    monkeypatch.setattr("aimd.plugins.ocr.backends.platform.system", lambda: "Linux")
+    assert select_ocr_backend() == "transformers"
 
 
-def test_resolve_ocr_engine_rejects_wrong_platform(monkeypatch) -> None:
-    monkeypatch.setattr("aimd.plugins.ocr.engines.platform.system", lambda: "Linux")
-    with pytest.raises(EngineUnavailableError):
-        resolve_ocr_engine("mlx4ocr")
+def test_select_ocr_backend_rejects_unsupported_platform(monkeypatch) -> None:
+    monkeypatch.setattr("aimd.plugins.ocr.backends.platform.system", lambda: "Windows")
+    with pytest.raises(BackendUnavailableError):
+        select_ocr_backend()
 
 
 def test_resolve_mlx4ocr_model_maps_aimd_names() -> None:
@@ -48,7 +51,9 @@ def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
     assert resolve_transformers_ocr_model(None) == "stepfun-ai/GOT-OCR-2.0-hf"
     assert resolve_transformers_ocr_model("got_ocr") == "stepfun-ai/GOT-OCR-2.0-hf"
     assert resolve_transformers_ocr_model("unlimited_ocr") == "baidu/Unlimited-OCR"
-    assert resolve_transformers_ocr_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
+    assert (
+        resolve_transformers_ocr_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
+    )
     assert resolve_transformers_ocr_model("glm_ocr") == "zai-org/GLM-OCR"
     assert (
         resolve_transformers_ocr_model("paddleocr_vl")
@@ -82,10 +87,10 @@ def test_mlx4ocr_pdf_command_uses_default_paddleocr_v6(monkeypatch, tmp_path: Pa
         assert kwargs["text"] is True
         return subprocess.CompletedProcess(command, 0, stdout="recognized", stderr="")
 
-    monkeypatch.setattr("aimd.plugins.ocr.engines.shutil.which", lambda _: "mlx4ocr")
-    monkeypatch.setattr("aimd.plugins.ocr.engines.subprocess.run", _run)
+    monkeypatch.setattr("aimd.plugins.ocr.backends.shutil.which", lambda _: "mlx4ocr")
+    monkeypatch.setattr("aimd.plugins.ocr.backends.subprocess.run", _run)
 
-    text = MLX4OCREngine()._recognize_pdf_or_document(
+    text = MLX4OCRBackend()._recognize_pdf_or_document(
         pdf,
         model=None,
         start=0,
@@ -102,11 +107,11 @@ def test_mlx4ocr_pdf_command_uses_default_paddleocr_v6(monkeypatch, tmp_path: Pa
 
 
 @pytest.mark.parametrize(
-    ("model", "mlx4ocr_engine"),
+    ("model", "mlx4ocr_backend"),
     [("glm_ocr", "glm-ocr"), ("paddleocr_vl", "paddleocr-vl")],
 )
 def test_mlx4ocr_pdf_command_maps_vlm_models(
-    monkeypatch, tmp_path: Path, model: str, mlx4ocr_engine: str
+    monkeypatch, tmp_path: Path, model: str, mlx4ocr_backend: str
 ):
     pdf = tmp_path / "scan.pdf"
     pdf.write_text("x", encoding="utf-8")
@@ -116,10 +121,10 @@ def test_mlx4ocr_pdf_command_maps_vlm_models(
         captured["command"] = command
         return subprocess.CompletedProcess(command, 0, stdout="recognized", stderr="")
 
-    monkeypatch.setattr("aimd.plugins.ocr.engines.shutil.which", lambda _: "mlx4ocr")
-    monkeypatch.setattr("aimd.plugins.ocr.engines.subprocess.run", _run)
+    monkeypatch.setattr("aimd.plugins.ocr.backends.shutil.which", lambda _: "mlx4ocr")
+    monkeypatch.setattr("aimd.plugins.ocr.backends.subprocess.run", _run)
 
-    text = MLX4OCREngine()._recognize_pdf_or_document(
+    text = MLX4OCRBackend()._recognize_pdf_or_document(
         pdf,
         model=model,
         start=None,
@@ -129,11 +134,11 @@ def test_mlx4ocr_pdf_command_maps_vlm_models(
 
     assert text == "recognized"
     command = captured["command"]
-    assert command[command.index("--engine") + 1] == mlx4ocr_engine
+    assert command[command.index("--engine") + 1] == mlx4ocr_backend
     assert "--variant" not in command
 
 
-def test_transformers_engine_ocr_image_uses_resolved_model(
+def test_transformers_backend_ocr_image_uses_resolved_model(
     monkeypatch, tmp_path: Path
 ) -> None:
     image = tmp_path / "scan.png"
@@ -155,10 +160,10 @@ def test_transformers_engine_ocr_image_uses_resolved_model(
         return _FakeModel()
 
     monkeypatch.setattr(
-        "aimd.plugins.ocr.engines.create_transformers_ocr_model", _create_model
+        "aimd.plugins.ocr.backends.create_transformers_ocr_model", _create_model
     )
 
-    result = TransformersOCREngine().recognize(
+    result = TransformersOCRBackend().recognize(
         image,
         model="got_ocr",
         language="zh",
@@ -271,13 +276,13 @@ def test_read_unlimited_ocr_output_files_fallback(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_ocr_wraps_engine_result_as_text_context(
+async def test_process_ocr_wraps_backend_result_as_text_context(
     monkeypatch, tmp_path: Path
 ) -> None:
     image = tmp_path / "page.png"
     image.write_text("x", encoding="utf-8")
 
-    class _FakeEngine:
+    class _FakeBackend:
         def recognize(self, input_path, **kwargs):
             assert input_path == image
             assert kwargs["model"] == "paddleocr_v6"
@@ -290,12 +295,11 @@ async def test_process_ocr_wraps_engine_result_as_text_context(
             )
 
     monkeypatch.setattr(
-        "aimd.plugins.ocr.processor.create_ocr_engine", lambda engine: _FakeEngine()
+        "aimd.plugins.ocr.processor.create_ocr_backend", lambda: _FakeBackend()
     )
 
     result = await process_ocr(
         image,
-        engine="mlx4ocr",
         model="paddleocr_v6",
         language="zh",
     )

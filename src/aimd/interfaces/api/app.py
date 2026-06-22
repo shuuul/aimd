@@ -9,7 +9,6 @@ from logly import logger
 from pydantic import BaseModel, Field
 
 from aimd.interfaces.output import persist_result_output_if_requested
-from aimd.plugins.asr.engines import list_transcription_engines
 from aimd.core.models import ProcessInput, ProcessResult, TaskType
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
@@ -17,19 +16,6 @@ from aimd.core.errors import AimdError
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-
-
-class EngineCapabilityResponse(BaseModel):
-    name: str
-    available: bool
-    reason: str | None = None
-    fix_hint: str | None = None
-    selected_by_auto: bool = False
-
-
-class EnginesResponse(BaseModel):
-    auto_selected_engine: str | None = None
-    engines: list[EngineCapabilityResponse]
 
 
 class ProcessRequest(BaseModel):
@@ -43,10 +29,6 @@ class ProcessRequest(BaseModel):
     )
     output_file: str | None = Field(
         default=None, description="Optional path to write resulting markdown output."
-    )
-    transcribe_engine: str = Field(
-        default="auto",
-        description="Engine. Transcript: auto, mlx, qwen. OCR: auto, mlx4ocr, transformers.",
     )
     model: str | None = Field(
         default=None,
@@ -106,11 +88,12 @@ def _get_request_temp_dir() -> Path | None:
     return temp_dir
 
 
-def _build_process_input(request: ProcessRequest, temp_dir: Path | None) -> ProcessInput:
+def _build_process_input(
+    request: ProcessRequest, temp_dir: Path | None
+) -> ProcessInput:
     return ProcessInput(
         input_source=request.input_source,
         task_type=request.task_type,
-        transcribe_engine=request.transcribe_engine,
         model=request.model,
         language=request.language,
         start=request.start,
@@ -152,31 +135,12 @@ def create_app() -> FastAPI:
     async def healthz() -> HealthResponse:
         return HealthResponse()
 
-    @app.get("/v1/engines", response_model=EnginesResponse)
-    async def engines() -> EnginesResponse:
-        result = list_transcription_engines()
-        return EnginesResponse(
-            auto_selected_engine=result.auto_selected_engine,
-            engines=[
-                EngineCapabilityResponse(
-                    name=engine,
-                    available=result.engines[engine].available,
-                    reason=result.engines[engine].reason,
-                    fix_hint=result.engines[engine].fix_hint,
-                    selected_by_auto=engine == result.auto_selected_engine,
-                )
-                for engine in ("mlx", "qwen")
-            ],
-        )
-
     @app.post("/v1/process", response_model=ProcessResponse)
     async def process(request: ProcessRequest) -> ProcessResponse:
         try:
             temp_dir = _get_request_temp_dir()
 
-            result = await process_core_input(
-                _build_process_input(request, temp_dir)
-            )
+            result = await process_core_input(_build_process_input(request, temp_dir))
 
             persisted = persist_result_output_if_requested(result, request.output_file)
             if persisted.ignored_output_file:

@@ -15,24 +15,26 @@ from .errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputE
 from .models import InputRoute, ProcessInput, ProcessResult, TaskType, TextContext
 from .router import FileSupportChecker, ensure_supported_input as ensure_supported_route
 
-from aimd.plugins.asr import resolve_engine_with_preflight
 from aimd.plugins.url import detect_platform
 from aimd.plugins.doc import PANDOC_DOCUMENT_EXTENSIONS
 
 _DOCUMENT_ASSET_EXTENSIONS = {".docx", ".epub", ".odt"}
-_MARKITDOWN_FILE_EXTENSIONS = AUDIO_EXTENSIONS | PANDOC_DOCUMENT_EXTENSIONS | {
-    ".doc",
-    ".pdf",
-    ".ppt",
-    ".pptx",
-    ".txt",
-    ".xls",
-    ".xlsx",
-}
+_MARKITDOWN_FILE_EXTENSIONS = (
+    AUDIO_EXTENSIONS
+    | PANDOC_DOCUMENT_EXTENSIONS
+    | {
+        ".doc",
+        ".pdf",
+        ".ppt",
+        ".pptx",
+        ".txt",
+        ".xls",
+        ".xlsx",
+    }
+)
 
 UrlProcessor = Callable[
     [
-        str,
         str,
         str | None,
         str | None,
@@ -46,7 +48,7 @@ UrlProcessor = Callable[
 ]
 
 LocalFileProcessor = Callable[
-    [str, str, str | None, str | None, Path | None, str | None, int | None, int | None],
+    [str, str | None, str | None, Path | None, str | None, int | None, int | None],
     Awaitable[tuple[TextContext, Path | None]],
 ]
 
@@ -313,7 +315,6 @@ def _text_context_from_markdown(
 
 async def convert_url_with_markitdown(
     url: str,
-    transcribe_engine: str = "auto",
     language: str | None = None,
     model: str | None = None,
     save_original_path: Path | None = None,
@@ -332,7 +333,6 @@ async def convert_url_with_markitdown(
             io.BytesIO(),
             stream_info=StreamInfo(url=url),
             task_type="transcript",
-            transcribe_engine=transcribe_engine,
             language=language,
             model=model,
             save_original_path=save_original_path,
@@ -356,7 +356,6 @@ async def convert_url_with_markitdown(
 
 async def convert_file_with_markitdown(
     file_path: str | Path,
-    transcribe_engine: str = "auto",
     language: str | None = None,
     model: str | None = None,
     temp_dir: Path | None = None,
@@ -374,7 +373,11 @@ async def convert_file_with_markitdown(
         raise UnsupportedInputError(f"Path is not a file: {input_path}")
 
     suffix = input_path.suffix.lower()
-    output_dir = input_path.parent / input_path.stem if suffix in _DOCUMENT_ASSET_EXTENSIONS else None
+    output_dir = (
+        input_path.parent / input_path.stem
+        if suffix in _DOCUMENT_ASSET_EXTENSIONS
+        else None
+    )
 
     md = MarkItDown(enable_plugins=True)
     loop = asyncio.get_running_loop()
@@ -383,7 +386,6 @@ async def convert_file_with_markitdown(
         partial(
             md.convert,
             input_path,
-            transcribe_engine=transcribe_engine,
             language=language,
             model=model,
             temp_dir=temp_dir,
@@ -420,7 +422,6 @@ async def process_input(
     *,
     process_url: UrlProcessor = convert_url_with_markitdown,
     process_file: LocalFileProcessor = convert_file_with_markitdown,
-    resolve_engine: Callable[[str], str] = resolve_engine_with_preflight,
     is_supported_file_fn: FileSupportChecker = is_supported_file,
 ) -> ProcessResult:
     """Process a routed input request."""
@@ -435,8 +436,8 @@ async def process_input(
 
     try:
         if route.source_kind == "url":
-            return await _process_url(request, process_url, resolve_engine)
-        return await _process_local_file(request, task_type, process_file, resolve_engine)
+            return await _process_url(request, process_url)
+        return await _process_local_file(request, task_type, process_file)
     except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
         raise
     except Exception as exc:
@@ -446,14 +447,9 @@ async def process_input(
 async def _process_url(
     request: ProcessInput,
     process_url: UrlProcessor,
-    resolve_engine: Callable[[str], str],
 ) -> ProcessResult:
-    if request.transcribe_engine != "auto":
-        resolve_engine(request.transcribe_engine)
-
     text_context, platform = await process_url(
         request.input_source,
-        request.transcribe_engine,
         request.language,
         request.model,
         request.save_original,
@@ -473,19 +469,13 @@ async def _process_local_file(
     request: ProcessInput,
     task_type: TaskType,
     process_file: LocalFileProcessor,
-    resolve_engine: Callable[[str], str],
 ) -> ProcessResult:
     input_path = Path(request.input_source)
     if not input_path.exists():
         raise InputNotFoundError(f"Input file not found: {request.input_source}")
 
-    engine = request.transcribe_engine
-    if task_type == "transcript":
-        engine = resolve_engine(request.transcribe_engine)
-
     text_context, output_dir = await process_file(
         input_path.as_posix(),
-        engine,
         request.language,
         request.model,
         request.temp_dir,

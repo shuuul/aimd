@@ -5,7 +5,7 @@ from pathlib import Path
 
 from logly import logger
 
-from .capabilities import resolve_engine_with_preflight
+from .capabilities import select_transcription_backend
 from .const import AUDIO_EXTENSIONS
 from .errors import ProcessingFailedError, UnsupportedInputError
 from .models.mlx import transcribe_audio_mlx
@@ -14,12 +14,11 @@ from .models.qwen import transcribe_audio_qwen
 
 async def transcribe_file(
     file_path: str | Path,
-    engine: str = "auto",
     language: str | None = None,
     model: str | None = None,
     temp_dir: Path | None = None,
 ) -> str:
-    """Transcribe an audio or video file with a configured ASR engine."""
+    """Transcribe an audio or video file with the platform ASR backend."""
     file_path = Path(file_path)
 
     if not file_path.exists():
@@ -39,18 +38,18 @@ async def transcribe_file(
     else:
         logger.info(f"Processing audio file: {file_path}")
 
-    actual_engine = resolve_engine_with_preflight(engine)
-    logger.info(f"Using transcription engine: {actual_engine}")
+    backend = select_transcription_backend()
+    logger.info(f"Using transcription backend: {backend}")
 
     try:
-        if actual_engine == "mlx":
+        if backend == "mlx":
             transcribed_text = await transcribe_audio_mlx(
                 file_path,
                 model=model,
                 language=language,
                 temp_dir=temp_dir,
             )
-        elif actual_engine == "qwen":
+        elif backend == "qwen":
             transcribed_text = await transcribe_audio_qwen(
                 file_path,
                 model=model,
@@ -58,7 +57,7 @@ async def transcribe_file(
                 temp_dir=temp_dir,
             )
         else:
-            raise UnsupportedInputError(f"Unsupported engine: {actual_engine}")
+            raise UnsupportedInputError(f"Unsupported transcription backend: {backend}")
     except Exception as e:
         if isinstance(e, (UnsupportedInputError, ProcessingFailedError)):
             raise
@@ -75,7 +74,6 @@ async def transcribe_file(
 
 def transcribe_file_sync(
     file_path: str | Path,
-    engine: str = "auto",
     language: str | None = None,
     model: str | None = None,
     temp_dir: Path | None = None,
@@ -84,7 +82,6 @@ def transcribe_file_sync(
     return asyncio.run(
         transcribe_file(
             file_path,
-            engine=engine,
             language=language,
             model=model,
             temp_dir=temp_dir,

@@ -8,7 +8,6 @@ from logly import logger
 from mcp.server.fastmcp import FastMCP
 
 from aimd.interfaces.output import persist_result_output_if_requested
-from aimd.plugins.asr.engines import list_transcription_engines
 from aimd.core.models import ProcessInput, ProcessResult
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
@@ -26,22 +25,6 @@ def _get_request_temp_dir() -> Path | None:
     temp_dir = Path(env_temp_dir)
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir
-
-
-def _engine_capabilities_payload(result) -> dict[str, Any]:  # noqa: ANN001
-    return {
-        "auto_selected_engine": result.auto_selected_engine,
-        "engines": [
-            {
-                "name": engine,
-                "available": result.engines[engine].available,
-                "reason": result.engines[engine].reason,
-                "fix_hint": result.engines[engine].fix_hint,
-                "selected_by_auto": engine == result.auto_selected_engine,
-            }
-            for engine in ("mlx", "qwen")
-        ],
-    }
 
 
 def _process_result_payload(
@@ -68,17 +51,9 @@ async def healthz() -> dict[str, str]:
 
 
 @mcp.tool()
-async def list_engines() -> dict[str, Any]:
-    """List transcription engine capabilities and auto-selected engine."""
-    result = list_transcription_engines()
-    return _engine_capabilities_payload(result)
-
-
-@mcp.tool()
 async def process_input(
     input_source: str,
     task_type: str | None = None,
-    transcribe_engine: str = "auto",
     model: str | None = None,
     language: str | None = None,
     start: int | None = None,
@@ -97,7 +72,6 @@ async def process_input(
             ProcessInput(
                 input_source=input_source,
                 task_type=task_type,
-                transcribe_engine=transcribe_engine,
                 model=model,
                 language=language,
                 start=start,

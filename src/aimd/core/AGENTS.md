@@ -11,7 +11,7 @@ Core package organized as a small interface-independent processing service.
 Feature modules are bundled in the same `aimd-tool` distribution:
 
 - `aimd.plugins.url` — MarkItDown plugin for URL transcript extraction, yt-dlp subtitles/cookies/audio fallback, and opt-in Defuddle readable HTML
-- `aimd.plugins.asr` — MarkItDown plugin for local audio/video transcription, ASR engines, and capability checks
+- `aimd.plugins.asr` — MarkItDown plugin for local audio/video transcription, ASR backends, and capability checks
 - `aimd.interfaces.api` — FastAPI service module
 - `aimd.interfaces.mcp` — MCP stdio server module
 - `aimd.plugins.doc` — MarkItDown plugin for Pandoc-backed document conversion
@@ -61,7 +61,7 @@ The stripping is performed by `strip_subtitle_formatting()` in
 
 ## TRANSCRIPTION MODELS
 
-- Engine names are fixed in `const.TRANSCRIPTION_ENGINES`: `auto`, `mlx`, `qwen`.
-- `mlx` is implemented in `aimd.plugins.asr.models.mlx` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
-- `qwen` is implemented in `aimd.plugins.asr.models.qwen` and uses a direct Transformers backend on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
+- Backend selection is platform-driven and not user-configurable.
+- The MLX backend is implemented in `aimd.plugins.asr.models.mlx` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
+- The Qwen backend is implemented in `aimd.plugins.asr.models.qwen` and uses a direct Transformers backend on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
 - mlx Qwen3-ASR defaults omitted language to `Chinese`; other mlx-audio STT models stay on their own default/auto language behavior.
