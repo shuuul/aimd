@@ -76,7 +76,7 @@ def process(
         "-m",
         help="Model for transcription, or OCR model. macOS OCR: paddleocr_v6 "
         "(default), glm_ocr, or paddleocr_vl. Linux/CUDA OCR: got_ocr "
-        "(default), glm_ocr, paddleocr_vl, or a Hugging Face model ID. "
+        "(default), unlimited_ocr, glm_ocr, paddleocr_vl, or a Hugging Face model ID. "
         "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
         "and also supports other documented mlx-audio STT model IDs. "
         "qwen supports Qwen/Qwen3-ASR-1.7B (default) or Qwen/Qwen3-ASR-0.6B.",
