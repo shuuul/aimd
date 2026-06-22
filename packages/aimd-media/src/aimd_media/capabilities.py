@@ -39,7 +39,8 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
     apple_silicon = is_apple_silicon() if is_macos else False
     has_mlx_audio = _module_available("mlx_audio")
     has_torch = _module_available("torch")
-    has_qwen_asr = _module_available("qwen_asr")
+    has_torchaudio = _module_available("torchaudio")
+    has_transformers = _module_available("transformers")
     torch_cuda_available = _torch_cuda_available() if has_torch else False
 
     capabilities: dict[str, EngineCapability] = {}
@@ -60,14 +61,22 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
         fix_hint=None if mlx_available else "Install dependency: mlx-audio",
     )
 
-    qwen_available = is_linux and has_qwen_asr and has_torch and torch_cuda_available
+    qwen_available = (
+        is_linux
+        and has_torch
+        and has_torchaudio
+        and has_transformers
+        and torch_cuda_available
+    )
     qwen_reason = None
     if not is_linux:
         qwen_reason = "qwen engine is only supported on Linux."
-    elif not has_qwen_asr:
-        qwen_reason = "qwen_asr module is not installed."
     elif not has_torch:
         qwen_reason = "torch module is not installed."
+    elif not has_torchaudio:
+        qwen_reason = "torchaudio module is not installed."
+    elif not has_transformers:
+        qwen_reason = "transformers module is not installed."
     elif not torch_cuda_available:
         qwen_reason = "CUDA is not available in the current PyTorch runtime."
 
@@ -78,7 +87,7 @@ def get_engine_capabilities() -> dict[str, EngineCapability]:
         fix_hint=(
             None
             if qwen_available
-            else "Install dependency: qwen-asr (Linux + CUDA required)"
+            else "Install dependencies: torch, torchaudio, transformers (Linux + CUDA required)"
         ),
     )
 

@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version 0.9.0">
+    <img src="https://img.shields.io/badge/version-0.9.1-blue" alt="Version 0.9.1">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -31,7 +31,7 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 - **One input command** for URLs, audio/video files, ebooks, PDFs, Markdown, text, and other MarkItDown-supported documents.
 - **Media extraction** with `aimd-media`: yt-dlp URLs such as podcasts, YouTube, Bilibili, and local audio/video files.
-- **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or `qwen-asr`.
+- **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated ebook chapter/image extraction in the `aimd-book` plugin.
 - **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
 
@@ -87,7 +87,7 @@ uv run aimd --help
 Platform notes:
 
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`.
-- Linux transcription uses `qwen-asr` and requires a CUDA-capable GPU.
+- Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
 - Local file conversion is powered by MarkItDown. Ebook conversion is handled by `aimd-book`; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
 
 ## Quick start
@@ -124,7 +124,7 @@ Engines:
 |--------|----------|-------|
 | `auto` | macOS/Linux | Selects the best available backend. |
 | `mlx` | Apple Silicon | Uses `mlx-audio`; default local backend on macOS when available. |
-| `qwen` | Linux/CUDA | Uses `qwen-asr`; default local backend on Linux when available. |
+| `qwen` | Linux/CUDA | Uses Qwen3-ASR through Transformers; default local backend on Linux when available. |
 
 ### URLs
 
@@ -253,8 +253,8 @@ Release a tagged version:
 
 ```bash
 # Make sure all packages have the same version, then push a v-prefixed tag.
-git tag v0.9.0
-git push origin v0.9.0
+git tag v0.9.1
+git push origin v0.9.1
 ```
 
 The release workflow builds every workspace package, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes the distributions to PyPI using the `UV_PUBLISH_TOKEN` repository secret.

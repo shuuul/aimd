@@ -13,7 +13,7 @@ Infrastructure layer in the main `aimd` package.
 - `aimd_media.const.MLX_AUDIO_MODELS` is a curated allow-list for mlx-audio STT IDs. It includes Qwen3-ASR quantized variants plus newer mlx-audio 0.4.4 STT models such as Whisper, Distil-Whisper, Parakeet, Nemotron ASR, Voxtral, VibeVoice-ASR, and Qwen2-Audio.
 - Do not add mlx-audio forced aligner models to transcription until the product/API accepts reference text and timestamp output.
 - mlx Qwen3-ASR gets a default `Chinese` language hint for existing behavior. Other mlx-audio STT models should receive no language hint unless the caller provided one and the model `generate()` signature accepts `language`.
-- `aimd_media.const.QWEN_ASR_MODELS` tracks official qwen-asr ASR models only: `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ASR-0.6B`.
+- `aimd_media.const.QWEN_ASR_MODELS` tracks official Qwen3-ASR models only: `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ASR-0.6B`.
 - Qwen3-ASR upstream supports more languages/dialects than the local `LANGUAGE_CODE_TO_NAME` table exposes; expanding the table is a valid small follow-up if the adapters need those codes.
 
 ## Rules

@@ -24,7 +24,7 @@ Feature packages live beside this package:
 - Keep IO/third-party integrations in `infrastructure/*`.
 - Keep interface-specific request/response mapping in `adapters/*`.
 
-- Keep platform-dependent dependency use behind capability checks; `mlx-audio` is Darwin-only and `qwen-asr` is Linux-only.
+- Keep platform-dependent dependency use behind capability checks; `mlx-audio` is Darwin-only and Qwen3-ASR runs through Transformers on Linux/CUDA.
 - Keep heavy local-file integrations behind MarkItDown plugins; keep this package as the facade/router and `TextContext` wrapper.
 - Keep output file persistence in adapters via `application/services/output_writer.py`; `ProcessInput` and `ProcessResult` do not carry `output_file`.
 - Keep API/MCP payload mapping in `application/services/interface_payloads.py` as plain helpers with no FastAPI/MCP imports.
@@ -64,5 +64,5 @@ The stripping is performed by `strip_subtitle_formatting()` in
 
 - Engine names are fixed in `const.TRANSCRIPTION_ENGINES`: `auto`, `mlx`, `qwen`.
 - `mlx` is implemented in `aimd_media.mlx_engine` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
-- `qwen` is implemented in `aimd_media.qwen_engine` and uses `qwen_asr.Qwen3ASRModel` on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
+- `qwen` is implemented in `aimd_media.qwen_engine` and uses a direct Transformers backend on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
 - mlx Qwen3-ASR defaults omitted language to `Chinese`; other mlx-audio STT models stay on their own default/auto language behavior.

@@ -1,6 +1,6 @@
 [project]
 name = "aimd-ocr"
-version = "0.9.0"
+version = "0.9.1"
 description = "OCR package scaffold for aimd."
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }

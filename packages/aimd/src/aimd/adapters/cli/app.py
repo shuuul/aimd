@@ -68,7 +68,7 @@ def process(
         "auto",
         "--engine",
         "-e",
-        help="Transcription engine: mlx (Apple Silicon, mlx-audio STT), qwen (Linux/CUDA, qwen-asr).",
+        help="Transcription engine: mlx (Apple Silicon, mlx-audio STT), qwen (Linux/CUDA, Qwen3-ASR via Transformers).",
     ),
     model: Optional[str] = typer.Option(
         None,

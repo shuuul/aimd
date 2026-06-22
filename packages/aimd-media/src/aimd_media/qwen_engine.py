@@ -10,9 +10,8 @@ from .const import QWEN_ASR_DEFAULT_MODEL, QWEN_ASR_MODELS
 from .errors import ProcessingFailedError, UnsupportedInputError
 from .audio_utils import convert_to_wav_if_needed
 
-# Silence noisy upstream warnings emitted while loading nagisa / qwen-asr /
-# transformers. These are benign and would otherwise pollute CLI output.
-warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"nagisa(\..*)?")
+# Silence noisy upstream transformers generation warnings. These are benign and
+# would otherwise pollute CLI output.
 warnings.filterwarnings(
     "ignore",
     message=r"The following generation flags are not valid.*",
@@ -45,11 +44,12 @@ LANGUAGE_CODE_TO_NAME = {
 }
 
 _cached_model = None
+_cached_processor = None
 _cached_model_name: str | None = None
 
 
 def _resolve_language(language: str | None) -> str | None:
-    """Map short language codes to full names expected by qwen-asr, or None for auto."""
+    """Map short language codes to full names expected by Qwen3-ASR, or None for auto."""
     if language is None:
         return None
     lang = language.lower()
@@ -64,25 +64,34 @@ def _resolve_language(language: str | None) -> str | None:
     )
 
 
-def _get_model(model_name: str):
-    """Load or return cached Qwen3ASRModel."""
-    global _cached_model, _cached_model_name  # noqa: PLW0603
+def _get_model_and_processor(model_name: str):
+    """Load or return cached Qwen3-ASR Transformers model and processor."""
+    global _cached_model, _cached_processor, _cached_model_name  # noqa: PLW0603
     if _cached_model is not None and _cached_model_name == model_name:
-        return _cached_model
+        return _cached_model, _cached_processor
 
     import torch
-    from qwen_asr import Qwen3ASRModel  # type: ignore[import-untyped]
+    from transformers import AutoModel, AutoProcessor
 
-    _cached_model = Qwen3ASRModel.from_pretrained(
+    dtype = (
+        torch.bfloat16
+        if getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+        else torch.float16
+    )
+    _cached_processor = AutoProcessor.from_pretrained(
         model_name,
-        dtype=torch.bfloat16,
+        trust_remote_code=True,
+        fix_mistral_regex=True,
+    )
+    _cached_model = AutoModel.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        torch_dtype=dtype,
         device_map="cuda:0",
-        max_inference_batch_size=1,
-        max_new_tokens=4096,
     )
     _ensure_pad_token(_cached_model)
     _cached_model_name = model_name
-    return _cached_model
+    return _cached_model, _cached_processor
 
 
 def _ensure_pad_token(model: object) -> None:
@@ -98,6 +107,72 @@ def _ensure_pad_token(model: object) -> None:
     eos = getattr(gen_config, "eos_token_id", None)
     if eos is not None and getattr(gen_config, "pad_token_id", None) is None:
         gen_config.pad_token_id = eos[0] if isinstance(eos, (list, tuple)) else eos
+
+
+def _model_device_and_dtype(model: object):
+    """Return the first parameter device/dtype for tensor placement."""
+    first_parameter = next(model.parameters())
+    return first_parameter.device, first_parameter.dtype
+
+
+def _inputs_to_model_device(inputs, model: object):
+    """Move processor tensors to model device without casting token ids."""
+    import torch
+
+    device, dtype = _model_device_and_dtype(model)
+    return {
+        key: (
+            (
+                value.to(device=device, dtype=dtype)
+                if torch.is_floating_point(value)
+                else value.to(device=device)
+            )
+            if isinstance(value, torch.Tensor)
+            else value
+        )
+        for key, value in inputs.items()
+    }
+
+
+def _load_audio_array(audio_path: Path):
+    """Load a mono 16 kHz float32 waveform for Qwen3-ASR processor input."""
+    import torchaudio
+    import torchaudio.functional as F
+
+    waveform, sample_rate = torchaudio.load(audio_path)
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if sample_rate != 16000:
+        waveform = F.resample(waveform, sample_rate, 16000)
+    waveform = waveform.squeeze(0).clamp(-1, 1).float()
+    return waveform.cpu().numpy()
+
+
+def _build_prompt(processor: object, language: str | None) -> str:
+    """Build Qwen3-ASR audio chat prompt."""
+    messages = [
+        {"role": "system", "content": ""},
+        {"role": "user", "content": [{"type": "audio", "audio": ""}]},
+    ]
+    prompt = processor.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        tokenize=False,
+    )
+    if language is not None:
+        prompt += f"language {language}<asr_text>"
+    return prompt
+
+
+def _parse_qwen_output(output: str, forced_language: str | None) -> str:
+    """Extract transcription text from Qwen3-ASR generated output."""
+    text = output.strip()
+    if forced_language is not None:
+        return text
+    marker = "<asr_text>"
+    if marker in text:
+        return text.split(marker, 1)[1].strip()
+    return text
 
 
 async def transcribe_audio_qwen(
@@ -120,22 +195,24 @@ async def transcribe_audio_qwen(
         )
 
     try:
-        import qwen_asr  # type: ignore[import-untyped]  # noqa: F401
+        import torchaudio  # type: ignore[import-untyped]  # noqa: F401
+        import transformers  # type: ignore[import-untyped]  # noqa: F401
     except ImportError:
         raise ProcessingFailedError(
-            "qwen-asr library is not installed. Install it: pip install qwen-asr"
+            "transformers and torchaudio are required for qwen engine."
         )
 
     resolved_model = model or QWEN_ASR_DEFAULT_MODEL
     if resolved_model not in QWEN_ASR_MODELS:
         raise UnsupportedInputError(
-            f"Unknown qwen-asr model: {resolved_model}. "
+            f"Unknown Qwen3-ASR model: {resolved_model}. "
             f"Available: {list(QWEN_ASR_MODELS.keys())}"
         )
 
     resolved_language = _resolve_language(language)
     logger.info(
-        f"Transcribing with qwen-asr model: {resolved_model}, language: {resolved_language or 'auto'}"
+        f"Transcribing with Qwen3-ASR Transformers model: {resolved_model}, "
+        f"language: {resolved_language or 'auto'}"
     )
 
     wav_path: Path | None = None
@@ -144,27 +221,45 @@ async def transcribe_audio_qwen(
         audio_path = wav_path or file_path
 
         def _transcribe() -> str:
-            qwen_model = _get_model(resolved_model)
-            results = qwen_model.transcribe(
-                audio=str(audio_path),
-                language=resolved_language,
+            import torch
+
+            qwen_model, processor = _get_model_and_processor(resolved_model)
+            audio = _load_audio_array(audio_path)
+            prompt = _build_prompt(processor, resolved_language)
+            inputs = processor(
+                text=[prompt],
+                audio=[audio],
+                return_tensors="pt",
+                padding=True,
             )
-            return results[0].text.strip()
+            inputs = _inputs_to_model_device(inputs, qwen_model)
+            input_ids = inputs["input_ids"]
+
+            with torch.no_grad():
+                generated = qwen_model.generate(**inputs, max_new_tokens=4096)
+
+            generated_ids = getattr(generated, "sequences", generated)
+            decoded = processor.batch_decode(
+                generated_ids[:, input_ids.shape[1] :],
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )
+            return _parse_qwen_output(decoded[0], resolved_language).strip()
 
         loop = asyncio.get_event_loop()
         transcribed_text = await loop.run_in_executor(None, _transcribe)
 
         if not transcribed_text:
-            raise ProcessingFailedError("qwen-asr produced empty transcription")
+            raise ProcessingFailedError("Qwen3-ASR produced empty transcription")
 
         logger.info(
-            f"Successfully transcribed {len(transcribed_text)} characters with qwen-asr"
+            f"Successfully transcribed {len(transcribed_text)} characters with Qwen3-ASR"
         )
         return transcribed_text
     except (ProcessingFailedError, UnsupportedInputError):
         raise
     except Exception as e:
-        raise ProcessingFailedError(f"qwen-asr transcription failed: {e}") from e
+        raise ProcessingFailedError(f"Qwen3-ASR transcription failed: {e}") from e
     finally:
         if wav_path is not None:
             wav_path.unlink(missing_ok=True)

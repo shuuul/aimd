@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-21
-**Version:** 0.9.0
+**Version:** 0.9.1
 **Branch:** main
 
 ## OVERVIEW
@@ -103,7 +103,7 @@ OCR non-goals for the first pass:
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP package mapping.
 - **Stable output contract**: processors return `TextContext(title, chunk_list, split_header_level)`.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
-- **Platform-conditional audio deps**: `mlx-audio` on Darwin; `qwen-asr` on Linux.
+- **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on Linux/CUDA.
 - **Package boundaries**: `aimd` owns interface adapters, routing, and `TextContext` wrapping; `aimd-media` owns media URL/local audio-video extraction; `aimd-book` and future OCR follow MarkItDown plugin contracts.
 
 ## ANTI-PATTERNS
