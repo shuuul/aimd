@@ -86,9 +86,8 @@ def _get_model_and_processor(model_name: str):
     _cached_model = AutoModel.from_pretrained(
         model_name,
         trust_remote_code=True,
-        torch_dtype=dtype,
-        device_map="cuda:0",
-    )
+        dtype=dtype,
+    ).to("cuda")
     _ensure_pad_token(_cached_model)
     _cached_model_name = model_name
     return _cached_model, _cached_processor

@@ -1,6 +1,6 @@
 [project]
 name = "aimd-tool"
-version = "0.10.2"
+version = "0.10.3"
 description = "Context preparation tool for LLM workflows."
 readme = { text = "Prepare LLM-ready context from URLs, audio/video, and documents.", content-type = "text/markdown" }
 authors = [
@@ -8,18 +8,18 @@ authors = [
 ]
 requires-python = ">=3.10, <3.13"
 dependencies = [
-    "accelerate>=1.12.0",
     "logly>=0.1.6",
     "markitdown>=0.1.1,<0.2.0",
     "mlx-audio>=0.4.4; sys_platform == 'darwin'",
     "mlx4ocr>=0.1.2; sys_platform == 'darwin' and python_version >= '3.12'",
+    "pillow>=12.2.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.1.1",
     "rich>=13.9.4",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "torch>=2.9.1",
     "torchaudio>=2.9.1",
-    "transformers>=4.57.6",
+    "transformers>=4.57",
     "typer>=0.20.0",
     "yt-dlp[default]>=2025.11.12",
 ]

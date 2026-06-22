@@ -7,6 +7,10 @@ from aimd.core.errors import EngineUnavailableError, ProcessingFailedError
 from aimd.ocr.engines import OCRPage, OCRResult, resolve_ocr_engine
 from aimd.ocr.mlx4ocr_engine import MLX4OCREngine, _resolve_mlx4ocr_model
 from aimd.ocr.processor import process_ocr
+from aimd.ocr.transformers_engine import (
+    TransformersOCREngine,
+    _resolve_transformers_ocr_model,
+)
 
 
 def test_resolve_ocr_engine_selects_platform_defaults(monkeypatch) -> None:
@@ -28,6 +32,22 @@ def test_resolve_mlx4ocr_model_maps_aimd_names() -> None:
     assert _resolve_mlx4ocr_model("paddleocr_v6") == ("ppocrv6", "medium")
     assert _resolve_mlx4ocr_model("glm_ocr") == ("glm-ocr", None)
     assert _resolve_mlx4ocr_model("paddleocr_vl") == ("paddleocr-vl", None)
+
+
+def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
+    assert _resolve_transformers_ocr_model(None) == "stepfun-ai/GOT-OCR-2.0-hf"
+    assert _resolve_transformers_ocr_model("got_ocr") == "stepfun-ai/GOT-OCR-2.0-hf"
+    assert _resolve_transformers_ocr_model("glm_ocr") == "zai-org/GLM-OCR"
+    assert (
+        _resolve_transformers_ocr_model("paddleocr_vl")
+        == "PaddlePaddle/PaddleOCR-VL-1.5"
+    )
+    assert _resolve_transformers_ocr_model("org/custom-model") == "org/custom-model"
+
+
+def test_resolve_transformers_ocr_model_rejects_ppocrv6() -> None:
+    with pytest.raises(ProcessingFailedError):
+        _resolve_transformers_ocr_model("paddleocr_v6")
 
 
 def test_mlx4ocr_pdf_command_uses_default_paddleocr_v6(monkeypatch, tmp_path: Path):
@@ -91,6 +111,38 @@ def test_mlx4ocr_pdf_command_maps_vlm_models(
     command = captured["command"]
     assert command[command.index("--engine") + 1] == mlx4ocr_engine
     assert "--variant" not in command
+
+
+def test_transformers_engine_ocr_image_uses_resolved_model(
+    monkeypatch, tmp_path: Path
+) -> None:
+    image = tmp_path / "scan.png"
+    image.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def _recognize_image(self, input_path, *, model_name, language):  # noqa: ANN001, ARG001
+        captured["input_path"] = input_path
+        captured["model_name"] = model_name
+        captured["language"] = language
+        return "recognized text"
+
+    monkeypatch.setattr(TransformersOCREngine, "_recognize_image", _recognize_image)
+
+    result = TransformersOCREngine().recognize(
+        image,
+        model="got_ocr",
+        language="zh",
+    )
+
+    assert result == OCRResult(
+        title="scan",
+        pages=(OCRPage(page_index=None, text="recognized text"),),
+    )
+    assert captured == {
+        "input_path": image,
+        "model_name": "stepfun-ai/GOT-OCR-2.0-hf",
+        "language": "zh",
+    }
 
 
 @pytest.mark.asyncio

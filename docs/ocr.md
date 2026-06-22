@@ -35,7 +35,7 @@ Planned dependency split:
 ```toml
 dependencies = [
     "mlx4ocr>=0.1.2; sys_platform == 'darwin'",
-    "transformers>=4.57.6; sys_platform == 'linux'",
+    "transformers>=4.57; sys_platform == 'linux'",
     "torch>=2.9.1; sys_platform == 'linux'",
 ]
 ```
@@ -163,12 +163,18 @@ Implementation outline:
    the `mlx4ocr` engine.
 6. Add an explicit `--model` escape hatch after the default model is proven.
 
-Open Linux model decision:
+Linux model decision:
 
-- Choose the default after a smoke test on CPU and, if available, CUDA.
-- Prefer a model with reasonable CPU fallback and standard `transformers`
-  loading APIs.
-- Document model size and first-run download behavior.
+- Default to `got_ocr`, mapped to `stepfun-ai/GOT-OCR-2.0-hf`, through
+  `AutoProcessor` + `AutoModelForImageTextToText` on CUDA because it works with
+  the current PyPI Transformers release.
+- Map `glm_ocr` to `zai-org/GLM-OCR` for environments with a new-enough
+  Transformers build, and map `paddleocr_vl` to `PaddlePaddle/PaddleOCR-VL-1.5`
+  when its optional runtime requirements are present.
+- Do not map traditional PP-OCRv6 / `paddleocr_v6` through Transformers for
+  now; that path would require a PaddleOCR-style detector/recognizer stack.
+- PDF OCR uses poppler's `pdftoppm` executable when available, avoiding an
+  additional Python PDF renderer dependency.
 
 ## Output formatting
 

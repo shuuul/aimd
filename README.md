@@ -85,7 +85,7 @@ Platform notes:
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`.
 - macOS OCR uses `mlx4ocr` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
-- Linux OCR routing is present, but the default Transformers OCR model is not enabled yet.
+- Linux OCR uses the Transformers backend with CUDA.
 - Local file conversion is powered by MarkItDown. Ebook conversion is handled by the bundled `aimd.book` MarkItDown plugin; today it supports EPUB-compatible ZIP/spine books and still shells out to the Pandoc CLI for chapter HTML conversion.
 
 ## Quick start
@@ -174,13 +174,14 @@ Current note: `aimd.book` owns the ebook converter and routes `.epub`, `.mobi`, 
 aimd page.png
 aimd scan.pdf                                  # OCR if no extractable PDF text is found
 aimd scan.pdf --engine mlx4ocr                 # macOS/Apple Silicon
+aimd scan.pdf --engine transformers --model got_ocr       # Linux/CUDA VLM OCR
 aimd scan.pdf --model paddleocr_v6             # default PP-OCRv6 detector/recognizer
 aimd scan.pdf --model glm_ocr                  # optional mlx4ocr VLM backend
 aimd scan.pdf --model paddleocr_vl             # optional mlx4ocr VLM backend
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. On macOS, OCR `auto` resolves to `mlx4ocr`, and the default OCR model is `paddleocr_v6` (mapped to mlx4ocr `ppocrv6` with the `medium` variant). `glm_ocr` and `paddleocr_vl` require mlx4ocr's optional VLM dependencies. On Linux, OCR `auto` resolves to the Transformers OCR boundary, which currently fails fast until a default OCR-capable model is selected and smoke-tested.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. On macOS, OCR `auto` resolves to `mlx4ocr`, and the default OCR model is `paddleocr_v6` (mapped to mlx4ocr `ppocrv6` with the `medium` variant). `glm_ocr` and `paddleocr_vl` require mlx4ocr's optional VLM dependencies. On Linux, OCR `auto` resolves to the CUDA Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release; `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed, and `paddleocr_vl` maps to `PaddlePaddle/PaddleOCR-VL-1.5` when its optional runtime requirements are present. Traditional PP-OCRv6/`paddleocr_v6` is intentionally not routed through Transformers. PDF OCR on Linux uses the system `pdftoppm` executable from poppler when available.
 
 ### MarkItDown plugins
 
