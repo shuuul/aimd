@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/banner.png" alt="aimd">
+  <img src="assets/aimd-banner-sm.png" alt="aimd">
 
   ![Python](https://img.shields.io/badge/python-3.10--3.12-blue)
   ![uv](https://img.shields.io/badge/uv-ready-blue)
