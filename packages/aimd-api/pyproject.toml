@@ -1,6 +1,6 @@
 [project]
 name = "aimd-api"
-version = "0.8.6"
+version = "0.9.0"
 description = "FastAPI service for aimd."
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }

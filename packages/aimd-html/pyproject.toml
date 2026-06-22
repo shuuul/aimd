@@ -1,6 +1,6 @@
 [project]
 name = "aimd-html"
-version = "0.8.6"
+version = "0.9.0"
 description = "Defuddle-backed HTML extraction helpers for aimd workflows."
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }

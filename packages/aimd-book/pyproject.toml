@@ -1,6 +1,6 @@
 [project]
 name = "aimd-book"
-version = "0.8.6"
+version = "0.9.0"
 description = "Ebook conversion package for aimd."
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }

@@ -59,7 +59,7 @@ wheels = [
 
 [[package]]
 name = "aimd"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd" }
 dependencies = [
     { name = "aimd-book" },
@@ -99,7 +99,7 @@ provides-extras = ["all"]
 
 [[package]]
 name = "aimd-api"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd-api" }
 dependencies = [
     { name = "aimd" },
@@ -116,7 +116,7 @@ requires-dist = [
 
 [[package]]
 name = "aimd-book"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd-book" }
 dependencies = [
     { name = "logly" },
@@ -131,12 +131,12 @@ requires-dist = [
 
 [[package]]
 name = "aimd-html"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd-html" }
 
 [[package]]
 name = "aimd-mcp"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd-mcp" }
 dependencies = [
     { name = "aimd" },
@@ -151,7 +151,7 @@ requires-dist = [
 
 [[package]]
 name = "aimd-media"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd-media" }
 dependencies = [
     { name = "logly" },
@@ -185,7 +185,7 @@ requires-dist = [
 
 [[package]]
 name = "aimd-ocr"
-version = "0.8.6"
+version = "0.9.0"
 source = { editable = "packages/aimd-ocr" }
 
 [[package]]
