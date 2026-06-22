@@ -1,10 +1,18 @@
 <div align="center">
   <img src="assets/aimd-banner-sm.png" alt="aimd">
 
-  ![Python](https://img.shields.io/badge/python-3.10--3.12-blue)
-  ![uv](https://img.shields.io/badge/uv-ready-blue)
-  ![Version](https://img.shields.io/badge/version-0.9.0-blue)
-  ![License](https://img.shields.io/badge/license-MIT-green)
+  <a href="https://www.python.org/">
+    <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white" alt="Python 3.10, 3.11, 3.12">
+  </a>
+  <a href="https://docs.astral.sh/uv/">
+    <img src="https://img.shields.io/badge/uv-workspace-654FF0?logo=uv&logoColor=white" alt="uv workspace">
+  </a>
+  <a href="https://github.com/shuuul/aimd/releases">
+    <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version 0.9.0">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+  </a>
 </div>
 
 # aimd
@@ -25,27 +33,40 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 ## Install
 
-CLI-only install after release:
+Install the CLI after release:
 
 ```bash
 uv tool install aimd
 aimd --help
 ```
 
-Install API/MCP packages when needed:
+Install from GitHub `main` before a release:
+
+```bash
+uv tool install --force \
+  "aimd @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd"
+```
+
+Install the full tool set from GitHub, including the API and MCP executables:
+
+```bash
+uv tool install --force \
+  "aimd[all] @ git+https://github.com/shuuul/aimd.git@main#subdirectory=packages/aimd" \
+  --with-executables-from aimd-api \
+  --with-executables-from aimd-mcp
+```
+
+Install API/MCP packages separately when needed:
 
 ```bash
 # HTTP API
-pip install aimd-api
+uv tool install aimd-api
 
 # MCP server
-pip install aimd-mcp
+uv tool install aimd-mcp
 
-# Both
-pip install aimd-api aimd-mcp
-
-# Everything published by the workspace
-pip install "aimd[all]"
+# Or install into an existing Python environment
+uv pip install "aimd[all]"
 ```
 
 From a source checkout, use the workspace directly:
