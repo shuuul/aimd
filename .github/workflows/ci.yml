@@ -18,21 +18,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v5
         with:
           python-version-file: ".python-version"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.3.0
+        uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.0"
           enable-cache: true
 
-      - name: Install deps (locked)
-        run: uv sync --locked --all-extras --dev
+      - name: Install workspace dependencies
+        run: uv sync --locked --all-packages --all-extras --dev
 
-      - name: Run hooks
-        run: uv run prek --all-files
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install workspace dependencies
+        run: uv sync --locked --all-packages --all-extras --dev
+
+      - name: Run tests
+        run: uv run pytest -q

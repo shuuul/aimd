@@ -7,6 +7,12 @@
   <a href="https://docs.astral.sh/uv/">
     <img src="https://img.shields.io/badge/uv-workspace-654FF0?logo=uv&logoColor=white" alt="uv workspace">
   </a>
+  <a href="https://github.com/shuuul/aimd/actions/workflows/ci.yml">
+    <img src="https://github.com/shuuul/aimd/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="https://github.com/shuuul/aimd/actions/workflows/release.yml">
+    <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
+  </a>
   <a href="https://github.com/shuuul/aimd/releases">
     <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version 0.9.0">
   </a>
