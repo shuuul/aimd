@@ -1,6 +1,7 @@
 """Simple platform backend selection for ASR (no heavy preflight dicts)."""
 
 import platform
+import shutil
 
 from aimd.core.errors import BackendUnavailableError
 
@@ -22,6 +23,10 @@ def _cuda_available() -> bool:
         return False
 
 
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
 def select_transcription_backend() -> str:
     """Select transcription backend or raise clear error. Let actual libs fail for details."""
     system = platform.system()
@@ -33,10 +38,9 @@ def select_transcription_backend() -> str:
         )
     else:
         has_torch = _module_available("torch")
-        has_torchaudio = _module_available("torchaudio")
         has_transformers = _module_available("transformers")
-        if has_torch and has_torchaudio and has_transformers and _cuda_available():
+        if has_torch and has_transformers and _cuda_available() and _ffmpeg_available():
             return "transformers"
         raise BackendUnavailableError(
-            "Transformers ASR backend requires torch, torchaudio, transformers and CUDA."
+            "Transformers ASR backend requires torch, transformers, ffmpeg and CUDA."
         )

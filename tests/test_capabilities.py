@@ -18,12 +18,13 @@ def test_select_prefers_transformers_on_linux_cuda(monkeypatch):
     monkeypatch.setattr("platform.system", lambda: "Linux")
 
     def fake_available(name):
-        return name in ("torch", "torchaudio", "transformers")
+        return name in ("torch", "transformers")
 
     monkeypatch.setattr(
         "aimd.plugins.asr.capabilities._module_available", fake_available
     )
     monkeypatch.setattr("aimd.plugins.asr.capabilities._cuda_available", lambda: True)
+    monkeypatch.setattr("aimd.plugins.asr.capabilities._ffmpeg_available", lambda: True)
     assert select_transcription_backend() == "transformers"
 
 
@@ -31,9 +32,10 @@ def test_select_prefers_transformers_on_windows_cuda(monkeypatch):
     monkeypatch.setattr("platform.system", lambda: "Windows")
     monkeypatch.setattr(
         "aimd.plugins.asr.capabilities._module_available",
-        lambda name: name in ("torch", "torchaudio", "transformers"),
+        lambda name: name in ("torch", "transformers"),
     )
     monkeypatch.setattr("aimd.plugins.asr.capabilities._cuda_available", lambda: True)
+    monkeypatch.setattr("aimd.plugins.asr.capabilities._ffmpeg_available", lambda: True)
     assert select_transcription_backend() == "transformers"
 
 

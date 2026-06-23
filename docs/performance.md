@@ -19,19 +19,39 @@ This document records practical performance expectations for `aimd` processing p
 |------|--------|--------------|------------------------------|
 | Transcription | `mlx` | Quantized Qwen3-ASR | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
 | Transcription | `mlx` | Whisper, Distil-Whisper, Parakeet, Nemotron, Voxtral, VibeVoice, Qwen2-Audio | Performance is delegated to `mlx-audio`; model size and upstream generation behavior dominate. |
-| Transcription | `transformers` | Qwen3-ASR | Requires CUDA on a non-Darwin platform. Uses local Hugging Face Transformers generation; no vLLM/SGLang runtime. The 0.6B model is the lower-memory option; 1.7B is the default quality-oriented option. |
+| Transcription | `transformers` | Qwen3-ASR | Default on CUDA-capable non-Darwin platforms and explicit opt-in on macOS/MPS when a `Qwen/Qwen3-ASR-*` model ID is provided. Uses AIMD's local Transformers 5.x Qwen3-ASR implementation; no `qwen-asr`, vLLM, or SGLang runtime. The 0.6B model is the lower-memory option; 1.7B is the default quality-oriented CUDA option. |
 | OCR | `mlx-vlm` | GLM-OCR or explicit mlx-vlm compatible VLMs | macOS VLM OCR path. Heavier than classic detector/recognizer OCR but avoids a separate OCR wrapper layer. |
 | OCR | `transformers` | GOT-OCR | Default Linux/CUDA OCR path; uses a generic Transformers image-text generation flow. |
 | OCR | `transformers` | Unlimited-OCR | Linux/CUDA VLM OCR path using Baidu's custom `infer`/`infer_multi` API and trusted remote code. Results are read from the model's saved output files. |
 | OCR | `transformers` | GLM-OCR or explicit Hugging Face image-text models | Linux/CUDA VLM OCR path; availability depends on upstream model-code requirements and compatible Transformers/runtime versions. |
 
+## Apple Silicon ASR comparison
+
+MPS can run Qwen3-ASR through AIMD's local Transformers 5.x backend, but macOS still defaults to MLX. In our smoke/latency checks, the MPS path was viable and useful as an explicit `Qwen/Qwen3-ASR-*` opt-in, but the quantized MLX models remained the better default for Apple Silicon because they are simpler to maintain, smaller, and at least as fast in warm-cache runs.
+
+Input shapes differed slightly between runs, so treat these as practical observations rather than a strict leaderboard.
+
+| Date | Hardware/runtime | Backend/model | Input | Warm latency | Memory observation | Result / decision |
+|------|------------------|---------------|-------|--------------|--------------------|-------------------|
+| 2026-06-23 | Apple Silicon, macOS, MLX | `mlx-community/Qwen3-ASR-0.6B-4bit` | 7.24s generated Chinese WAV | ~0.18s | MLX peak ~1.46 GB | Fastest/lower-memory observed Qwen3-ASR path; suitable Apple Silicon opt-in for lower-memory MLX use. |
+| 2026-06-23 | Apple Silicon, macOS, MLX | `mlx-community/Qwen3-ASR-1.7B-4bit` | 7.24s generated Chinese WAV | ~0.39s | MLX peak ~2.5 GB | Balanced default-quality Apple Silicon path; macOS default remains MLX. |
+| 2026-06-23 | Apple Silicon, macOS, MLX | `mlx-community/Qwen3-ASR-1.7B-8bit` | 7.24s generated Chinese WAV | ~0.56s | MLX peak ~3.32 GB | Higher memory and slower than 4-bit in this smoke. |
+| 2026-06-23 | Apple Silicon, macOS, Transformers 5.12.1 / MPS | `Qwen/Qwen3-ASR-0.6B` | generated Chinese WAV | ~0.25s after local SDPA + KV-cache adaptation on a short smoke; earlier 7.24s run was ~0.45s | MPS allocated ~1.5 GB in earlier run | MPS works and is useful for explicit Transformers validation, but it does not replace MLX as the macOS default. |
+
+Operational policy from these measurements:
+
+- macOS Apple Silicon automatic transcription backend remains `mlx`.
+- Passing `--model Qwen/Qwen3-ASR-0.6B` or `--model Qwen/Qwen3-ASR-1.7B` explicitly opts into the local Transformers backend, including on MPS.
+- Dependency upgrades that affect Transformers should run the opt-in Qwen3-ASR integration smoke below before release.
+
 ## Current smoke-test record
 
-The following is a functional smoke test, not a benchmark. It verifies that the CUDA path can load and execute a model in the development environment.
+The following are functional smoke tests, not benchmarks. They verify that heavyweight model paths can load and execute in development environments.
 
 | Date | Hardware | Command/path | Input | Observed result |
 |------|----------|--------------|-------|-----------------|
 | 2026-06-22 | NVIDIA GeForce RTX 5090, Linux/WSL2 | `process_ocr(..., model="unlimited_ocr")` | Generated 512×160 PNG containing `Hello OCR 123` | Returned `HelloOCR 123` after first loading `baidu/Unlimited-OCR`. |
+| 2026-06-23 | Apple Silicon, macOS, Transformers 5.12.1 / MPS | `transcribe_file(..., model="Qwen/Qwen3-ASR-0.6B", language="zh")` | Generated short Chinese WAV | Returned non-empty Chinese text through AIMD's local Qwen3-ASR Transformers backend with SDPA and KV cache enabled. |
 
 ## Measurement guidance
 
@@ -51,3 +71,14 @@ A minimal local timing harness can wrap the public CLI:
 ```
 
 For API/MCP model-reuse measurements, start the server once and send repeated requests against the same process.
+
+## Dependency-upgrade smoke tests
+
+Qwen3-ASR support vendors the model architecture locally and targets Transformers 5.x. Before upgrading Transformers, run the normal tests and the opt-in real inference smoke:
+
+```bash
+uv run pytest -q tests/test_transformers_asr.py tests/test_capabilities.py
+AIMD_RUN_QWEN3_ASR_INTEGRATION=1 uv run pytest -q tests/test_transformers_asr.py -k real_inference_smoke
+```
+
+Set `AIMD_QWEN3_ASR_TEST_AUDIO=/path/to/audio.wav` to use a fixed local audio fixture; otherwise the macOS smoke creates a short synthetic speech file with `say` and `ffmpeg`.

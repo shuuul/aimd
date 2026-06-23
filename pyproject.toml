@@ -24,7 +24,6 @@ dependencies = [
     "rich>=13.9.4",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "torch>=2.9.1",
-    "torchaudio>=2.9.1",
     "torchvision>=0.27.1",
     "transformers>=4.57",
     "typer>=0.20.0",
@@ -73,10 +72,6 @@ dev = [
 torch = [
     { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" }
 ]
-torchaudio = [
-    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" }
-]
-
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"

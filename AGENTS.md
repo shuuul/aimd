@@ -169,6 +169,24 @@ uv run prek --all-files
 
 If `prek` modifies files, review the diff, stage the updates, and run `uv run prek --all-files` again before committing.
 
+Use Conventional Commits so release-please can generate changelog entries and select the next version automatically:
+
+```text
+feat(asr): add local Qwen3-ASR Transformers backend
+fix(url): preserve subtitle fallback errors
+perf(asr): enable KV cache for MPS inference
+docs(performance): record Apple Silicon ASR results
+chore(deps): remove unused audio dependency
+```
+
+Common release-impacting types:
+
+- `feat(...)`: appears under features and triggers a minor release.
+- `fix(...)`: appears under fixes and triggers a patch release.
+- `perf(...)`: appears under performance improvements and generally triggers a patch release.
+- `docs(...)`, `test(...)`, `chore(...)`, `refactor(...)`: use for non-user-facing maintenance; they may appear in the release PR depending on release-please grouping but should not be used for product changes.
+- Breaking changes: add `!` after the type/scope, such as `feat(api)!: change process response`, and include a `BREAKING CHANGE:` footer.
+
 ## DAILY MAINTENANCE / RELEASE CHECKLIST
 
 ```bash
@@ -189,10 +207,19 @@ uv run prek --all-files
 uv run pytest -q
 ```
 
-For version bumps:
+Release automation:
+
+- Commits to `main` run release-please, which creates or updates a release PR.
+- The release PR updates `CHANGELOG.md`, `pyproject.toml`, and `.release-please-manifest.json`.
+- Before merging a release PR, run `uv lock` locally if `pyproject.toml` changed the project version, commit the resulting `uv.lock` update into the release PR, then run `uv run prek --all-files` and `uv run pytest -q`.
+- Review and merge the release PR to create the GitHub release/tag. Do not manually edit the generated changelog unless release notes need correction.
+- The existing tag-based release workflow builds distributions, smoke-installs them, attaches artifacts to the GitHub release, and publishes to PyPI.
+
+For manual version bumps outside release-please, prefer avoiding them. If needed:
 
 ```bash
 uv version --bump patch  # or minor/major
+uv lock
 ```
 
 ## PACKAGE / DEPENDENCY NOTES
@@ -204,7 +231,7 @@ uv version --bump patch  # or minor/major
 - MarkItDown plugin entry points: `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, `aimd.plugins.ocr`.
 - `aimd-tool[all]` installs API/MCP runtime dependencies.
 - Dev group includes API/MCP dependencies so tests run with `uv sync --dev`.
-- `torch`/`torchaudio` resolve from the PyTorch CPU wheel index on Darwin.
+- `torch` resolves from the PyTorch CPU wheel index on Darwin; ASR audio decoding uses ffmpeg directly.
 - `defuddle` is a Node/TypeScript package; `aimd.plugins.url` registers the opt-in readable HTML converter and wraps `npx defuddle parse` rather than vendoring Node code.
 - URL extraction supports Netscape cookie files, explicit browser cookie sources, and automatic browser-cookie probing when no cookie option is supplied. Invalid explicit cookie options should be reported directly.
 - URL transcript extraction should prefer subtitles, then audio transcription fallback; if both paths produce no text, treat it as a processing failure rather than a metadata-only success.

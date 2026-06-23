@@ -17,7 +17,7 @@ from logly import logger
 from aimd.core.errors import UnsupportedInputError
 
 from .capabilities import select_transcription_backend
-from .const import AUDIO_EXTENSIONS, VIDEO_FILE_EXTENSIONS
+from .const import AUDIO_EXTENSIONS, TRANSFORMERS_ASR_MODELS, VIDEO_FILE_EXTENSIONS
 from .models.base import ASRModel
 from .models.mlx import MLXAudioASRModel
 from .models.transformers import TransformersASRModel
@@ -50,7 +50,7 @@ async def transcribe_file(
     else:
         logger.info(f"Processing audio file: {file_path}")
 
-    backend = select_transcription_backend()
+    backend = _select_backend_for_model(model)
     logger.info(f"Using transcription backend: {backend}")
 
     asr_model: ASRModel
@@ -64,6 +64,13 @@ async def transcribe_file(
         language=language,
         temp_dir=temp_dir,
     )
+
+
+def _select_backend_for_model(model: str | None) -> str:
+    """Select ASR backend, honoring explicit Transformers Qwen3-ASR model IDs."""
+    if model in TRANSFORMERS_ASR_MODELS or (model or "").startswith("Qwen/Qwen3-ASR-"):
+        return "transformers"
+    return select_transcription_backend()
 
 
 def _transcribe_file_sync(

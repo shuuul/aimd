@@ -129,7 +129,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
 
   pypi-publish:
     name: Publish to PyPI

@@ -1,6 +1,9 @@
-"""Transformers ASR backend implementation for CUDA platforms."""
+"""Transformers ASR backend implementation for Qwen3-ASR."""
 
 import asyncio
+import shutil
+import subprocess
+import threading
 import warnings
 from pathlib import Path
 
@@ -43,6 +46,7 @@ LANGUAGE_CODE_TO_NAME = {
     "fi": "Finnish",
     "ms": "Malay",
 }
+QWEN3_ASR_PAD_TOKEN_ID = 151645
 
 
 class TransformersASRModel:
@@ -58,7 +62,7 @@ class TransformersASRModel:
         language: str | None = None,
         temp_dir: Path | None = None,
     ) -> str:
-        """Transcribe audio using Transformers ASR models (requires CUDA)."""
+        """Transcribe audio using Qwen3-ASR through local Transformers classes."""
         try:
             import torch  # type: ignore
         except ImportError:
@@ -66,22 +70,17 @@ class TransformersASRModel:
                 "PyTorch is not installed. Required for Transformers ASR backend."
             )
 
-        if not torch.cuda.is_available():
-            raise ProcessingFailedError(
-                "CUDA is not available. Transformers ASR backend requires a CUDA-capable GPU."
-            )
-
         try:
-            import torchaudio  # type: ignore[import-untyped]  # noqa: F401
             import transformers  # type: ignore[import-untyped]  # noqa: F401
         except ImportError:
             raise ProcessingFailedError(
-                "transformers and torchaudio are required for Transformers ASR backend."
+                "transformers is required for Transformers ASR backend."
             )
 
+        device = _select_device(torch)
         logger.info(
             "Transcribing with Qwen3-ASR model on Transformers backend: "
-            f"{self.model_id}, language: {language or 'auto'}"
+            f"{self.model_id}, device: {device}, language: {language or 'auto'}"
         )
 
         wav_path: Path | None = None
@@ -114,6 +113,9 @@ class TransformersASRModel:
 _cached_model = None
 _cached_processor = None
 _cached_model_name: str | None = None
+_cached_device: str | None = None
+_model_cache_lock = threading.Lock()
+_generation_lock = threading.Lock()
 
 
 def _resolve_language(language: str | None) -> str | None:
@@ -132,33 +134,65 @@ def _resolve_language(language: str | None) -> str | None:
     )
 
 
+def _select_device(torch) -> str:  # noqa: ANN001
+    """Select the best available PyTorch device for local Transformers ASR."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def _get_model_and_processor(model_name: str):
     """Load or return cached Qwen3-ASR Transformers model and processor."""
-    global _cached_model, _cached_processor, _cached_model_name  # noqa: PLW0603
-    if _cached_model is not None and _cached_model_name == model_name:
-        return _cached_model, _cached_processor
+    global _cached_model, _cached_processor, _cached_model_name, _cached_device  # noqa: PLW0603
 
     import torch
-    from transformers import AutoModel, AutoProcessor
 
-    dtype = (
-        torch.bfloat16
-        if getattr(torch.cuda, "is_bf16_supported", lambda: False)()
-        else torch.float16
-    )
-    _cached_processor = AutoProcessor.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        fix_mistral_regex=True,
-    )
-    _cached_model = AutoModel.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        dtype=dtype,
-    ).to("cuda")
-    _ensure_pad_token(_cached_model)
-    _cached_model_name = model_name
-    return _cached_model, _cached_processor
+    device = _select_device(torch)
+    if (
+        _cached_model is not None
+        and _cached_model_name == model_name
+        and _cached_device == device
+    ):
+        return _cached_model, _cached_processor
+
+    with _model_cache_lock:
+        if (
+            _cached_model is not None
+            and _cached_model_name == model_name
+            and _cached_device == device
+        ):
+            return _cached_model, _cached_processor
+
+        from transformers import AutoModel, AutoProcessor
+
+        from aimd.plugins.asr.qwen3_asr_transformers import (
+            register_qwen3_asr_transformers,
+        )
+
+        register_qwen3_asr_transformers()
+        dtype = (
+            torch.bfloat16
+            if device == "cuda"
+            and getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+            else torch.float16
+            if device in {"cuda", "mps"}
+            else torch.float32
+        )
+        _cached_processor = AutoProcessor.from_pretrained(
+            model_name,
+            fix_mistral_regex=True,
+        )
+        _cached_model = AutoModel.from_pretrained(
+            model_name,
+            dtype=dtype,
+        ).to(device)
+        _cached_model.eval()
+        _ensure_pad_token(_cached_model)
+        _cached_model_name = model_name
+        _cached_device = device
+        return _cached_model, _cached_processor
 
 
 def _ensure_pad_token(model: object) -> None:
@@ -167,13 +201,16 @@ def _ensure_pad_token(model: object) -> None:
     Avoids the per-call `Setting pad_token_id to eos_token_id` log line
     transformers prints during open-ended generation when a pad token is unset.
     """
-    inner = getattr(model, "model", model)
-    gen_config = getattr(inner, "generation_config", None)
-    if gen_config is None:
-        return
-    eos = getattr(gen_config, "eos_token_id", None)
-    if eos is not None and getattr(gen_config, "pad_token_id", None) is None:
-        gen_config.pad_token_id = eos[0] if isinstance(eos, (list, tuple)) else eos
+    candidates = [model, getattr(model, "thinker", None), getattr(model, "model", None)]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        gen_config = getattr(candidate, "generation_config", None)
+        if gen_config is None:
+            continue
+        eos = getattr(gen_config, "eos_token_id", None)
+        if eos is not None and getattr(gen_config, "pad_token_id", None) is None:
+            gen_config.pad_token_id = eos[0] if isinstance(eos, (list, tuple)) else eos
 
 
 def _model_device_and_dtype(model: object):
@@ -203,16 +240,39 @@ def _inputs_to_model_device(inputs, model: object):
 
 def _load_audio_array(audio_path: Path):
     """Load a mono 16 kHz float32 waveform for Qwen3-ASR processor input."""
-    import torchaudio
-    import torchaudio.functional as F
+    import numpy as np
 
-    waveform, sample_rate = torchaudio.load(audio_path)
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    if sample_rate != 16000:
-        waveform = F.resample(waveform, sample_rate, 16000)
-    waveform = waveform.squeeze(0).clamp(-1, 1).float()
-    return waveform.cpu().numpy()
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ProcessingFailedError(
+            "Qwen3-ASR audio loading requires ffmpeg to produce 16 kHz mono PCM."
+        )
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(audio_path),
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-f",
+            "f32le",
+            "-",
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ProcessingFailedError(
+            f"ffmpeg audio decode failed: {result.stderr.decode(errors='replace')}"
+        )
+    audio = np.frombuffer(result.stdout, dtype=np.float32)
+    if audio.size == 0:
+        raise ProcessingFailedError("Decoded audio is empty")
+    return np.clip(audio, -1.0, 1.0)
 
 
 def _build_prompt(processor: object, language: str | None) -> str:
@@ -259,8 +319,12 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
     inputs = _inputs_to_model_device(inputs, asr_model)
     input_ids = inputs["input_ids"]
 
-    with torch.no_grad():
-        generated = asr_model.generate(**inputs, max_new_tokens=4096)
+    with _generation_lock, torch.no_grad():
+        generated = asr_model.generate(
+            **inputs,
+            max_new_tokens=4096,
+            pad_token_id=QWEN3_ASR_PAD_TOKEN_ID,
+        )
 
     generated_ids = getattr(generated, "sequences", generated)
     decoded = processor.batch_decode(
