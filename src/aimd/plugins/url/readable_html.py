@@ -1,4 +1,4 @@
-"""Small Python wrapper around the Defuddle CLI.
+"""Readable HTML extraction through the Defuddle CLI.
 
 Defuddle is distributed as a Node/TypeScript package. This wrapper keeps the
 Python package boundary explicit and invokes ``npx defuddle`` when callers opt

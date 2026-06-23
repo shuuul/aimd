@@ -1,15 +1,16 @@
-"""URL processing orchestration."""
+"""URL transcript processing orchestration."""
 
 from dataclasses import dataclass
 from pathlib import Path
 
 from logly import logger
 
-from .errors import ProcessingFailedError, UnsupportedInputError
-from .audio_download import extract_content_from_audio
-from .formatter import detect_platform, format_content, strip_subtitle_formatting
+from ..errors import ProcessingFailedError, UnsupportedInputError
+from .audio_fallback import extract_content_from_audio
+from .markdown import format_content, strip_subtitle_formatting
+from .platforms import detect_platform
 from .subtitles import extract_subtitles
-from .video_info import extract_video_info
+from .metadata import extract_video_info
 
 
 @dataclass(slots=True)

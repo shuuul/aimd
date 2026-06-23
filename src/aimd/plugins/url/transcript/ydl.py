@@ -1,4 +1,4 @@
-"""yt-dlp client construction helpers."""
+"""yt-dlp client construction for URL transcript extraction."""
 
 from functools import lru_cache
 from typing import Any

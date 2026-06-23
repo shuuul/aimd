@@ -12,7 +12,7 @@ The `aimd` package uses MarkItDown as the URL/local-file conversion contract and
 - `aimd.interfaces.cli`: Typer CLI interface (`aimd.interfaces.cli:main`).
 - `aimd.interfaces.api`: FastAPI-backed HTTP API module (`aimd.interfaces.api:main`).
 - `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
-- `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction.
+- `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Transcript internals live under `aimd.plugins.url.transcript`; readable HTML extraction lives in `aimd.plugins.url.readable_html`.
 - `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, ASR model validation, and platform backend selection.
 - `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents. EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
 - `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs, with `mlx-vlm` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.

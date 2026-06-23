@@ -140,7 +140,7 @@ aimd scan.pdf --start 0 --end 2 --output scan-pages.md
 OCR backend selection is automatic based on the current platform:
 
 ```bash
-aimd scan.pdf --model paddleocr_v6 --output scan.md       # macOS Apple Silicon
+aimd scan.pdf --model glm_ocr --output scan.md            # macOS Apple Silicon
 aimd scan.pdf --model got_ocr --output scan.md            # Linux/CUDA
 aimd scan.pdf --model unlimited_ocr --output scan.md      # Linux/CUDA
 ```

@@ -1,11 +1,11 @@
-"""Video metadata extraction for URL processing."""
+"""Media metadata extraction for URL transcript processing."""
 
 import asyncio
 from typing import Any
 
 from logly import logger
 
-from .errors import ProcessingFailedError, UnsupportedInputError
+from ..errors import ProcessingFailedError, UnsupportedInputError
 from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
@@ -14,7 +14,7 @@ from .cookies import (
     is_keyring_error,
     is_unsupported_url_error,
 )
-from .ydl_client import create_info_ydl
+from .ydl import create_info_ydl
 
 
 async def extract_video_info(

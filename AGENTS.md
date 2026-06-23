@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-22
-**Version:** 0.10.0
+**Generated:** 2026-06-23
+**Version:** 0.12.0
 **Branch:** main
 
 ## OVERVIEW
@@ -56,7 +56,7 @@ flowchart TD
 
     URLPlugin["aimd.plugins.url MarkItDown plugin\nURL transcript + Defuddle HTML"]
     ASRPlugin["aimd.plugins.asr MarkItDown plugin\nlocal audio/video transcription"]
-    ASR["aimd.plugins.asr engines\nmlx/qwen preflight + transcription"]
+    ASR["aimd.plugins.asr engines\nmlx/transformers preflight + transcription"]
     DocPlugin["aimd.plugins.doc MarkItDown plugin\nPandoc docs + EPUB assets"]
     OCRPlugin["aimd.plugins.ocr MarkItDown plugin\nimages/scanned PDFs"]
     MarkItDown["MarkItDown\nbuilt-ins + markitdown.plugin entry points"]
@@ -86,12 +86,12 @@ flowchart TD
 | Input routing | `src/aimd/core/router.py` | Maps source_kind + task_type into an `InputRoute`. |
 | Core processing | `src/aimd/core/process.py` | Sends URL and local-file work through MarkItDown and wraps Markdown into `TextContext`. |
 | Local file conversion | `src/aimd/core/process.py` | Calls `MarkItDown(enable_plugins=True)` and wraps Markdown into `TextContext`. |
-| URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in Defuddle readable HTML extraction. |
+| URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in readable HTML extraction. Transcript internals live under `src/aimd/plugins/url/transcript/`; Defuddle wrapping lives in `readable_html.py`. |
 | Request/result models | `src/aimd/core/models.py` | `ProcessInput`, `ProcessResult`, `TaskType`; output files are interface-owned. |
 | Output persistence | `src/aimd/interfaces/output.py` | Shared CLI/API/MCP markdown persistence helpers. |
 | CLI | `src/aimd/interfaces/cli/app.py` | Typer command, user output, local file persistence. |
-| HTTP API | `src/aimd/interfaces/api/app.py` | `/healthz`, `/v1/engines`, `/v1/process`. |
-| MCP server | `src/aimd/interfaces/mcp/app.py` | `healthz`, `list_engines`, `process_input`. |
+| HTTP API | `src/aimd/interfaces/api/app.py` | `/healthz`, `/v1/process`. |
+| MCP server | `src/aimd/interfaces/mcp/app.py` | `healthz`, `process_input`. |
 | Engine preflight | `src/aimd/plugins/asr/capabilities.py` | Audio engine availability and auto-resolution. |
 | ASR processing | `src/aimd/plugins/asr/` | MarkItDown plugin for local audio/video transcription, model validation, ffmpeg transcoding. |
 | Markdown shaping | `src/aimd/core/process.py` | Chunking and title extraction for MarkItDown/URL output. |
@@ -105,7 +105,7 @@ flowchart TD
 - **Route model**: classify inputs with `InputRoute(source_kind, task_type)`; `source_kind` is the supplied input kind, `task_type` selects processing logic.
 - **MarkItDown contract**: URL and local-file conversion go through `MarkItDown(enable_plugins=True)`; bundled feature modules register MarkItDown plugins.
 - **Output ownership**: `output_file` belongs to CLI/API/MCP interfaces, not `ProcessInput` or `ProcessResult`; use `aimd.interfaces.output` for shared persistence.
-- **Fail-fast preflight**: validate selected engines before expensive work.
+- **Fail-fast preflight**: validate platform-selected backends and requested models before expensive work.
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.
 - **Stable output contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
 - **URL cookie behavior**: keep automatic browser-cookie probing when no explicit cookie option is supplied; it is intentional user convenience for restricted media. Explicit cookie arguments should fail fast when invalid, and URL transcript/audio fallback failures should not be hidden behind metadata-only success results.
@@ -146,14 +146,16 @@ uv build
 aimd audio.mp3
 aimd "https://youtube.com/..."
 aimd document.epub
-aimd audio.mp3 --engine mlx --model mlx-community/parakeet-tdt-0.6b-v3
+aimd audio.mp3 --model mlx-community/parakeet-tdt-0.6b-v3
 aimd "https://youtube.com/..." --cookies-from-browser chrome --raw-transcript
 aimd audio.mp3 --temp-dir ./tmp --log-level DEBUG
 
 # API
 aimd-api
 curl http://127.0.0.1:8000/healthz
-curl http://127.0.0.1:8000/v1/engines
+curl -X POST http://127.0.0.1:8000/v1/process \
+  -H 'content-type: application/json' \
+  -d '{"input_source":"audio.mp3"}'
 
 # MCP
 aimd-mcp

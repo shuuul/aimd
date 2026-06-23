@@ -4,18 +4,18 @@ from pathlib import Path
 import pytest
 
 from aimd.plugins.url.errors import ProcessingFailedError
-from aimd.plugins.url.audio_download import (
+from aimd.plugins.url.transcript.audio_fallback import (
     _try_download_with_format,
     download_audio,
 )
-from aimd.plugins.url.cookies import (
+from aimd.plugins.url.transcript.cookies import (
     build_cookie_sources,
     is_auth_required_error,
     parse_cookies_from_browser,
 )
-from aimd.plugins.url.video_info import extract_video_info
-from aimd.plugins.url.processor import get_text_from_url
-from aimd.plugins.url.subtitles import get_preferred_languages
+from aimd.plugins.url.transcript.metadata import extract_video_info
+from aimd.plugins.url.transcript.processor import get_text_from_url
+from aimd.plugins.url.transcript.subtitles import get_preferred_languages
 
 
 @pytest.mark.asyncio
@@ -36,10 +36,12 @@ async def test_get_text_from_url_extracts_info_once(monkeypatch) -> None:
         return "subtitle text"
 
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd.plugins.url.transcript.processor.extract_video_info",
+        _mock_extract_video_info,
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_subtitles", _mock_extract_subtitles
+        "aimd.plugins.url.transcript.processor.extract_subtitles",
+        _mock_extract_subtitles,
     )
 
     result = await get_text_from_url("https://example.com/video")
@@ -74,10 +76,12 @@ async def test_get_text_from_url_includes_detected_platform_in_output(
         return "subtitle text"
 
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd.plugins.url.transcript.processor.extract_video_info",
+        _mock_extract_video_info,
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_subtitles", _mock_extract_subtitles
+        "aimd.plugins.url.transcript.processor.extract_subtitles",
+        _mock_extract_subtitles,
     )
 
     result = await get_text_from_url("https://www.youtube.com/watch?v=test")
@@ -105,10 +109,12 @@ async def test_get_text_from_url_cookie_isolation(monkeypatch) -> None:
         return "subtitle text"
 
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd.plugins.url.transcript.processor.extract_video_info",
+        _mock_extract_video_info,
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_subtitles", _mock_extract_subtitles
+        "aimd.plugins.url.transcript.processor.extract_subtitles",
+        _mock_extract_subtitles,
     )
 
     await asyncio.gather(
@@ -193,7 +199,8 @@ async def test_auth_required_failure_surfaces_cookie_hint(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "aimd.plugins.url.processor.extract_video_info", _mock_extract_video_info
+        "aimd.plugins.url.transcript.processor.extract_video_info",
+        _mock_extract_video_info,
     )
 
     with pytest.raises(
@@ -222,7 +229,7 @@ async def test_extract_video_info_surfaces_cookie_hint_after_bilibili_412(
             raise RuntimeError("could not find firefox cookies database")
 
     monkeypatch.setattr(
-        "aimd.plugins.url.video_info.create_info_ydl",
+        "aimd.plugins.url.transcript.metadata.create_info_ydl",
         lambda *, platform, cookie_source: _FakeYDL(  # noqa: ARG005
             cookie_source["name"]
         ),
@@ -252,7 +259,7 @@ async def test_download_audio_prefers_audio_only_for_youtube(
         return out
 
     monkeypatch.setattr(
-        "aimd.plugins.url.audio_download._try_download_with_format",
+        "aimd.plugins.url.transcript.audio_fallback._try_download_with_format",
         _mock_try_download_with_format,
     )
 
@@ -283,7 +290,7 @@ async def test_download_audio_prefers_audio_only_for_bilibili(
         return out
 
     monkeypatch.setattr(
-        "aimd.plugins.url.audio_download._try_download_with_format",
+        "aimd.plugins.url.transcript.audio_fallback._try_download_with_format",
         _mock_try_download_with_format,
     )
 
@@ -319,14 +326,16 @@ async def test_download_with_format_only_adds_postprocessor_when_codec_requested
             Path(f"{self.opts['outtmpl']}.webm").write_text("x", encoding="utf-8")
 
     monkeypatch.setattr(
-        "aimd.plugins.url.audio_download.build_cookie_sources",
+        "aimd.plugins.url.transcript.audio_fallback.build_cookie_sources",
         lambda **kwargs: [{"name": "no-cookie", "use_cookies": False}],
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.audio_download.impersonation_available",
+        "aimd.plugins.url.transcript.audio_fallback.impersonation_available",
         lambda: False,
     )
-    monkeypatch.setattr("aimd.plugins.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL)
+    monkeypatch.setattr(
+        "aimd.plugins.url.transcript.audio_fallback.yt_dlp.YoutubeDL", _FakeYDL
+    )
 
     result_no_codec = await _try_download_with_format(
         url="https://example.com/video",
@@ -376,7 +385,7 @@ async def test_download_with_format_surfaces_cookie_hint_after_bilibili_412(
             raise RuntimeError("could not find firefox cookies database")
 
     monkeypatch.setattr(
-        "aimd.plugins.url.audio_download.build_cookie_sources",
+        "aimd.plugins.url.transcript.audio_fallback.build_cookie_sources",
         lambda **kwargs: [  # noqa: ARG005
             {
                 "name": "cookiesfrombrowser:chrome:default",
@@ -393,10 +402,12 @@ async def test_download_with_format_surfaces_cookie_hint_after_bilibili_412(
         ],
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.audio_download.impersonation_available",
+        "aimd.plugins.url.transcript.audio_fallback.impersonation_available",
         lambda: False,
     )
-    monkeypatch.setattr("aimd.plugins.url.audio_download.yt_dlp.YoutubeDL", _FakeYDL)
+    monkeypatch.setattr(
+        "aimd.plugins.url.transcript.audio_fallback.yt_dlp.YoutubeDL", _FakeYDL
+    )
 
     with pytest.raises(
         ProcessingFailedError, match="Authenticated cookies are required"

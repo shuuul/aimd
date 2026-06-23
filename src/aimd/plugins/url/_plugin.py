@@ -13,8 +13,8 @@ from markitdown import (
     StreamInfo,
 )
 
-from .defuddle import extract_html_with_defuddle
-from .processor import get_text_from_url
+from .readable_html import extract_html_with_defuddle
+from .transcript import get_text_from_url
 
 HTML_EXTENSIONS = {".html", ".htm"}
 

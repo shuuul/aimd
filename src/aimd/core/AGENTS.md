@@ -56,12 +56,12 @@ The `raw_transcript` field on `ProcessInput` (default `False`) controls this:
 - **MCP**: `raw_transcript` parameter on `process_input` tool
 
 The stripping is performed by `strip_subtitle_formatting()` in
-`aimd.plugins.url.formatter`, applied in `aimd.plugins.url.processor` before
+`aimd.plugins.url.transcript.markdown`, applied in `aimd.plugins.url.transcript.processor` before
 `format_content()` embeds the text into the markdown output.
 
 ## TRANSCRIPTION MODELS
 
 - Backend selection is platform-driven and not user-configurable.
 - The MLX backend is implemented in `aimd.plugins.asr.models.mlx` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
-- The Qwen backend is implemented in `aimd.plugins.asr.models.qwen` and uses a direct Transformers backend on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
+- The Transformers ASR backend is implemented in `aimd.plugins.asr.models.transformers` and uses Qwen3-ASR on Linux/CUDA with `Qwen/Qwen3-ASR-1.7B` default and `Qwen/Qwen3-ASR-0.6B` as the lower-memory option.
 - mlx Qwen3-ASR defaults omitted language to `Chinese`; other mlx-audio STT models stay on their own default/auto language behavior.

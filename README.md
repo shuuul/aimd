@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.10.2-blue" alt="Version 0.10.2">
+    <img src="https://img.shields.io/badge/version-0.12.0-blue" alt="Version 0.12.0">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -308,8 +308,8 @@ Release a tagged version:
 
 ```bash
 # Make sure the package version matches the tag, then push a v-prefixed tag.
-git tag v0.10.0
-git push origin v0.10.0
+git tag v0.12.0
+git push origin v0.12.0
 ```
 
 The release workflow builds the single `aimd-tool` distribution, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes that distribution to PyPI using the `UV_PUBLISH_TOKEN` repository secret.

@@ -5,12 +5,28 @@ from collections.abc import Iterable
 
 from logly import logger
 
-from .const import (
-    CHINESE_SUBTITLE_LANGUAGES,
-    ENGLISH_SUBTITLE_LANGUAGES,
-    FORBIDDEN_SUBTITLE_LANGUAGES,
-)
-from .ydl_client import create_subtitle_ydl
+from .ydl import create_subtitle_ydl
+
+ENGLISH_SUBTITLE_LANGUAGES = [
+    "en-orig",
+    "en",
+    "en-US",
+    "en-GB",
+    "ai-en",
+]
+
+CHINESE_SUBTITLE_LANGUAGES = [
+    "zh-orig",
+    "zh-Hans",
+    "zh-Hant",
+    "zh-CN",
+    "zh",
+    "ai-zh",
+    "zh-TW",
+    "zh-HK",
+]
+
+FORBIDDEN_SUBTITLE_LANGUAGES = ["danmaku"]
 
 
 def _is_original_language(lang: str) -> bool:

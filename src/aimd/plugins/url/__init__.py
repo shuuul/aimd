@@ -6,8 +6,8 @@ from ._plugin import (
     __plugin_interface_version__,
     register_converters,
 )
-from .formatter import detect_platform
 from .router import is_url
+from .transcript import detect_platform
 
 __all__ = [
     "AimdReadableHtmlConverter",

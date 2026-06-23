@@ -1,4 +1,4 @@
-"""Audio fallback download and transcription for URL processing."""
+"""Audio fallback download and transcription for URL transcripts."""
 
 import asyncio
 import tempfile
@@ -10,7 +10,7 @@ from logly import logger
 
 from aimd.plugins.asr import transcribe_file
 
-from .errors import ProcessingFailedError
+from ..errors import ProcessingFailedError
 from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
@@ -18,8 +18,8 @@ from .cookies import (
     is_cookie_source_unavailable_error,
     is_keyring_error,
 )
-from .formatter import detect_platform
-from .ydl_client import apply_cookie_source, impersonation_available
+from .platforms import detect_platform
+from .ydl import apply_cookie_source, impersonation_available
 
 
 _MAX_FILENAME_BYTES = 200

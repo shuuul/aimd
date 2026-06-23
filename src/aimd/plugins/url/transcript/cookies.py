@@ -1,4 +1,4 @@
-"""Cookie-source parsing and auth-related URL extraction helpers."""
+"""Cookie-source parsing and auth-related transcript helpers."""
 
 from typing import Any
 
