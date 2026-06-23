@@ -34,7 +34,7 @@ def test_asr_plugin_converts_audio_with_markitdown(
         return "transcript text"
 
     monkeypatch.setattr(
-        "aimd.plugins.asr._plugin.transcribe_file_sync", _transcribe_file_sync
+        "aimd.plugins.asr._plugin._transcribe_file_sync", _transcribe_file_sync
     )
 
     result = MarkItDown(enable_plugins=True).convert(

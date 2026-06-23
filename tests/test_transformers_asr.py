@@ -1,4 +1,4 @@
-from aimd.plugins.asr.models.qwen import (
+from aimd.plugins.asr.models.transformers import (
     _parse_qwen_output,
     _resolve_language,
 )

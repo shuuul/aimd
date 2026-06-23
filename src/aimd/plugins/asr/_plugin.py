@@ -2,21 +2,39 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, BinaryIO
 
 from markitdown import (
     DocumentConverter,
     DocumentConverterResult,
-    FailedConversionAttempt,
     MarkItDown,
     StreamInfo,
 )
 
 from .const import AUDIO_EXTENSIONS
-from .processor import transcribe_file_sync
+from .processor import transcribe_file
 
 __plugin_interface_version__ = 1
+
+
+def _transcribe_file_sync(
+    file_path: Path,
+    *,
+    language: str | None = None,
+    model: str | None = None,
+    temp_dir: Path | None = None,
+) -> str:
+    """Synchronous MarkItDown boundary for ASR transcription."""
+    return asyncio.run(
+        transcribe_file(
+            file_path,
+            language=language,
+            model=model,
+            temp_dir=temp_dir,
+        )
+    )
 
 
 def register_converters(markitdown: MarkItDown, **kwargs: Any) -> None:
@@ -33,8 +51,7 @@ class AimdASRConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> bool:
-        extension = (stream_info.extension or "").lower()
-        return extension in AUDIO_EXTENSIONS
+        return (stream_info.extension or "").lower() in AUDIO_EXTENSIONS
 
     def convert(
         self,
@@ -42,19 +59,13 @@ class AimdASRConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> DocumentConverterResult:
-        if not stream_info.local_path:
-            raise FailedConversionAttempt("aimd.plugins.asr requires a local file path")
-
         input_path = Path(stream_info.local_path)
-        try:
-            transcript = transcribe_file_sync(
-                input_path,
-                language=kwargs.get("language"),
-                model=kwargs.get("model"),
-                temp_dir=kwargs.get("temp_dir"),
-            )
-        except Exception as exc:
-            raise FailedConversionAttempt(f"ASR conversion failed: {exc}") from exc
+        transcript = _transcribe_file_sync(
+            input_path,
+            language=kwargs.get("language"),
+            model=kwargs.get("model"),
+            temp_dir=kwargs.get("temp_dir"),
+        )
 
         return DocumentConverterResult(
             title=input_path.stem,

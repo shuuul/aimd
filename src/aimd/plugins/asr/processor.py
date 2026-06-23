@@ -1,15 +1,14 @@
 """Audio/video transcription orchestration."""
 
-import asyncio
 from pathlib import Path
 
 from logly import logger
 
 from .capabilities import select_transcription_backend
-from .const import AUDIO_EXTENSIONS
+from .const import AUDIO_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 from .errors import ProcessingFailedError, UnsupportedInputError
 from .models.mlx import transcribe_audio_mlx
-from .models.qwen import transcribe_audio_qwen
+from .models.transformers import transcribe_audio_transformers
 
 
 async def transcribe_file(
@@ -31,8 +30,7 @@ async def transcribe_file(
             f"Supported formats: {', '.join(sorted(AUDIO_EXTENSIONS))}"
         )
 
-    video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".ts", ".m4v"}
-    is_video = file_ext in video_extensions
+    is_video = file_ext in VIDEO_FILE_EXTENSIONS
     if is_video:
         logger.info(f"Processing video file: {file_path} (audio will be extracted)")
     else:
@@ -49,15 +47,13 @@ async def transcribe_file(
                 language=language,
                 temp_dir=temp_dir,
             )
-        elif backend == "qwen":
-            transcribed_text = await transcribe_audio_qwen(
+        else:
+            transcribed_text = await transcribe_audio_transformers(
                 file_path,
                 model=model,
                 language=language,
                 temp_dir=temp_dir,
             )
-        else:
-            raise UnsupportedInputError(f"Unsupported transcription backend: {backend}")
     except Exception as e:
         if isinstance(e, (UnsupportedInputError, ProcessingFailedError)):
             raise
@@ -70,20 +66,3 @@ async def transcribe_file(
         raise ProcessingFailedError(f"Transcription failed: {error_msg}") from e
 
     return transcribed_text
-
-
-def transcribe_file_sync(
-    file_path: str | Path,
-    language: str | None = None,
-    model: str | None = None,
-    temp_dir: Path | None = None,
-) -> str:
-    """Synchronous MarkItDown boundary for ASR transcription."""
-    return asyncio.run(
-        transcribe_file(
-            file_path,
-            language=language,
-            model=model,
-            temp_dir=temp_dir,
-        )
-    )

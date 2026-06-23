@@ -15,6 +15,7 @@ class BackendCapability:
     available: bool
     reason: str | None = None
     fix_hint: str | None = None
+    runtime: str | None = None
     deprecated: bool = False
 
 
@@ -58,36 +59,38 @@ def get_backend_capabilities() -> dict[str, BackendCapability]:
         available=mlx_available,
         reason=mlx_reason,
         fix_hint=None if mlx_available else "Install dependency: mlx-audio",
+        runtime="mlx",
     )
 
-    qwen_available = (
+    transformers_available = (
         is_linux
         and has_torch
         and has_torchaudio
         and has_transformers
         and torch_cuda_available
     )
-    qwen_reason = None
+    transformers_reason = None
     if not is_linux:
-        qwen_reason = "qwen backend is only supported on Linux."
+        transformers_reason = "Transformers ASR is only supported on Linux."
     elif not has_torch:
-        qwen_reason = "torch module is not installed."
+        transformers_reason = "torch module is not installed."
     elif not has_torchaudio:
-        qwen_reason = "torchaudio module is not installed."
+        transformers_reason = "torchaudio module is not installed."
     elif not has_transformers:
-        qwen_reason = "transformers module is not installed."
+        transformers_reason = "transformers module is not installed."
     elif not torch_cuda_available:
-        qwen_reason = "CUDA is not available in the current PyTorch runtime."
+        transformers_reason = "CUDA is not available in the current PyTorch runtime."
 
-    capabilities["qwen"] = BackendCapability(
-        name="qwen",
-        available=qwen_available,
-        reason=qwen_reason,
+    capabilities["transformers"] = BackendCapability(
+        name="transformers",
+        available=transformers_available,
+        reason=transformers_reason,
         fix_hint=(
             None
-            if qwen_available
+            if transformers_available
             else "Install dependencies: torch, torchaudio, transformers (Linux + CUDA required)"
         ),
+        runtime="cuda",
     )
 
     return capabilities
@@ -99,7 +102,7 @@ def select_transcription_backend() -> str:
     if platform.system() == "Darwin":
         priority = ("mlx",)
     else:
-        priority = ("qwen",)
+        priority = ("transformers",)
 
     for candidate in priority:
         if capabilities[candidate].available:

@@ -23,15 +23,15 @@ def _patch_capabilities(
             "Linux",
             {
                 "mlx": BackendCapability("mlx", False, "unsupported", None),
-                "qwen": BackendCapability("qwen", True, None, None),
+                "transformers": BackendCapability("transformers", True, None, None),
             },
-            "qwen",
+            "transformers",
         ),
         (
             "Darwin",
             {
                 "mlx": BackendCapability("mlx", True, None, None),
-                "qwen": BackendCapability("qwen", False, "linux only", None),
+                "transformers": BackendCapability("transformers", False, "linux only", None),
             },
             "mlx",
         ),
@@ -56,14 +56,14 @@ def test_select_transcription_backend_prefers_platform_backend(
             "Linux",
             {
                 "mlx": BackendCapability("mlx", False, "unsupported", None),
-                "qwen": BackendCapability("qwen", False, "no qwen", None),
+                "transformers": BackendCapability("transformers", False, "no transformers", None),
             },
         ),
         (
             "Darwin",
             {
                 "mlx": BackendCapability("mlx", False, "unsupported", None),
-                "qwen": BackendCapability("qwen", False, "linux only", None),
+                "transformers": BackendCapability("transformers", False, "linux only", None),
             },
         ),
     ],

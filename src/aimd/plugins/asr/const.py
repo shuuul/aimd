@@ -45,8 +45,12 @@ MLX_AUDIO_MODELS = {
     "mlx-community/Qwen2-Audio-7B-Instruct-4bit": "Qwen2-Audio 7B Instruct (4-bit)",
 }
 
-QWEN_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
+TRANSFORMERS_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
 QWEN_ASR_MODELS = {
     "Qwen/Qwen3-ASR-1.7B": "Qwen3-ASR 1.7B (default)",
     "Qwen/Qwen3-ASR-0.6B": "Qwen3-ASR 0.6B",
 }
+TRANSFORMERS_ASR_MODELS = QWEN_ASR_MODELS
+
+# Backwards-compatible names for callers importing the older Qwen constants.
+QWEN_ASR_DEFAULT_MODEL = TRANSFORMERS_ASR_DEFAULT_MODEL

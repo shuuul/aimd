@@ -1,4 +1,4 @@
-"""Qwen3-ASR transcription backend implementation (Linux/CUDA)."""
+"""Transformers ASR backend implementation (Linux/CUDA)."""
 
 import asyncio
 import warnings
@@ -7,7 +7,10 @@ from pathlib import Path
 from logly import logger
 
 from ..audio_utils import convert_to_wav_if_needed
-from ..const import QWEN_ASR_DEFAULT_MODEL, QWEN_ASR_MODELS
+from ..const import (
+    TRANSFORMERS_ASR_DEFAULT_MODEL,
+    TRANSFORMERS_ASR_MODELS,
+)
 from ..errors import ProcessingFailedError, UnsupportedInputError
 
 # Silence noisy upstream transformers generation warnings. These are benign and
@@ -59,7 +62,7 @@ def _resolve_language(language: str | None) -> str | None:
         if lang == full_name.lower():
             return full_name
     raise UnsupportedInputError(
-        f"Unsupported language for qwen backend: '{language}'. "
+        f"Unsupported language for Transformers ASR backend: '{language}'. "
         f"Supported: {list(LANGUAGE_CODE_TO_NAME.keys())}"
     )
 
@@ -174,23 +177,52 @@ def _parse_qwen_output(output: str, forced_language: str | None) -> str:
     return text
 
 
-async def transcribe_audio_qwen(
+def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) -> str:
+    """Run Qwen3-ASR through Hugging Face Transformers."""
+    import torch
+
+    resolved_language = _resolve_language(language)
+    asr_model, processor = _get_model_and_processor(model_name)
+    audio = _load_audio_array(audio_path)
+    prompt = _build_prompt(processor, resolved_language)
+    inputs = processor(
+        text=[prompt],
+        audio=[audio],
+        return_tensors="pt",
+        padding=True,
+    )
+    inputs = _inputs_to_model_device(inputs, asr_model)
+    input_ids = inputs["input_ids"]
+
+    with torch.no_grad():
+        generated = asr_model.generate(**inputs, max_new_tokens=4096)
+
+    generated_ids = getattr(generated, "sequences", generated)
+    decoded = processor.batch_decode(
+        generated_ids[:, input_ids.shape[1] :],
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
+    )
+    return _parse_qwen_output(decoded[0], resolved_language).strip()
+
+
+async def transcribe_audio_transformers(
     file_path: Path,
     model: str | None = None,
     language: str | None = None,
     temp_dir: Path | None = None,
 ) -> str:
-    """Transcribe audio using Qwen3-ASR (requires Linux + CUDA)."""
+    """Transcribe audio using Transformers ASR models (requires Linux + CUDA)."""
     try:
         import torch  # type: ignore
     except ImportError:
         raise ProcessingFailedError(
-            "PyTorch is not installed. Required for qwen backend."
+            "PyTorch is not installed. Required for Transformers ASR backend."
         )
 
     if not torch.cuda.is_available():
         raise ProcessingFailedError(
-            "CUDA is not available. qwen backend requires a CUDA-capable GPU."
+            "CUDA is not available. Transformers ASR backend requires a CUDA-capable GPU."
         )
 
     try:
@@ -198,20 +230,19 @@ async def transcribe_audio_qwen(
         import transformers  # type: ignore[import-untyped]  # noqa: F401
     except ImportError:
         raise ProcessingFailedError(
-            "transformers and torchaudio are required for qwen backend."
+            "transformers and torchaudio are required for Transformers ASR backend."
         )
 
-    resolved_model = model or QWEN_ASR_DEFAULT_MODEL
-    if resolved_model not in QWEN_ASR_MODELS:
+    resolved_model = model or TRANSFORMERS_ASR_DEFAULT_MODEL
+    if resolved_model not in TRANSFORMERS_ASR_MODELS:
         raise UnsupportedInputError(
-            f"Unknown Qwen3-ASR model: {resolved_model}. "
-            f"Available: {list(QWEN_ASR_MODELS.keys())}"
+            f"Unknown Transformers ASR model: {resolved_model}. "
+            f"Available: {list(TRANSFORMERS_ASR_MODELS.keys())}"
         )
 
-    resolved_language = _resolve_language(language)
     logger.info(
-        f"Transcribing with Qwen3-ASR Transformers model: {resolved_model}, "
-        f"language: {resolved_language or 'auto'}"
+        "Transcribing with Qwen3-ASR model on Transformers backend: "
+        f"{resolved_model}, language: {language or 'auto'}"
     )
 
     wav_path: Path | None = None
@@ -220,30 +251,7 @@ async def transcribe_audio_qwen(
         audio_path = wav_path or file_path
 
         def _transcribe() -> str:
-            import torch
-
-            qwen_model, processor = _get_model_and_processor(resolved_model)
-            audio = _load_audio_array(audio_path)
-            prompt = _build_prompt(processor, resolved_language)
-            inputs = processor(
-                text=[prompt],
-                audio=[audio],
-                return_tensors="pt",
-                padding=True,
-            )
-            inputs = _inputs_to_model_device(inputs, qwen_model)
-            input_ids = inputs["input_ids"]
-
-            with torch.no_grad():
-                generated = qwen_model.generate(**inputs, max_new_tokens=4096)
-
-            generated_ids = getattr(generated, "sequences", generated)
-            decoded = processor.batch_decode(
-                generated_ids[:, input_ids.shape[1] :],
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False,
-            )
-            return _parse_qwen_output(decoded[0], resolved_language).strip()
+            return _transcribe_qwen(audio_path, resolved_model, language)
 
         loop = asyncio.get_event_loop()
         transcribed_text = await loop.run_in_executor(None, _transcribe)
