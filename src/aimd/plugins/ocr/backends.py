@@ -115,7 +115,9 @@ class MLXVLMOCRBackend:
     ) -> tuple[OCRPage, ...]:
         model_id = _resolve_mlx_vlm_model(model)
         if input_path.suffix.lower() != ".pdf":
-            raise ProcessingFailedError("MLX VLM OCR supports image files and PDFs only.")
+            raise ProcessingFailedError(
+                "MLX VLM OCR supports image files and PDFs only."
+            )
 
         try:
             rendered_pages = _render_pdf_with_pymupdf(
@@ -256,7 +258,9 @@ def _render_pdf_with_pymupdf(
             for page_index in range(first_page, last_page + 1):
                 page = document.load_page(page_index)
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-                page_path = output_dir / f"{input_path.stem}_page_{page_index + 1:04d}.png"
+                page_path = (
+                    output_dir / f"{input_path.stem}_page_{page_index + 1:04d}.png"
+                )
                 pixmap.save(page_path)
                 rendered_pages.append((page_index, page_path))
         return tuple(rendered_pages)

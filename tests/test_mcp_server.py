@@ -23,7 +23,9 @@ async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None
             ),
         )
 
-    monkeypatch.setattr("aimd.interfaces.mcp.app.process_core_input", _fake_process_input)
+    monkeypatch.setattr(
+        "aimd.interfaces.mcp.app.process_core_input", _fake_process_input
+    )
 
     output_file = tmp_path / "out.md"
     result = await mcp_app.process_input("input.mp3", output_file=str(output_file))

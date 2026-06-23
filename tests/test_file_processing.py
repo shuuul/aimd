@@ -3,7 +3,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aimd.core.process import _split_markdown_by_headers
-from aimd.plugins.doc.processor import PANDOC_INPUT_FORMAT_BY_EXTENSION, process_doc_with_assets
+from aimd.plugins.doc.processor import (
+    PANDOC_INPUT_FORMAT_BY_EXTENSION,
+    process_doc_with_assets,
+)
 
 
 def test_split_markdown_by_headers_fallback_without_headers() -> None:
@@ -117,7 +120,9 @@ def test_pandoc_extension_map_includes_supported_document_families() -> None:
     assert ".azw3" not in PANDOC_INPUT_FORMAT_BY_EXTENSION
 
 
-def test_process_pandoc_document_uses_detected_reader(monkeypatch, tmp_path: Path) -> None:
+def test_process_pandoc_document_uses_detected_reader(
+    monkeypatch, tmp_path: Path
+) -> None:
     source = tmp_path / "paper.rst"
     source.write_text("Title\n=====\n", encoding="utf-8")
     seen: dict[str, object] = {}

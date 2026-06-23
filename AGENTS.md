@@ -161,6 +161,16 @@ curl -X POST http://127.0.0.1:8000/v1/process \
 aimd-mcp
 ```
 
+## BEFORE EVERY COMMIT
+
+Run lint/format hooks before committing, and include any hook-generated fixes in the commit:
+
+```bash
+uv run prek --all-files
+```
+
+If `prek` modifies files, review the diff, stage the updates, and run `uv run prek --all-files` again before committing.
+
 ## DAILY MAINTENANCE / RELEASE CHECKLIST
 
 ```bash
