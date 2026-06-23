@@ -15,9 +15,12 @@ def test_split_markdown_by_headers_fallback_without_headers() -> None:
     assert all(len(content) <= 4000 for _, content in sections)
 
 
-def _fake_convert(html_file: Path, output_file: Path) -> None:
+def _fake_run_pandoc(**kwargs):  # noqa: ANN003
     """Write large markdown content to *output_file*, simulating pandoc."""
-    output_file.write_text("# Chapter\n\n" + ("lorem ipsum " * 5000), encoding="utf-8")
+    assert kwargs["input_format"] == "html"
+    kwargs["output_file"].write_text(
+        "# Chapter\n\n" + ("lorem ipsum " * 5000), encoding="utf-8"
+    )
 
 
 def test_process_epub_large_content_returns_markdown(tmp_path: Path) -> None:
@@ -27,8 +30,8 @@ def test_process_epub_large_content_returns_markdown(tmp_path: Path) -> None:
         zf.writestr("OEBPS/ch2.html", "<html><body>c2</body></html>")
 
     with patch(
-        "aimd.plugins.doc.processor._convert_html_to_markdown",
-        side_effect=_fake_convert,
+        "aimd.plugins.doc.processor._run_pandoc",
+        side_effect=_fake_run_pandoc,
     ):
         result = process_doc_with_assets(epub_path)
 
@@ -63,13 +66,17 @@ def test_process_epub_spine_ordering(tmp_path: Path) -> None:
 
     written_order: list[str] = []
 
-    def _track_convert(html_file: Path, output_file: Path) -> None:
+    def _track_run_pandoc(**kwargs):  # noqa: ANN003
+        html_file = kwargs["input_file"]
+        assert kwargs["input_format"] == "html"
         written_order.append(html_file.stem)
-        output_file.write_text(f"## {html_file.stem}\n\ncontent\n", encoding="utf-8")
+        kwargs["output_file"].write_text(
+            f"## {html_file.stem}\n\ncontent\n", encoding="utf-8"
+        )
 
     with patch(
-        "aimd.plugins.doc.processor._convert_html_to_markdown",
-        side_effect=_track_convert,
+        "aimd.plugins.doc.processor._run_pandoc",
+        side_effect=_track_run_pandoc,
     ):
         result = process_doc_with_assets(epub_path)
 

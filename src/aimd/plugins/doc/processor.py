@@ -202,11 +202,6 @@ def _run_pandoc(
         )
 
 
-def _convert_html_to_markdown(html_file: Path, output_file: Path) -> None:
-    """Convert a single HTML/XHTML file to markdown via the pandoc CLI."""
-    _run_pandoc(input_file=html_file, input_format="html", output_file=output_file)
-
-
 def _process_pandoc_document(
     file_path: Path,
     *,
@@ -293,7 +288,11 @@ def _process_epub_with_assets(
             out_md = chapters_dir / f"{basename}.md"
 
             try:
-                _convert_html_to_markdown(html_file, out_md)
+                _run_pandoc(
+                    input_file=html_file,
+                    input_format="html",
+                    output_file=out_md,
+                )
                 clean_markdown(out_md)
                 content = out_md.read_text(encoding="utf-8")
                 chapter_files.append((basename, content))

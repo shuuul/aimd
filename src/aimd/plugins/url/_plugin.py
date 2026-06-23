@@ -9,7 +9,6 @@ from typing import Any, BinaryIO
 from markitdown import (
     DocumentConverter,
     DocumentConverterResult,
-    FailedConversionAttempt,
     MarkItDown,
     StreamInfo,
 )
@@ -49,26 +48,18 @@ class AimdUrlTranscriptConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> DocumentConverterResult:
-        if not stream_info.url:
-            raise FailedConversionAttempt("aimd.plugins.url requires a URL")
-
-        try:
-            result = asyncio.run(
-                get_text_from_url(
-                    stream_info.url,
-                    language=kwargs.get("language"),
-                    model=kwargs.get("model"),
-                    save_original_path=kwargs.get("save_original_path"),
-                    cookies_file=kwargs.get("cookies_file"),
-                    cookies_from_browser=kwargs.get("cookies_from_browser"),
-                    temp_dir=kwargs.get("temp_dir"),
-                    raw_transcript=kwargs.get("raw_transcript", False),
-                )
+        result = asyncio.run(
+            get_text_from_url(
+                stream_info.url,
+                language=kwargs.get("language"),
+                model=kwargs.get("model"),
+                save_original_path=kwargs.get("save_original_path"),
+                cookies_file=kwargs.get("cookies_file"),
+                cookies_from_browser=kwargs.get("cookies_from_browser"),
+                temp_dir=kwargs.get("temp_dir"),
+                raw_transcript=kwargs.get("raw_transcript", False),
             )
-        except Exception as exc:
-            raise FailedConversionAttempt(
-                f"AIMD URL transcript conversion failed: {exc}"
-            ) from exc
+        )
 
         return DocumentConverterResult(
             title=result.title,
@@ -94,8 +85,7 @@ class AimdReadableHtmlConverter(DocumentConverter):
         if stream_info.url and stream_info.url.startswith(("http://", "https://")):
             return True
 
-        extension = (stream_info.extension or "").lower()
-        return extension in HTML_EXTENSIONS
+        return (stream_info.extension or "").lower() in HTML_EXTENSIONS
 
     def convert(
         self,
@@ -104,19 +94,11 @@ class AimdReadableHtmlConverter(DocumentConverter):
         **kwargs: Any,
     ) -> DocumentConverterResult:
         source = stream_info.url or stream_info.local_path
-        if not source:
-            raise FailedConversionAttempt(
-                "aimd.plugins.url Defuddle conversion requires a URL or local file path"
-            )
-
-        try:
-            result = extract_html_with_defuddle(
-                Path(source) if stream_info.local_path else source,
-                markdown=True,
-                npx_command=kwargs.get("npx_command", "npx"),
-            )
-        except Exception as exc:
-            raise FailedConversionAttempt(f"Defuddle conversion failed: {exc}") from exc
+        result = extract_html_with_defuddle(
+            Path(source) if stream_info.local_path else source,
+            markdown=True,
+            npx_command=kwargs.get("npx_command", "npx"),
+        )
 
         return DocumentConverterResult(
             title=result.title,

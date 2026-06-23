@@ -8,7 +8,6 @@ from typing import Any, BinaryIO
 from markitdown import (
     DocumentConverter,
     DocumentConverterResult,
-    FailedConversionAttempt,
     MarkItDown,
     StreamInfo,
 )
@@ -32,8 +31,7 @@ class AimdDocConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> bool:
-        extension = (stream_info.extension or "").lower()
-        return extension in PANDOC_DOCUMENT_EXTENSIONS
+        return (stream_info.extension or "").lower() in PANDOC_DOCUMENT_EXTENSIONS
 
     def convert(
         self,
@@ -41,17 +39,11 @@ class AimdDocConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> DocumentConverterResult:
-        if not stream_info.local_path:
-            raise FailedConversionAttempt("aimd.plugins.doc requires a local file path")
-
-        try:
-            result = process_doc_with_assets(
-                Path(stream_info.local_path),
-                output_dir=kwargs.get("output_dir"),
-                temp_dir=kwargs.get("temp_dir"),
-            )
-        except Exception as exc:
-            raise FailedConversionAttempt(f"Document conversion failed: {exc}") from exc
+        result = process_doc_with_assets(
+            Path(stream_info.local_path),
+            output_dir=kwargs.get("output_dir"),
+            temp_dir=kwargs.get("temp_dir"),
+        )
 
         return DocumentConverterResult(
             title=result.title,
