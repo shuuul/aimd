@@ -114,7 +114,9 @@ class Qwen3ASRAudioEncoderConfig(PretrainedConfig):
         self.activation_dropout = activation_dropout
         self.num_hidden_layers = encoder_layers
         self.initializer_range = initializer_range
-        self.scale_embedding = scale_embedding  # scale factor will be sqrt(d_model) if True
+        self.scale_embedding = (
+            scale_embedding  # scale factor will be sqrt(d_model) if True
+        )
         self.max_source_positions = max_source_positions
         self.n_window = n_window
         self.output_dim = output_dim
