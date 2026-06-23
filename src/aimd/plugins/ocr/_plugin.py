@@ -8,7 +8,6 @@ from typing import Any, BinaryIO
 from markitdown import (
     DocumentConverter,
     DocumentConverterResult,
-    FailedConversionAttempt,
     MarkItDown,
     StreamInfo,
 )
@@ -34,11 +33,10 @@ class AimdOCRConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> bool:
-        if kwargs.get("task_type") != "ocr":
-            return False
-
-        extension = (stream_info.extension or "").lower()
-        return extension in OCR_EXTENSIONS
+        return (
+            kwargs.get("task_type") == "ocr"
+            and (stream_info.extension or "").lower() in OCR_EXTENSIONS
+        )
 
     def convert(
         self,
@@ -46,20 +44,14 @@ class AimdOCRConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> DocumentConverterResult:
-        if not stream_info.local_path:
-            raise FailedConversionAttempt("aimd.plugins.ocr requires a local file path")
-
-        try:
-            result = process_ocr_sync(
-                Path(stream_info.local_path),
-                model=kwargs.get("model"),
-                language=kwargs.get("language"),
-                start=kwargs.get("start"),
-                end=kwargs.get("end"),
-                temp_dir=kwargs.get("temp_dir"),
-            )
-        except Exception as exc:
-            raise FailedConversionAttempt(f"OCR conversion failed: {exc}") from exc
+        result = process_ocr_sync(
+            Path(stream_info.local_path),
+            model=kwargs.get("model"),
+            language=kwargs.get("language"),
+            start=kwargs.get("start"),
+            end=kwargs.get("end"),
+            temp_dir=kwargs.get("temp_dir"),
+        )
 
         return DocumentConverterResult(
             title=result.title,

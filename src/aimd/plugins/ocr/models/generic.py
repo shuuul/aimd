@@ -5,7 +5,6 @@ from pathlib import Path
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 
 from .base import (
-    TransformersOCRModel,
     get_cached_model_and_processor,
     get_cuda_dtype,
     inputs_to_model_device,
@@ -27,7 +26,7 @@ def _build_messages(image_path: Path, language: str | None) -> list[dict[str, ob
     ]
 
 
-class GenericTransformersOCRModel(TransformersOCRModel):
+class GenericTransformersOCRModel:
     """OCR adapter for image-text models with processor chat templates."""
 
     def __init__(self, model_id: str) -> None:
@@ -116,8 +115,6 @@ def _load_generic_model(model_name: str) -> tuple[object, object]:
         extra = ""
         if model_name == "zai-org/GLM-OCR":
             extra = " GLM-OCR currently requires installing Transformers from GitHub."
-        elif model_name == "PaddlePaddle/PaddleOCR-VL-1.5":
-            extra = " PaddleOCR-VL may require torchvision with the current model code."
         raise BackendUnavailableError(
             f"Unable to load Transformers OCR model {model_name!r}: {exc}{extra}"
         ) from exc

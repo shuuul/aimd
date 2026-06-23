@@ -5,7 +5,6 @@ from pathlib import Path
 from aimd.core.errors import ProcessingFailedError
 
 from .base import (
-    TransformersOCRModel,
     get_cached_model_and_processor,
     inputs_to_model_device,
 )
@@ -14,7 +13,7 @@ from .generic import _load_generic_model
 GOT_OCR_MODEL_ID = "stepfun-ai/GOT-OCR-2.0-hf"
 
 
-class GOTOCRModel(TransformersOCRModel):
+class GOTOCRModel:
     """Adapter for stepfun-ai/GOT-OCR-2.0-hf."""
 
     model_id = GOT_OCR_MODEL_ID

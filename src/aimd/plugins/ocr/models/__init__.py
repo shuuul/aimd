@@ -2,7 +2,7 @@
 
 from aimd.core.errors import ProcessingFailedError
 
-from .base import TransformersOCRModel, clear_model_cache
+from .base import clear_model_cache
 from .generic import GenericTransformersOCRModel
 from .got import GOT_OCR_MODEL_ID, GOTOCRModel
 from .unlimited import (
@@ -25,9 +25,6 @@ TRANSFORMERS_OCR_MODEL_ALIASES = {
     "glm_ocr": "zai-org/GLM-OCR",
     "glm-ocr": "zai-org/GLM-OCR",
     "zai-org/glm-ocr": "zai-org/GLM-OCR",
-    "paddleocr_vl": "PaddlePaddle/PaddleOCR-VL-1.5",
-    "paddleocr-vl": "PaddlePaddle/PaddleOCR-VL-1.5",
-    "paddlepaddle/paddleocr-vl-1.5": "PaddlePaddle/PaddleOCR-VL-1.5",
 }
 
 
@@ -41,12 +38,14 @@ def resolve_transformers_ocr_model(model: str | None) -> str:
         return requested.strip()
     raise ProcessingFailedError(
         "Unsupported Transformers OCR model. Supported models: got_ocr, "
-        "unlimited_ocr, glm_ocr, paddleocr_vl, or an explicit Hugging Face model ID. "
-        "PP-OCRv6/paddleocr_v6 is not supported by the Transformers backend."
+        "unlimited_ocr, glm_ocr, or an explicit Hugging Face model ID. "
+        "PaddleOCR aliases are not supported."
     )
 
 
-def create_transformers_ocr_model(model: str | None) -> TransformersOCRModel:
+def create_transformers_ocr_model(
+    model: str | None,
+) -> GOTOCRModel | UnlimitedOCRModel | GenericTransformersOCRModel:
     """Create a model-specific Transformers OCR adapter."""
     model_id = resolve_transformers_ocr_model(model)
     if model_id == GOT_OCR_MODEL_ID:
@@ -63,7 +62,6 @@ __all__ = [
     "UNLIMITED_OCR_MODEL_ID",
     "GenericTransformersOCRModel",
     "GOTOCRModel",
-    "TransformersOCRModel",
     "UnlimitedOCRModel",
     "clear_model_cache",
     "create_transformers_ocr_model",

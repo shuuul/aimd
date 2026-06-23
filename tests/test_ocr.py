@@ -1,15 +1,16 @@
 from pathlib import Path
-import subprocess
+import sys
+import types
 
 import pytest
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 from aimd.plugins.ocr.backends import (
-    MLX4OCRBackend,
+    MLXVLMOCRBackend,
     OCRPage,
     OCRResult,
     TransformersOCRBackend,
-    _resolve_mlx4ocr_model,
+    _resolve_mlx_vlm_model,
     select_ocr_backend,
 )
 from aimd.plugins.ocr.models import (
@@ -28,7 +29,7 @@ from aimd.plugins.ocr.processor import process_ocr
 
 def test_select_ocr_backend_selects_platform_defaults(monkeypatch) -> None:
     monkeypatch.setattr("aimd.plugins.ocr.backends.platform.system", lambda: "Darwin")
-    assert select_ocr_backend() == "mlx4ocr"
+    assert select_ocr_backend() == "mlx-vlm"
 
     monkeypatch.setattr("aimd.plugins.ocr.backends.platform.system", lambda: "Linux")
     assert select_ocr_backend() == "transformers"
@@ -40,11 +41,15 @@ def test_select_ocr_backend_rejects_unsupported_platform(monkeypatch) -> None:
         select_ocr_backend()
 
 
-def test_resolve_mlx4ocr_model_maps_aimd_names() -> None:
-    assert _resolve_mlx4ocr_model(None) == ("ppocrv6", "medium")
-    assert _resolve_mlx4ocr_model("paddleocr_v6") == ("ppocrv6", "medium")
-    assert _resolve_mlx4ocr_model("glm_ocr") == ("glm-ocr", None)
-    assert _resolve_mlx4ocr_model("paddleocr_vl") == ("paddleocr-vl", None)
+def test_resolve_mlx_vlm_model_maps_aimd_names() -> None:
+    assert _resolve_mlx_vlm_model(None) == "mlx-community/GLM-OCR-bf16"
+    assert _resolve_mlx_vlm_model("glm_ocr") == "mlx-community/GLM-OCR-bf16"
+    assert _resolve_mlx_vlm_model("org/custom-model") == "org/custom-model"
+
+
+def test_resolve_mlx_vlm_model_rejects_paddleocr_aliases() -> None:
+    with pytest.raises(ProcessingFailedError):
+        _resolve_mlx_vlm_model("paddleocr_v6")
 
 
 def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
@@ -55,16 +60,15 @@ def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
         resolve_transformers_ocr_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
     )
     assert resolve_transformers_ocr_model("glm_ocr") == "zai-org/GLM-OCR"
-    assert (
-        resolve_transformers_ocr_model("paddleocr_vl")
-        == "PaddlePaddle/PaddleOCR-VL-1.5"
-    )
     assert resolve_transformers_ocr_model("org/custom-model") == "org/custom-model"
 
 
-def test_resolve_transformers_ocr_model_rejects_ppocrv6() -> None:
+@pytest.mark.parametrize("model", ["paddleocr_v6", "paddleocr_vl"])
+def test_resolve_transformers_ocr_model_rejects_paddleocr_aliases(
+    model: str,
+) -> None:
     with pytest.raises(ProcessingFailedError):
-        resolve_transformers_ocr_model("paddleocr_v6")
+        resolve_transformers_ocr_model(model)
 
 
 def test_create_transformers_ocr_model_selects_model_adapter() -> None:
@@ -75,22 +79,99 @@ def test_create_transformers_ocr_model_selects_model_adapter() -> None:
     assert generic.model_id == "zai-org/GLM-OCR"
 
 
-def test_mlx4ocr_pdf_command_uses_default_paddleocr_v6(monkeypatch, tmp_path: Path):
+def test_mlx_vlm_image_uses_python_package(monkeypatch, tmp_path: Path):
+    image = tmp_path / "scan.png"
+    image.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _FakeModel:
+        config = "config"
+
+    def _load(model_id):  # noqa: ANN001
+        captured["model_id"] = model_id
+        return _FakeModel(), "processor"
+
+    def _apply_chat_template(processor, config, prompt, **kwargs):  # noqa: ANN001
+        captured["processor"] = processor
+        captured["config"] = config
+        captured["prompt"] = prompt
+        captured.update(kwargs)
+        return "formatted prompt"
+
+    def _generate(model, processor, prompt, **kwargs):  # noqa: ANN001
+        captured["generate_model"] = model
+        captured["generate_processor"] = processor
+        captured["formatted_prompt"] = prompt
+        captured.update(kwargs)
+        return types.SimpleNamespace(text="recognized")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm",
+        types.SimpleNamespace(load=_load, generate=_generate),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.prompt_utils",
+        types.SimpleNamespace(apply_chat_template=_apply_chat_template),
+    )
+    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model_id", None)
+
+    result = MLXVLMOCRBackend().recognize(image, model="glm_ocr")
+
+    assert result == OCRResult(
+        title="scan",
+        pages=(OCRPage(page_index=None, text="recognized"),),
+    )
+    assert captured["model_id"] == "mlx-community/GLM-OCR-bf16"
+    assert captured["prompt"] == "Text Recognition:"
+    assert captured["num_images"] == 1
+    assert captured["image"] == [image.as_posix()]
+    assert captured["max_tokens"] == 4096
+
+
+def test_mlx_vlm_pdf_uses_python_package(monkeypatch, tmp_path: Path):
     pdf = tmp_path / "scan.pdf"
     pdf.write_text("x", encoding="utf-8")
-    captured: dict[str, list[str]] = {}
+    render_dir = tmp_path / "rendered"
+    render_dir.mkdir()
+    page_paths = [render_dir / "page-1.png", render_dir / "page-2.png"]
+    for page_path in page_paths:
+        page_path.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
 
-    def _run(command, **kwargs):  # noqa: ANN001
-        captured["command"] = command
-        assert kwargs["check"] is False
-        assert kwargs["capture_output"] is True
-        assert kwargs["text"] is True
-        return subprocess.CompletedProcess(command, 0, stdout="recognized", stderr="")
+    class _FakeModel:
+        config = "config"
 
-    monkeypatch.setattr("aimd.plugins.ocr.backends.shutil.which", lambda _: "mlx4ocr")
-    monkeypatch.setattr("aimd.plugins.ocr.backends.subprocess.run", _run)
+    def _load(model_id):  # noqa: ANN001
+        captured["model_id"] = model_id
+        return _FakeModel(), "processor"
 
-    text = MLX4OCRBackend()._recognize_pdf_or_document(
+    def _generate(model, processor, prompt, **kwargs):  # noqa: ANN001, ARG001
+        captured.setdefault("images", []).append(kwargs["image"][0])
+        return types.SimpleNamespace(text=f"recognized {len(captured['images'])}")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm",
+        types.SimpleNamespace(load=_load, generate=_generate),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.prompt_utils",
+        types.SimpleNamespace(apply_chat_template=lambda *args, **kwargs: "prompt"),
+    )
+    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model_id", None)
+    monkeypatch.setattr(
+        "aimd.plugins.ocr.backends._render_pdf_with_pymupdf",
+        lambda input_path, **kwargs: tuple(enumerate(page_paths)),  # noqa: ARG005
+    )
+
+    pages = MLXVLMOCRBackend()._recognize_pdf_or_document(
         pdf,
         model=None,
         start=0,
@@ -98,44 +179,15 @@ def test_mlx4ocr_pdf_command_uses_default_paddleocr_v6(monkeypatch, tmp_path: Pa
         temp_dir=tmp_path,
     )
 
-    assert text == "recognized"
-    command = captured["command"]
-    assert command[command.index("--engine") + 1] == "ppocrv6"
-    assert command[command.index("--variant") + 1] == "medium"
-    assert command[command.index("--start") + 1] == "0"
-    assert command[command.index("--end") + 1] == "2"
-
-
-@pytest.mark.parametrize(
-    ("model", "mlx4ocr_backend"),
-    [("glm_ocr", "glm-ocr"), ("paddleocr_vl", "paddleocr-vl")],
-)
-def test_mlx4ocr_pdf_command_maps_vlm_models(
-    monkeypatch, tmp_path: Path, model: str, mlx4ocr_backend: str
-):
-    pdf = tmp_path / "scan.pdf"
-    pdf.write_text("x", encoding="utf-8")
-    captured: dict[str, list[str]] = {}
-
-    def _run(command, **kwargs):  # noqa: ANN001, ARG001
-        captured["command"] = command
-        return subprocess.CompletedProcess(command, 0, stdout="recognized", stderr="")
-
-    monkeypatch.setattr("aimd.plugins.ocr.backends.shutil.which", lambda _: "mlx4ocr")
-    monkeypatch.setattr("aimd.plugins.ocr.backends.subprocess.run", _run)
-
-    text = MLX4OCRBackend()._recognize_pdf_or_document(
-        pdf,
-        model=model,
-        start=None,
-        end=None,
-        temp_dir=tmp_path,
+    assert pages == (
+        OCRPage(page_index=0, text="recognized 1"),
+        OCRPage(page_index=1, text="recognized 2"),
     )
-
-    assert text == "recognized"
-    command = captured["command"]
-    assert command[command.index("--engine") + 1] == mlx4ocr_backend
-    assert "--variant" not in command
+    assert captured["images"] == [
+        page_paths[0].as_posix(),
+        page_paths[1].as_posix(),
+    ]
+    assert captured["model_id"] == "mlx-community/GLM-OCR-bf16"
 
 
 def test_transformers_backend_ocr_image_uses_resolved_model(
@@ -285,7 +337,7 @@ async def test_process_ocr_wraps_backend_result_as_text_context(
     class _FakeBackend:
         def recognize(self, input_path, **kwargs):
             assert input_path == image
-            assert kwargs["model"] == "paddleocr_v6"
+            assert kwargs["model"] == "glm_ocr"
             assert kwargs["language"] == "zh"
             assert kwargs["start"] is None
             assert kwargs["end"] is None
@@ -300,7 +352,7 @@ async def test_process_ocr_wraps_backend_result_as_text_context(
 
     result = await process_ocr(
         image,
-        model="paddleocr_v6",
+        model="glm_ocr",
         language="zh",
     )
 

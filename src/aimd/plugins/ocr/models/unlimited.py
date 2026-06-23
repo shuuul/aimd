@@ -5,12 +5,12 @@ import tempfile
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 
-from .base import TransformersOCRModel, get_cached_model_and_processor, get_cuda_dtype
+from .base import get_cached_model_and_processor, get_cuda_dtype
 
 UNLIMITED_OCR_MODEL_ID = "baidu/Unlimited-OCR"
 
 
-class UnlimitedOCRModel(TransformersOCRModel):
+class UnlimitedOCRModel:
     """Adapter for baidu/Unlimited-OCR's custom infer/infer_multi API."""
 
     model_id = UNLIMITED_OCR_MODEL_ID

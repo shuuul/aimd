@@ -1,13 +1,12 @@
 """OCR backend contracts, platform resolution, and backend adapters."""
 
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 import platform
 import shutil
 import subprocess
-import sys
 import tempfile
-from typing import Protocol
 
 from aimd.core.errors import (
     BackendUnavailableError,
@@ -17,8 +16,13 @@ from aimd.core.errors import (
 from .models import create_transformers_ocr_model
 
 IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
-DEFAULT_OCR_MODEL = "paddleocr_v6"
-PPOCRV6_VARIANTS = {"tiny", "small", "medium"}
+DEFAULT_OCR_MODEL = "glm_ocr"
+MLX_VLM_MODEL_ALIASES = {
+    "glm_ocr": "mlx-community/GLM-OCR-bf16",
+    "glm-ocr": "mlx-community/GLM-OCR-bf16",
+    "mlx-community/glm-ocr-bf16": "mlx-community/GLM-OCR-bf16",
+}
+MLX_VLM_DEFAULT_PROMPT = "Text Recognition:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,56 +41,38 @@ class OCRResult:
     pages: tuple[OCRPage, ...]
 
 
-class OCRBackend(Protocol):
-    """OCR backend adapter."""
-
-    def recognize(
-        self,
-        input_path: Path,
-        *,
-        model: str | None = None,
-        language: str | None = None,
-        start: int | None = None,
-        end: int | None = None,
-        temp_dir: Path | None = None,
-    ) -> OCRResult:
-        """Recognize text from an image or PDF."""
-        ...
-
-
 def select_ocr_backend() -> str:
     """Select the platform OCR backend."""
-    system = platform.system().lower()
-    if system == "darwin":
-        return "mlx4ocr"
-    if system == "linux":
+    system = platform.system()
+    if system == "Darwin":
+        return "mlx-vlm"
+    if system == "Linux":
         return "transformers"
     raise BackendUnavailableError(
         "OCR is unavailable on this platform. Supported OCR platforms are macOS "
-        "with mlx4ocr and Linux with CUDA-capable Transformers."
+        "with mlx-vlm and Linux with CUDA-capable Transformers."
     )
 
 
-def _resolve_mlx4ocr_model(model: str | None) -> tuple[str, str | None]:
-    """Map aimd OCR model names to mlx4ocr backend/variant options."""
-    normalized = (model or DEFAULT_OCR_MODEL).lower().replace("-", "_")
-    if normalized in {"paddleocr_v6", "ppocrv6", "pp_ocrv6"}:
-        return "ppocrv6", "medium"
-    if normalized == "glm_ocr":
-        return "glm-ocr", None
-    if normalized == "paddleocr_vl":
-        return "paddleocr-vl", None
-    if normalized in PPOCRV6_VARIANTS:
-        return "ppocrv6", normalized
+def _resolve_mlx_vlm_model(model: str | None) -> str:
+    """Resolve aimd OCR model aliases to mlx-vlm model IDs."""
+    requested = model or DEFAULT_OCR_MODEL
+    normalized = requested.strip().lower().replace(" ", "_")
+    if normalized in MLX_VLM_MODEL_ALIASES:
+        return MLX_VLM_MODEL_ALIASES[normalized]
+    if "/" in requested:
+        return requested.strip()
     raise ProcessingFailedError(
-        "Unsupported mlx4ocr model. Supported models: "
-        "paddleocr_v6, glm_ocr, paddleocr_vl. "
-        "PP-OCRv6 variants tiny, small, and medium are also accepted."
+        "Unsupported MLX VLM OCR model. Supported models: glm_ocr, "
+        "or an explicit mlx-vlm compatible Hugging Face model ID."
     )
 
 
-class MLX4OCRBackend:
-    """Run OCR through the mlx4ocr macOS runtime."""
+class MLXVLMOCRBackend:
+    """Run OCR through mlx-vlm on macOS."""
+
+    name = "mlx-vlm"
+    runtime = "mlx"
 
     def recognize(
         self,
@@ -100,8 +86,9 @@ class MLX4OCRBackend:
     ) -> OCRResult:
         if input_path.suffix.lower() in IMAGE_FILE_EXTENSIONS:
             text = self._recognize_image(input_path, model=model)
+            pages = (OCRPage(page_index=None, text=text.strip()),)
         else:
-            text = self._recognize_pdf_or_document(
+            pages = self._recognize_pdf_or_document(
                 input_path,
                 model=model,
                 start=start,
@@ -111,53 +98,11 @@ class MLX4OCRBackend:
 
         return OCRResult(
             title=input_path.stem,
-            pages=(OCRPage(page_index=None, text=text.strip()),),
+            pages=pages,
         )
 
     def _recognize_image(self, input_path: Path, *, model: str | None) -> str:
-        mlx4ocr_backend, variant = _resolve_mlx4ocr_model(model)
-        if mlx4ocr_backend != "ppocrv6":
-            return self._recognize_image_with_vlm(
-                input_path, mlx4ocr_backend=mlx4ocr_backend
-            )
-
-        try:
-            import cv2
-            from mlx4ocr import PP_OCRv6
-        except ImportError as exc:
-            raise BackendUnavailableError(
-                "mlx4ocr is not installed. Install OCR dependencies with `uv sync` "
-                "on macOS/Python 3.12+, then retry."
-            ) from exc
-
-        image = cv2.imread(input_path.as_posix())
-        if image is None:
-            raise ProcessingFailedError(f"Unable to read image for OCR: {input_path}")
-
-        ocr = PP_OCRv6.from_hub(variant)
-        try:
-            result = ocr.predict(image)
-            return str(result.result.text).strip()
-        finally:
-            ocr.close()
-
-    def _recognize_image_with_vlm(
-        self, input_path: Path, *, mlx4ocr_backend: str
-    ) -> str:
-        try:
-            from mlx4ocr import VLMOCR
-        except ImportError as exc:
-            raise BackendUnavailableError(
-                "mlx4ocr VLM OCR requires the optional mlx4ocr[vlm] dependencies. "
-                "Install them before using glm_ocr or paddleocr_vl."
-            ) from exc
-
-        ocr = VLMOCR.from_hub(engine=mlx4ocr_backend)
-        try:
-            result = ocr.predict_path(input_path.as_posix())
-            return str(result.text).strip()
-        finally:
-            ocr.close()
+        return _run_mlx_vlm_ocr(input_path, model_id=_resolve_mlx_vlm_model(model))
 
     def _recognize_pdf_or_document(
         self,
@@ -167,59 +112,157 @@ class MLX4OCRBackend:
         start: int | None,
         end: int | None,
         temp_dir: Path | None,
-    ) -> str:
-        executable = Path(sys.executable).with_name("mlx4ocr")
-        mlx4ocr_command = (
-            executable.as_posix() if executable.exists() else shutil.which("mlx4ocr")
-        )
-        if mlx4ocr_command is None:
+    ) -> tuple[OCRPage, ...]:
+        model_id = _resolve_mlx_vlm_model(model)
+        if input_path.suffix.lower() != ".pdf":
+            raise ProcessingFailedError("MLX VLM OCR supports image files and PDFs only.")
+
+        try:
+            rendered_pages = _render_pdf_with_pymupdf(
+                input_path,
+                start=start,
+                end=end,
+                temp_dir=temp_dir,
+            )
+        except ImportError as exc:
             raise BackendUnavailableError(
-                "mlx4ocr is not installed. Install OCR dependencies with `uv sync` "
-                "on macOS/Python 3.12+, then retry."
-            )
-        mlx4ocr_backend, variant = _resolve_mlx4ocr_model(model)
+                "PDF OCR with MLX VLM requires pymupdf. Install project "
+                "dependencies with `uv sync`, then retry."
+            ) from exc
 
-        with tempfile.TemporaryDirectory(
-            prefix="aimd-ocr-", dir=temp_dir
-        ) as output_root:
-            command = [
-                mlx4ocr_command,
-                "--path",
-                input_path.as_posix(),
-                "--format",
-                "markdown",
-                "--output",
-                output_root,
-            ]
-            command.extend(["--engine", mlx4ocr_backend])
-            if variant:
-                command.extend(["--variant", variant])
-            if start is not None:
-                command.extend(["--start", str(start)])
-            if end is not None:
-                command.extend(["--end", str(end)])
-
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
+        try:
+            return self._recognize_rendered_pages(
+                rendered_pages,
+                model_id=model_id,
             )
-            if completed.returncode != 0:
-                stderr = completed.stderr.strip() or completed.stdout.strip()
-                if "No module named mlx4ocr" in stderr:
-                    raise BackendUnavailableError(
-                        "mlx4ocr is not installed. Install OCR dependencies with `uv sync` "
-                        "on macOS/Python 3.12+, then retry."
-                    )
-                raise ProcessingFailedError(f"mlx4ocr failed: {stderr}")
+        finally:
+            if rendered_pages:
+                shutil.rmtree(rendered_pages[0][1].parent, ignore_errors=True)
 
-            output_path = (
-                Path(output_root) / input_path.stem / "ocr" / f"{input_path.stem}.md"
+    def _recognize_rendered_pages(
+        self,
+        rendered_pages: tuple[tuple[int, Path], ...],
+        *,
+        model_id: str,
+    ) -> tuple[OCRPage, ...]:
+        model, processor = _load_mlx_vlm_model(model_id)
+        return tuple(
+            OCRPage(
+                page_index=page_index,
+                text=_generate_mlx_vlm_text(model, processor, image_path),
             )
-            if output_path.exists():
-                return output_path.read_text(encoding="utf-8").strip()
-            return completed.stdout.strip()
+            for page_index, image_path in rendered_pages
+        )
+
+
+_cached_mlx_vlm_model = None
+_cached_mlx_vlm_processor = None
+_cached_mlx_vlm_model_id: str | None = None
+
+
+def _load_mlx_vlm_modules():
+    try:
+        return import_module("mlx_vlm"), import_module("mlx_vlm.prompt_utils")
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "MLX VLM OCR requires mlx-vlm. Install OCR dependencies with `uv sync` "
+            "on macOS/Python 3.12+, then retry."
+        ) from exc
+
+
+def _load_mlx_vlm_model(model_id: str) -> tuple[object, object]:
+    """Load or return cached mlx-vlm model state."""
+    global _cached_mlx_vlm_model, _cached_mlx_vlm_processor, _cached_mlx_vlm_model_id  # noqa: PLW0603
+    if _cached_mlx_vlm_model is not None and _cached_mlx_vlm_model_id == model_id:
+        return _cached_mlx_vlm_model, _cached_mlx_vlm_processor
+
+    mlx_vlm, _prompt_utils = _load_mlx_vlm_modules()
+    try:
+        _cached_mlx_vlm_model, _cached_mlx_vlm_processor = mlx_vlm.load(model_id)
+    except Exception as exc:  # noqa: BLE001 - upstream model load errors vary
+        _cached_mlx_vlm_model = None
+        _cached_mlx_vlm_processor = None
+        _cached_mlx_vlm_model_id = None
+        raise BackendUnavailableError(
+            f"Unable to load MLX VLM OCR model {model_id!r}: {exc}"
+        ) from exc
+    _cached_mlx_vlm_model_id = model_id
+    return _cached_mlx_vlm_model, _cached_mlx_vlm_processor
+
+
+def _run_mlx_vlm_ocr(input_path: Path, *, model_id: str) -> str:
+    """Run mlx-vlm OCR on one image path."""
+    model, processor = _load_mlx_vlm_model(model_id)
+    return _generate_mlx_vlm_text(model, processor, input_path)
+
+
+def _generate_mlx_vlm_text(
+    model: object,
+    processor: object,
+    image_path: Path,
+) -> str:
+    """Generate OCR text for one image using an already-loaded mlx-vlm model."""
+    mlx_vlm, prompt_utils = _load_mlx_vlm_modules()
+    config = getattr(model, "config", None)
+    formatted_prompt = prompt_utils.apply_chat_template(
+        processor,
+        config,
+        MLX_VLM_DEFAULT_PROMPT,
+        num_images=1,
+    )
+    result = mlx_vlm.generate(
+        model,
+        processor,
+        formatted_prompt,
+        image=[image_path.as_posix()],
+        max_tokens=4096,
+    )
+    text = str(getattr(result, "text", result)).strip()
+    if not text:
+        raise ProcessingFailedError("MLX VLM OCR produced empty content")
+    return text
+
+
+def _render_pdf_with_pymupdf(
+    input_path: Path,
+    *,
+    start: int | None,
+    end: int | None,
+    temp_dir: Path | None,
+) -> tuple[tuple[int, Path], ...]:
+    """Render PDF pages to PNG paths using the Python package API."""
+    import fitz
+
+    output_dir = Path(
+        tempfile.mkdtemp(
+            prefix="aimd-mlx-vlm-pdf-",
+            dir=temp_dir,
+        )
+    )
+    rendered_pages: list[tuple[int, Path]] = []
+    try:
+        with fitz.open(input_path) as document:
+            page_count = document.page_count
+            if page_count == 0:
+                raise ProcessingFailedError(f"PDF has no pages: {input_path}")
+            first_page = 0 if start is None else start
+            last_page = page_count - 1 if end is None else end
+            if first_page < 0 or last_page < first_page or last_page >= page_count:
+                raise ProcessingFailedError(
+                    f"Invalid OCR page range {first_page}-{last_page} for {input_path} "
+                    f"with {page_count} pages."
+                )
+            matrix = fitz.Matrix(2.0, 2.0)
+            for page_index in range(first_page, last_page + 1):
+                page = document.load_page(page_index)
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                page_path = output_dir / f"{input_path.stem}_page_{page_index + 1:04d}.png"
+                pixmap.save(page_path)
+                rendered_pages.append((page_index, page_path))
+        return tuple(rendered_pages)
+    except Exception:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise
 
 
 def _render_pdf_with_pdftoppm(
@@ -263,6 +306,9 @@ def _render_pdf_with_pdftoppm(
 
 class TransformersOCRBackend:
     """Run OCR through CUDA-capable Hugging Face Transformers VLM models."""
+
+    name = "transformers"
+    runtime = "cuda"
 
     def recognize(
         self,
@@ -309,10 +355,10 @@ class TransformersOCRBackend:
         return OCRResult(title=input_path.stem, pages=pages)
 
 
-def create_ocr_backend() -> OCRBackend:
+def create_ocr_backend() -> MLXVLMOCRBackend | TransformersOCRBackend:
     """Create the OCR backend adapter for the current platform."""
     resolved = select_ocr_backend()
-    if resolved == "mlx4ocr":
-        return MLX4OCRBackend()
+    if resolved == "mlx-vlm":
+        return MLXVLMOCRBackend()
 
     return TransformersOCRBackend()
