@@ -1,13 +1,24 @@
 """URL-to-Markdown processing and MarkItDown plugin."""
 
+from urllib.parse import urlparse
+
 from ._plugin import (
     AimdReadableHtmlConverter,
     AimdUrlTranscriptConverter,
     __plugin_interface_version__,
+    detect_platform,
     register_converters,
 )
-from .router import is_url
-from .transcript import detect_platform
+
+
+def is_url(value: str) -> bool:
+    """Return whether a string is an HTTP(S) URL."""
+    try:
+        result = urlparse(value)
+    except ValueError:
+        return False
+    return result.scheme in {"http", "https"} and bool(result.netloc)
+
 
 __all__ = [
     "AimdReadableHtmlConverter",

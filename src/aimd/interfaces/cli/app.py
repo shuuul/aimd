@@ -9,7 +9,7 @@ import typer
 from dotenv import load_dotenv
 from logly import logger
 
-from aimd.interfaces.output import persist_output
+from aimd.interfaces.output import MODEL_HELP_TEXT, persist_output
 from aimd.core.errors import AimdError
 from aimd.core.models import ProcessInput
 from aimd.core.process import ensure_supported_input, process_input
@@ -84,14 +84,7 @@ def process(
         None,
         "--model",
         "-m",
-        help="Model for transcription, or OCR model. macOS OCR: glm_ocr "
-        "(default) or an mlx-vlm compatible Hugging Face model ID. "
-        "Linux/CUDA OCR: got_ocr (default), unlimited_ocr, glm_ocr, "
-        "or a Hugging Face model ID. "
-        "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
-        "and also supports other documented mlx-audio STT model IDs. "
-        "Linux/CUDA Transformers ASR supports Qwen/Qwen3-ASR-1.7B "
-        "(default) or Qwen/Qwen3-ASR-0.6B.",
+        help=MODEL_HELP_TEXT,
     ),
     language: Optional[str] = typer.Option(
         None,

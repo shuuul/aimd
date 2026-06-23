@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aimd.core.process import _split_markdown_by_headers
-from aimd.plugins.doc.processor import (
+from aimd.plugins.doc.conversion import (
     PANDOC_INPUT_FORMAT_BY_EXTENSION,
     process_doc_with_assets,
 )
@@ -33,7 +33,7 @@ def test_process_epub_large_content_returns_markdown(tmp_path: Path) -> None:
         zf.writestr("OEBPS/ch2.html", "<html><body>c2</body></html>")
 
     with patch(
-        "aimd.plugins.doc.processor._run_pandoc",
+        "aimd.plugins.doc.conversion._run_pandoc",
         side_effect=_fake_run_pandoc,
     ):
         result = process_doc_with_assets(epub_path)
@@ -78,7 +78,7 @@ def test_process_epub_spine_ordering(tmp_path: Path) -> None:
         )
 
     with patch(
-        "aimd.plugins.doc.processor._run_pandoc",
+        "aimd.plugins.doc.conversion._run_pandoc",
         side_effect=_track_run_pandoc,
     ):
         result = process_doc_with_assets(epub_path)
@@ -131,7 +131,7 @@ def test_process_pandoc_document_uses_detected_reader(
         seen.update(kwargs)
         kwargs["output_file"].write_text("# Paper\n\nBody", encoding="utf-8")
 
-    monkeypatch.setattr("aimd.plugins.doc.processor._run_pandoc", _fake_run_pandoc)
+    monkeypatch.setattr("aimd.plugins.doc.conversion._run_pandoc", _fake_run_pandoc)
 
     result = process_doc_with_assets(source)
 

@@ -1,86 +1,46 @@
 import pytest
 
-from aimd.plugins.asr.capabilities import (
-    BackendCapability,
-    select_transcription_backend,
-)
-from aimd.plugins.asr.errors import BackendUnavailableError
+from aimd.core.errors import BackendUnavailableError
+from aimd.plugins.asr.capabilities import select_transcription_backend
 
 
-def _patch_capabilities(
-    monkeypatch, capabilities: dict[str, BackendCapability]
-) -> None:
+def test_select_prefers_mlx_on_apple_silicon(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("aimd.plugins.asr.capabilities.is_apple_silicon", lambda: True)
     monkeypatch.setattr(
-        "aimd.plugins.asr.capabilities.get_backend_capabilities",
-        lambda: capabilities,
+        "aimd.plugins.asr.capabilities._module_available",
+        lambda name: name == "mlx_audio",
     )
+    assert select_transcription_backend() == "mlx"
 
 
-@pytest.mark.parametrize(
-    ("system", "capabilities", "expected_backend"),
-    [
-        (
-            "Linux",
-            {
-                "mlx": BackendCapability("mlx", False, "unsupported", None),
-                "transformers": BackendCapability("transformers", True, None, None),
-            },
-            "transformers",
-        ),
-        (
-            "Darwin",
-            {
-                "mlx": BackendCapability("mlx", True, None, None),
-                "transformers": BackendCapability(
-                    "transformers", False, "linux only", None
-                ),
-            },
-            "mlx",
-        ),
-    ],
-)
-def test_select_transcription_backend_prefers_platform_backend(
-    monkeypatch,
-    system: str,
-    capabilities: dict[str, BackendCapability],
-    expected_backend: str,
-) -> None:
-    monkeypatch.setattr("aimd.plugins.asr.capabilities.platform.system", lambda: system)
-    _patch_capabilities(monkeypatch, capabilities)
+def test_select_prefers_transformers_on_linux_cuda(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
 
-    assert select_transcription_backend() == expected_backend
+    def fake_available(name):
+        return name in ("torch", "torchaudio", "transformers")
+
+    monkeypatch.setattr(
+        "aimd.plugins.asr.capabilities._module_available", fake_available
+    )
+    monkeypatch.setattr("aimd.plugins.asr.capabilities._cuda_available", lambda: True)
+    assert select_transcription_backend() == "transformers"
 
 
-@pytest.mark.parametrize(
-    ("system", "capabilities"),
-    [
-        (
-            "Linux",
-            {
-                "mlx": BackendCapability("mlx", False, "unsupported", None),
-                "transformers": BackendCapability(
-                    "transformers", False, "no transformers", None
-                ),
-            },
-        ),
-        (
-            "Darwin",
-            {
-                "mlx": BackendCapability("mlx", False, "unsupported", None),
-                "transformers": BackendCapability(
-                    "transformers", False, "linux only", None
-                ),
-            },
-        ),
-    ],
-)
-def test_select_transcription_backend_no_backend(
-    monkeypatch,
-    system: str,
-    capabilities: dict[str, BackendCapability],
-) -> None:
-    monkeypatch.setattr("aimd.plugins.asr.capabilities.platform.system", lambda: system)
-    _patch_capabilities(monkeypatch, capabilities)
+def test_select_prefers_transformers_on_windows_cuda(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "aimd.plugins.asr.capabilities._module_available",
+        lambda name: name in ("torch", "torchaudio", "transformers"),
+    )
+    monkeypatch.setattr("aimd.plugins.asr.capabilities._cuda_available", lambda: True)
+    assert select_transcription_backend() == "transformers"
 
+
+def test_select_raises_when_no_backend(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr(
+        "aimd.plugins.asr.capabilities._module_available", lambda name: False
+    )
     with pytest.raises(BackendUnavailableError):
         select_transcription_backend()

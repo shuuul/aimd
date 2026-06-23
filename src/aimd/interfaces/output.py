@@ -66,3 +66,28 @@ def persist_result_output_if_requested(
         result.text_context.chunk_list,
     )
     return PersistedOutput(output_file=str(resolved), output_dir=None)
+
+
+MODEL_HELP_TEXT = (
+    "Model for transcription, or OCR model. macOS OCR: glm_ocr "
+    "(default) or an mlx-vlm compatible Hugging Face model ID. "
+    "Linux/CUDA OCR: got_ocr (default), unlimited_ocr, glm_ocr, "
+    "or a Hugging Face model ID. "
+    "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
+    "and also supports other documented mlx-audio STT model IDs. "
+    "CUDA Transformers ASR supports Qwen/Qwen3-ASR-1.7B "
+    "(default) or Qwen/Qwen3-ASR-0.6B."
+)
+
+
+def get_request_temp_dir() -> Path | None:
+    """Shared helper for API and MCP to resolve AIMD_TEMP_DIR with mkdir."""
+    import os
+
+    env_temp_dir = os.environ.get("AIMD_TEMP_DIR")
+    if not env_temp_dir:
+        return None
+
+    temp_dir = Path(env_temp_dir)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return temp_dir

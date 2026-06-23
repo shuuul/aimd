@@ -7,7 +7,7 @@ from pathlib import Path
 
 from logly import logger
 
-from .errors import ProcessingFailedError
+from aimd.core.errors import ProcessingFailedError
 
 # Container/codec formats reliably read by both mlx-audio and librosa+soundfile.
 SUPPORTED_AUDIO_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}

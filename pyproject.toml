@@ -1,6 +1,6 @@
 [project]
 name = "aimd-tool"
-version = "0.12.0"
+version = "0.12.1"
 description = "Context preparation tool for LLM workflows."
 readme = { text = "Prepare LLM-ready context from URLs, audio/video, and documents.", content-type = "text/markdown" }
 authors = [

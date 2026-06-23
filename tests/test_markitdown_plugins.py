@@ -5,7 +5,7 @@ from pathlib import Path
 from markitdown import MarkItDown, StreamInfo
 
 from aimd.core.models import TextContext
-from aimd.plugins.url.transcript import UrlTextResult
+from aimd.plugins.url._plugin import UrlTextResult
 
 
 def test_aimd_markitdown_plugins_are_discoverable() -> None:

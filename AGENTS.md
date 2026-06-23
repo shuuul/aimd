@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-06-23
-**Version:** 0.12.0
+**Version:** 0.12.1
 **Branch:** main
 
 ## OVERVIEW
@@ -48,8 +48,7 @@ flowchart TD
     MCP["aimd.interfaces.mcp\nMCP stdio"]
 
     Models["aimd.core.models\nProcessInput / ProcessResult / InputRoute"]
-    Router["aimd.core.router\nsource_kind + task_type"]
-    Process["aimd.core.process\ninterface-independent orchestration"]
+    Process["aimd.core.process\nrouting + interface-independent orchestration"]
 
     MID["aimd.core.process\nMarkItDown(enable_plugins=True) -> TextContext"]
     Markdown["aimd.core.process\nchunk + title shaping"]
@@ -67,7 +66,6 @@ flowchart TD
     CLI --> Process
     API --> Process
     MCP --> Process
-    Process --> Router
     Process -->|URL transcript or local file| MID --> MarkItDown
     MarkItDown --> URLPlugin --> ASR
     MarkItDown --> ASRPlugin --> ASR
@@ -83,10 +81,10 @@ flowchart TD
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Input routing | `src/aimd/core/router.py` | Maps source_kind + task_type into an `InputRoute`. |
+| Input routing | `src/aimd/core/process.py` | Maps source_kind + task_type into an `InputRoute`. |
 | Core processing | `src/aimd/core/process.py` | Sends URL and local-file work through MarkItDown and wraps Markdown into `TextContext`. |
 | Local file conversion | `src/aimd/core/process.py` | Calls `MarkItDown(enable_plugins=True)` and wraps Markdown into `TextContext`. |
-| URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in readable HTML extraction. Transcript internals live under `src/aimd/plugins/url/transcript/`; Defuddle wrapping lives in `readable_html.py`. |
+| URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in readable HTML extraction. Logic lives directly under `src/aimd/plugins/url/` (flattened, no transcript/ subpackage). |
 | Request/result models | `src/aimd/core/models.py` | `ProcessInput`, `ProcessResult`, `TaskType`; output files are interface-owned. |
 | Output persistence | `src/aimd/interfaces/output.py` | Shared CLI/API/MCP markdown persistence helpers. |
 | CLI | `src/aimd/interfaces/cli/app.py` | Typer command, user output, local file persistence. |
@@ -110,7 +108,7 @@ flowchart TD
 - **Stable output contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
 - **URL cookie behavior**: keep automatic browser-cookie probing when no explicit cookie option is supplied; it is intentional user convenience for restricted media. Explicit cookie arguments should fail fast when invalid, and URL transcript/audio fallback failures should not be hidden behind metadata-only success results.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
-- **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on Linux/CUDA.
+- **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on CUDA-capable non-Darwin platforms.
 - **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.
 
 ## ANTI-PATTERNS

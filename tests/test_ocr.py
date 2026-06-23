@@ -10,7 +10,6 @@ from aimd.plugins.ocr.backends import (
     OCRPage,
     OCRResult,
     TransformersOCRBackend,
-    _resolve_mlx_vlm_model,
     select_ocr_backend,
 )
 from aimd.plugins.ocr.models import (
@@ -19,12 +18,13 @@ from aimd.plugins.ocr.models import (
 )
 from aimd.plugins.ocr.models.generic import GenericTransformersOCRModel
 from aimd.plugins.ocr.models.got import GOTOCRModel
+from aimd.plugins.ocr.models.mlx import resolve_mlx_vlm_model
 from aimd.plugins.ocr.models.unlimited import (
     UnlimitedOCRModel,
     normalize_unlimited_ocr_output,
     read_unlimited_ocr_output_files,
 )
-from aimd.plugins.ocr.processor import process_ocr
+from aimd.plugins.ocr import process_ocr
 
 
 def test_select_ocr_backend_selects_platform_defaults(monkeypatch) -> None:
@@ -42,14 +42,14 @@ def test_select_ocr_backend_rejects_unsupported_platform(monkeypatch) -> None:
 
 
 def test_resolve_mlx_vlm_model_maps_aimd_names() -> None:
-    assert _resolve_mlx_vlm_model(None) == "mlx-community/GLM-OCR-bf16"
-    assert _resolve_mlx_vlm_model("glm_ocr") == "mlx-community/GLM-OCR-bf16"
-    assert _resolve_mlx_vlm_model("org/custom-model") == "org/custom-model"
+    assert resolve_mlx_vlm_model(None) == "mlx-community/GLM-OCR-bf16"
+    assert resolve_mlx_vlm_model("glm_ocr") == "mlx-community/GLM-OCR-bf16"
+    assert resolve_mlx_vlm_model("org/custom-model") == "org/custom-model"
 
 
 def test_resolve_mlx_vlm_model_rejects_paddleocr_aliases() -> None:
     with pytest.raises(ProcessingFailedError):
-        _resolve_mlx_vlm_model("paddleocr_v6")
+        resolve_mlx_vlm_model("paddleocr_v6")
 
 
 def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
@@ -115,9 +115,9 @@ def test_mlx_vlm_image_uses_python_package(monkeypatch, tmp_path: Path):
         "mlx_vlm.prompt_utils",
         types.SimpleNamespace(apply_chat_template=_apply_chat_template),
     )
-    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model", None)
-    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_processor", None)
-    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model_id", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model_id", None)
 
     result = MLXVLMOCRBackend().recognize(image, model="glm_ocr")
 
@@ -163,11 +163,11 @@ def test_mlx_vlm_pdf_uses_python_package(monkeypatch, tmp_path: Path):
         "mlx_vlm.prompt_utils",
         types.SimpleNamespace(apply_chat_template=lambda *args, **kwargs: "prompt"),
     )
-    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model", None)
-    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_processor", None)
-    monkeypatch.setattr("aimd.plugins.ocr.backends._cached_mlx_vlm_model_id", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model_id", None)
     monkeypatch.setattr(
-        "aimd.plugins.ocr.backends._render_pdf_with_pymupdf",
+        "aimd.plugins.ocr.backends._render_pdf_pages",
         lambda input_path, **kwargs: tuple(enumerate(page_paths)),  # noqa: ARG005
     )
 
@@ -347,7 +347,7 @@ async def test_process_ocr_wraps_backend_result_as_text_context(
             )
 
     monkeypatch.setattr(
-        "aimd.plugins.ocr.processor.create_ocr_backend", lambda: _FakeBackend()
+        "aimd.plugins.ocr._plugin.create_ocr_backend", lambda: _FakeBackend()
     )
 
     result = await process_ocr(

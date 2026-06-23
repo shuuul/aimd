@@ -1,8 +1,35 @@
 """Base contracts and shared helpers for Transformers OCR model adapters."""
 
 from collections.abc import Callable
+from pathlib import Path
+from typing import Protocol
 
 from aimd.core.errors import BackendUnavailableError
+
+
+class TransformersOCRModel(Protocol):
+    """Common interface for Transformers OCR model adapters."""
+
+    model_id: str
+
+    def recognize_image(
+        self,
+        input_path: Path,
+        *,
+        language: str | None = None,
+        temp_dir: Path | None = None,
+    ) -> str:
+        """Recognize text from one image."""
+
+    def recognize_images(
+        self,
+        image_paths: list[Path],
+        *,
+        language: str | None = None,
+        temp_dir: Path | None = None,
+    ) -> list[str]:
+        """Recognize text from ordered images."""
+
 
 _cached_model = None
 _cached_processor = None

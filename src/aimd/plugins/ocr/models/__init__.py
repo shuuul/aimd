@@ -1,8 +1,8 @@
-"""Transformers OCR model registry."""
+"""Transformers OCR model registry (collapsed from models/ subpackage)."""
 
 from aimd.core.errors import ProcessingFailedError
 
-from .base import clear_model_cache
+from .base import TransformersOCRModel, clear_model_cache
 from .generic import GenericTransformersOCRModel
 from .got import GOT_OCR_MODEL_ID, GOTOCRModel
 from .unlimited import (
@@ -45,7 +45,7 @@ def resolve_transformers_ocr_model(model: str | None) -> str:
 
 def create_transformers_ocr_model(
     model: str | None,
-) -> GOTOCRModel | UnlimitedOCRModel | GenericTransformersOCRModel:
+) -> TransformersOCRModel:
     """Create a model-specific Transformers OCR adapter."""
     model_id = resolve_transformers_ocr_model(model)
     if model_id == GOT_OCR_MODEL_ID:
@@ -63,6 +63,7 @@ __all__ = [
     "GenericTransformersOCRModel",
     "GOTOCRModel",
     "UnlimitedOCRModel",
+    "TransformersOCRModel",
     "clear_model_cache",
     "create_transformers_ocr_model",
     "normalize_unlimited_ocr_output",

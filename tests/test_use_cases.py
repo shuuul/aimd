@@ -2,11 +2,10 @@ from pathlib import Path
 
 import pytest
 
-import aimd.core.router as router
+import aimd.core.process as process_mod
 from aimd.core.models import ProcessInput, TextContext
-from aimd.core.process import process_input
+from aimd.core.process import get_input_route, process_input
 from aimd.core.errors import UnsupportedInputError
-from aimd.core.router import get_input_route
 
 
 async def _unexpected_process_url(*args, **kwargs):  # noqa: ANN002, ANN003
@@ -53,7 +52,7 @@ def test_input_route_classifies_images_and_explicit_pdf_ocr(
     pdf = tmp_path / "scan.pdf"
     image.write_text("x", encoding="utf-8")
     pdf.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(router, "_pdf_has_extractable_text", lambda _: True)
+    monkeypatch.setattr(process_mod, "_pdf_has_extractable_text", lambda _: True)
 
     image_route = get_input_route(image.as_posix(), is_supported_file=lambda _: False)
     pdf_convert_route = get_input_route(
@@ -74,7 +73,7 @@ def test_input_route_classifies_images_and_explicit_pdf_ocr(
 def test_input_route_classifies_scanned_pdf_as_ocr(monkeypatch, tmp_path: Path) -> None:
     pdf = tmp_path / "scan.pdf"
     pdf.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(router, "_pdf_has_extractable_text", lambda _: False)
+    monkeypatch.setattr(process_mod, "_pdf_has_extractable_text", lambda _: False)
 
     route = get_input_route(pdf.as_posix(), is_supported_file=lambda _: True)
 

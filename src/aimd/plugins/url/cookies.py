@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from logly import logger
+from aimd.core.errors import UnsupportedInputError
 
 AUTH_REQUIRED_PLATFORMS = {"bilibili", "xiaohongshu"}
 
@@ -116,16 +116,16 @@ def build_cookie_sources(
     if cookies_from_browser:
         try:
             browser_tuple = parse_cookies_from_browser(cookies_from_browser)
-            sources.append(
-                {
-                    "name": f"cookiesfrombrowser:{cookies_from_browser}",
-                    "use_cookies": True,
-                    "cookiefile": None,
-                    "cookiesfrombrowser": browser_tuple,
-                }
-            )
         except ValueError as exc:
-            logger.warning(str(exc))
+            raise UnsupportedInputError(str(exc)) from exc
+        sources.append(
+            {
+                "name": f"cookiesfrombrowser:{cookies_from_browser}",
+                "use_cookies": True,
+                "cookiefile": None,
+                "cookiesfrombrowser": browser_tuple,
+            }
+        )
 
     if not cookies_file and not cookies_from_browser:
         # Ordered probe of all yt-dlp supported browsers; unavailable ones are

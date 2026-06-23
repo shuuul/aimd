@@ -5,7 +5,7 @@ from typing import Any
 
 from logly import logger
 
-from ..errors import ProcessingFailedError, UnsupportedInputError
+from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
 from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,

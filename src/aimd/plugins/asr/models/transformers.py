@@ -1,4 +1,4 @@
-"""Transformers ASR backend implementation (Linux/CUDA)."""
+"""Transformers ASR backend implementation for CUDA platforms."""
 
 import asyncio
 import warnings
@@ -6,12 +6,10 @@ from pathlib import Path
 
 from logly import logger
 
+from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
+
 from ..audio_utils import convert_to_wav_if_needed
-from ..const import (
-    TRANSFORMERS_ASR_DEFAULT_MODEL,
-    TRANSFORMERS_ASR_MODELS,
-)
-from ..errors import ProcessingFailedError, UnsupportedInputError
+from ..const import TRANSFORMERS_ASR_DEFAULT_MODEL
 
 # Silence noisy upstream transformers generation warnings. These are benign and
 # would otherwise pollute CLI output.
@@ -45,6 +43,73 @@ LANGUAGE_CODE_TO_NAME = {
     "fi": "Finnish",
     "ms": "Malay",
 }
+
+
+class TransformersASRModel:
+    """Qwen3-ASR Transformers model adapter."""
+
+    def __init__(self, model_id: str | None = None) -> None:
+        self.model_id = model_id or TRANSFORMERS_ASR_DEFAULT_MODEL
+
+    async def transcribe(
+        self,
+        file_path: Path,
+        *,
+        language: str | None = None,
+        temp_dir: Path | None = None,
+    ) -> str:
+        """Transcribe audio using Transformers ASR models (requires CUDA)."""
+        try:
+            import torch  # type: ignore
+        except ImportError:
+            raise ProcessingFailedError(
+                "PyTorch is not installed. Required for Transformers ASR backend."
+            )
+
+        if not torch.cuda.is_available():
+            raise ProcessingFailedError(
+                "CUDA is not available. Transformers ASR backend requires a CUDA-capable GPU."
+            )
+
+        try:
+            import torchaudio  # type: ignore[import-untyped]  # noqa: F401
+            import transformers  # type: ignore[import-untyped]  # noqa: F401
+        except ImportError:
+            raise ProcessingFailedError(
+                "transformers and torchaudio are required for Transformers ASR backend."
+            )
+
+        logger.info(
+            "Transcribing with Qwen3-ASR model on Transformers backend: "
+            f"{self.model_id}, language: {language or 'auto'}"
+        )
+
+        wav_path: Path | None = None
+        try:
+            wav_path = convert_to_wav_if_needed(file_path, temp_dir=temp_dir)
+            audio_path = wav_path or file_path
+
+            def _transcribe() -> str:
+                return _transcribe_qwen(audio_path, self.model_id, language)
+
+            loop = asyncio.get_event_loop()
+            transcribed_text = await loop.run_in_executor(None, _transcribe)
+
+            if not transcribed_text:
+                raise ProcessingFailedError("Qwen3-ASR produced empty transcription")
+
+            logger.info(
+                f"Successfully transcribed {len(transcribed_text)} characters with Qwen3-ASR"
+            )
+            return transcribed_text
+        except (ProcessingFailedError, UnsupportedInputError):
+            raise
+        except Exception as e:
+            raise ProcessingFailedError(f"Qwen3-ASR transcription failed: {e}") from e
+        finally:
+            if wav_path is not None:
+                wav_path.unlink(missing_ok=True)
+
 
 _cached_model = None
 _cached_processor = None
@@ -204,69 +269,3 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
         clean_up_tokenization_spaces=False,
     )
     return _parse_qwen_output(decoded[0], resolved_language).strip()
-
-
-async def transcribe_audio_transformers(
-    file_path: Path,
-    model: str | None = None,
-    language: str | None = None,
-    temp_dir: Path | None = None,
-) -> str:
-    """Transcribe audio using Transformers ASR models (requires Linux + CUDA)."""
-    try:
-        import torch  # type: ignore
-    except ImportError:
-        raise ProcessingFailedError(
-            "PyTorch is not installed. Required for Transformers ASR backend."
-        )
-
-    if not torch.cuda.is_available():
-        raise ProcessingFailedError(
-            "CUDA is not available. Transformers ASR backend requires a CUDA-capable GPU."
-        )
-
-    try:
-        import torchaudio  # type: ignore[import-untyped]  # noqa: F401
-        import transformers  # type: ignore[import-untyped]  # noqa: F401
-    except ImportError:
-        raise ProcessingFailedError(
-            "transformers and torchaudio are required for Transformers ASR backend."
-        )
-
-    resolved_model = model or TRANSFORMERS_ASR_DEFAULT_MODEL
-    if resolved_model not in TRANSFORMERS_ASR_MODELS:
-        raise UnsupportedInputError(
-            f"Unknown Transformers ASR model: {resolved_model}. "
-            f"Available: {list(TRANSFORMERS_ASR_MODELS.keys())}"
-        )
-
-    logger.info(
-        "Transcribing with Qwen3-ASR model on Transformers backend: "
-        f"{resolved_model}, language: {language or 'auto'}"
-    )
-
-    wav_path: Path | None = None
-    try:
-        wav_path = convert_to_wav_if_needed(file_path, temp_dir=temp_dir)
-        audio_path = wav_path or file_path
-
-        def _transcribe() -> str:
-            return _transcribe_qwen(audio_path, resolved_model, language)
-
-        loop = asyncio.get_event_loop()
-        transcribed_text = await loop.run_in_executor(None, _transcribe)
-
-        if not transcribed_text:
-            raise ProcessingFailedError("Qwen3-ASR produced empty transcription")
-
-        logger.info(
-            f"Successfully transcribed {len(transcribed_text)} characters with Qwen3-ASR"
-        )
-        return transcribed_text
-    except (ProcessingFailedError, UnsupportedInputError):
-        raise
-    except Exception as e:
-        raise ProcessingFailedError(f"Qwen3-ASR transcription failed: {e}") from e
-    finally:
-        if wav_path is not None:
-            wav_path.unlink(missing_ok=True)

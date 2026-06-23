@@ -11,7 +11,7 @@ This document records practical performance expectations for `aimd` processing p
 | Local audio/video transcription | Audio decode/transcode in `aimd.plugins.asr` and ASR model inference | Better in API/MCP because model objects are cached in-process | Non-WAV inputs may be converted to WAV before transcription. |
 | MarkItDown document conversion | Parser/Pandoc/document structure | Mostly CPU and file I/O bound | EPUB conversion also writes chapter/image output trees. |
 | Image OCR | OCR model inference | API/MCP can reuse loaded model objects | VLM OCR models are heavier than classic detector/recognizer OCR. |
-| PDF OCR | PDF rasterization plus one or more OCR passes | Model reuse helps; page rendering still scales with page count and DPI | Linux PDF OCR currently uses `pdftoppm`; macOS renders PDFs with PyMuPDF before `mlx-vlm` inference. |
+| PDF OCR | PDF rasterization plus one or more OCR passes | Model reuse helps; page rendering still scales with page count and DPI | PDF pages render with PyMuPDF before OCR model inference. |
 
 ## Model/runtime tradeoffs
 
@@ -19,7 +19,7 @@ This document records practical performance expectations for `aimd` processing p
 |------|--------|--------------|------------------------------|
 | Transcription | `mlx` | Quantized Qwen3-ASR | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
 | Transcription | `mlx` | Whisper, Distil-Whisper, Parakeet, Nemotron, Voxtral, VibeVoice, Qwen2-Audio | Performance is delegated to `mlx-audio`; model size and upstream generation behavior dominate. |
-| Transcription | `transformers` | Qwen3-ASR | Requires Linux/CUDA. Uses local Hugging Face Transformers generation; no vLLM/SGLang runtime. The 0.6B model is the lower-memory option; 1.7B is the default quality-oriented option. |
+| Transcription | `transformers` | Qwen3-ASR | Requires CUDA on a non-Darwin platform. Uses local Hugging Face Transformers generation; no vLLM/SGLang runtime. The 0.6B model is the lower-memory option; 1.7B is the default quality-oriented option. |
 | OCR | `mlx-vlm` | GLM-OCR or explicit mlx-vlm compatible VLMs | macOS VLM OCR path. Heavier than classic detector/recognizer OCR but avoids a separate OCR wrapper layer. |
 | OCR | `transformers` | GOT-OCR | Default Linux/CUDA OCR path; uses a generic Transformers image-text generation flow. |
 | OCR | `transformers` | Unlimited-OCR | Linux/CUDA VLM OCR path using Baidu's custom `infer`/`infer_multi` API and trusted remote code. Results are read from the model's saved output files. |

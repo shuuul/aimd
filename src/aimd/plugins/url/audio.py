@@ -10,7 +10,7 @@ from logly import logger
 
 from aimd.plugins.asr import transcribe_file
 
-from ..errors import ProcessingFailedError
+from aimd.core.errors import ProcessingFailedError
 from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
@@ -18,8 +18,21 @@ from .cookies import (
     is_cookie_source_unavailable_error,
     is_keyring_error,
 )
-from .platforms import detect_platform
 from .ydl import apply_cookie_source, impersonation_available
+
+
+def detect_platform(url: str) -> str:
+    """Detect the transcript platform from a URL."""
+    url_lower = url.lower()
+    if "youtube.com" in url_lower or "youtu.be" in url_lower:
+        return "youtube"
+    if "bilibili.com" in url_lower:
+        return "bilibili"
+    if "xiaohongshu.com" in url_lower or "xhslink.com" in url_lower:
+        return "xiaohongshu"
+    if "xiaoyuzhoufm.com" in url_lower:
+        return "xiaoyuzhoufm"
+    return "unknown"
 
 
 _MAX_FILENAME_BYTES = 200
@@ -121,6 +134,8 @@ async def _download_and_transcribe_audio(
         if transcribed_text and len(transcribed_text) > 10:
             return transcribed_text
         return None
+    except ProcessingFailedError:
+        raise
     except Exception as exc:
         logger.error(f"Failed to extract content from audio: {exc}")
         return None

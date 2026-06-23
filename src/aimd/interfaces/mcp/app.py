@@ -1,13 +1,15 @@
 """MCP server module for aimd."""
 
-import os
 from pathlib import Path
 from typing import Any
 
 from logly import logger
 from mcp.server.fastmcp import FastMCP
 
-from aimd.interfaces.output import persist_result_output_if_requested
+from aimd.interfaces.output import (
+    get_request_temp_dir,
+    persist_result_output_if_requested,
+)
 from aimd.core.models import ProcessInput, ProcessResult
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
@@ -15,16 +17,6 @@ from aimd.core.errors import AimdError
 logger.remove_all()
 
 mcp = FastMCP("aimd")
-
-
-def _get_request_temp_dir() -> Path | None:
-    env_temp_dir = os.environ.get("AIMD_TEMP_DIR")
-    if not env_temp_dir:
-        return None
-
-    temp_dir = Path(env_temp_dir)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    return temp_dir
 
 
 def _process_result_payload(
@@ -66,7 +58,7 @@ async def process_input(
 ) -> dict[str, Any]:
     """Process audio/video/url/documents and return markdown context."""
     try:
-        temp_dir = _get_request_temp_dir()
+        temp_dir = get_request_temp_dir()
 
         result = await process_core_input(
             ProcessInput(

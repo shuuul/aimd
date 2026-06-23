@@ -6,16 +6,16 @@ The repository has one published distribution, `aimd-tool`, with source code und
 The `aimd` package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
 
 - `aimd.core.models`: canonical request/response models.
-- `aimd.core.router` and `aimd.core.process`: input routing and processing.
+- `aimd.core.process`: input routing and processing.
 - `aimd.core.process`: processing orchestration, MarkItDown runner, and Markdown shaping helpers.
 - `aimd.interfaces.output`: shared output persistence helper for interfaces.
 - `aimd.interfaces.cli`: Typer CLI interface (`aimd.interfaces.cli:main`).
 - `aimd.interfaces.api`: FastAPI-backed HTTP API module (`aimd.interfaces.api:main`).
 - `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
-- `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Transcript internals live under `aimd.plugins.url.transcript`; readable HTML extraction lives in `aimd.plugins.url.readable_html`.
-- `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, ASR model validation, and platform backend selection.
-- `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents. EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
-- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs, with `mlx-vlm` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
+- `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Logic lives directly under `aimd.plugins.url/` (flattened).
+- `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, and platform backend selection (backends flattened, no separate models/ subdir).
+- `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents (cleaner inlined). EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
+- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs (models/ collapsed to single models.py), with `mlx-vlm` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
 
 Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 
@@ -60,7 +60,7 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 
 | Task | Backend boundary | Supported model source |
 |------|-----------------|------------------------|
-| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | `mlx-audio` STT models on Apple Silicon; Qwen3-ASR Transformers models on Linux/CUDA. |
+| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | `mlx-audio` STT models on Apple Silicon; Qwen3-ASR Transformers models on CUDA-capable non-Darwin platforms. |
 | Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` plugin entry points. |
 | OCR | MarkItDown + `aimd.plugins.ocr` plugin | `mlx-vlm` models on macOS/Apple Silicon; CUDA Transformers OCR aliases and explicit Hugging Face model IDs on Linux. |
 

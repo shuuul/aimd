@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.12.0-blue" alt="Version 0.12.0">
+    <img src="https://img.shields.io/badge/version-0.12.1-blue" alt="Version 0.12.1">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -31,7 +31,7 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 - **One input command** for URLs, audio/video files, EPUB documents, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
 - **URL extraction** through bundled `aimd.plugins.url`: yt-dlp transcript URLs such as podcasts, YouTube, and Bilibili, plus opt-in readable HTML extraction through Defuddle.
-- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` on Apple Silicon or Qwen3-ASR on Linux/CUDA.
+- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` on Apple Silicon or Qwen3-ASR on CUDA-capable non-Darwin platforms.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
 - **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
@@ -124,7 +124,7 @@ Backend selection is automatic:
 | Platform | Backend | Notes |
 |--------|----------|-------|
 | macOS Apple Silicon | MLX | Uses `mlx-audio` when available. |
-| Linux/CUDA | Transformers | Uses Qwen3-ASR through Transformers when CUDA is available. |
+| CUDA-capable non-Darwin | Transformers | Uses Qwen3-ASR through Transformers when CUDA is available. |
 
 ### Supported models
 
@@ -147,8 +147,8 @@ Backend selection is automatic:
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` | mlx-audio STT | No | Voxtral Mini 4B Realtime, fp16. |
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/VibeVoice-ASR-bf16` | mlx-audio STT | No | VibeVoice-ASR, bf16; upstream model may include diarization/timestamps. |
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
-| Transcription | Linux/CUDA / Transformers | `Qwen/Qwen3-ASR-1.7B` | Transformers | Yes | Default Linux/CUDA ASR model. |
-| Transcription | Linux/CUDA / Transformers | `Qwen/Qwen3-ASR-0.6B` | Transformers | No | Lower-memory Qwen3-ASR option. |
+| Transcription | CUDA-capable non-Darwin / Transformers | `Qwen/Qwen3-ASR-1.7B` | Transformers | Yes | Default CUDA Transformers ASR model. |
+| Transcription | CUDA-capable non-Darwin / Transformers | `Qwen/Qwen3-ASR-0.6B` | Transformers | No | Lower-memory Qwen3-ASR option. |
 | OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr`, `glm-ocr`, `mlx-community/GLM-OCR-bf16` | `mlx-community/GLM-OCR-bf16` | Yes | Default macOS MLX VLM OCR model. |
 | OCR | macOS Apple Silicon / mlx-vlm | Explicit Hugging Face model ID | Provided model ID | No | Any local `mlx-vlm` compatible OCR/image-text model. |
 | OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | Yes | Default Linux/CUDA OCR model. |
@@ -205,7 +205,7 @@ aimd scan.pdf --model glm_ocr                  # macOS mlx-vlm default, or Linux
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. macOS uses `mlx-vlm` directly, where the default OCR model is `glm_ocr` (`mlx-community/GLM-OCR-bf16`), and explicit `mlx-vlm` compatible Hugging Face model IDs are accepted. Linux/CUDA uses the Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed. PaddleOCR aliases are intentionally not supported. PDF OCR on Linux uses the system `pdftoppm` executable from poppler when available.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. macOS uses `mlx-vlm` directly, where the default OCR model is `glm_ocr` (`mlx-community/GLM-OCR-bf16`), and explicit `mlx-vlm` compatible Hugging Face model IDs are accepted. Linux/CUDA uses the Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed. PaddleOCR aliases are intentionally not supported. PDF OCR renders pages with PyMuPDF before model inference.
 
 ### MarkItDown plugins
 
@@ -308,8 +308,8 @@ Release a tagged version:
 
 ```bash
 # Make sure the package version matches the tag, then push a v-prefixed tag.
-git tag v0.12.0
-git push origin v0.12.0
+git tag v0.12.1
+git push origin v0.12.1
 ```
 
 The release workflow builds the single `aimd-tool` distribution, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes that distribution to PyPI using the `UV_PUBLISH_TOKEN` repository secret.
@@ -327,7 +327,7 @@ src/
 
 The package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
 
-- `aimd.core.models`, `aimd.core.process`, and `aimd.core.router` own canonical request/response models, input routing, and processing; ASR/OCR backends are selected internally from the current platform.
+- `aimd.core.models` and `aimd.core.process` own canonical request/response models, input routing, and processing; ASR/OCR backends are selected internally from the current platform.
 - `aimd.core.process.process_input()` sends URL and local-file work through `MarkItDown(enable_plugins=True)`.
 - Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
 - Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.

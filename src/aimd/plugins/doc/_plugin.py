@@ -12,7 +12,7 @@ from markitdown import (
     StreamInfo,
 )
 
-from .processor import PANDOC_DOCUMENT_EXTENSIONS, process_doc_with_assets
+from .conversion import PANDOC_DOCUMENT_EXTENSIONS, process_doc_with_assets
 
 __plugin_interface_version__ = 1
 

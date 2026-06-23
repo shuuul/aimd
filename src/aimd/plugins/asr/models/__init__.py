@@ -1,6 +1,11 @@
 """ASR model adapters."""
 
-from .mlx import transcribe_audio_mlx
-from .transformers import transcribe_audio_transformers
+from .base import ASRModel
+from .mlx import MLXAudioASRModel
+from .transformers import TransformersASRModel
 
-__all__ = ["transcribe_audio_mlx", "transcribe_audio_transformers"]
+__all__ = [
+    "ASRModel",
+    "MLXAudioASRModel",
+    "TransformersASRModel",
+]

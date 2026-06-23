@@ -13,10 +13,110 @@ from markitdown import MarkItDown, StreamInfo
 from aimd.plugins.asr.const import AUDIO_EXTENSIONS
 from .errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
 from .models import InputRoute, ProcessInput, ProcessResult, TaskType, TextContext
-from .router import FileSupportChecker, ensure_supported_input as ensure_supported_route
 
-from aimd.plugins.url import detect_platform
+from aimd.plugins.asr.const import AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
+from aimd.plugins.url import detect_platform, is_url
 from aimd.plugins.doc import PANDOC_DOCUMENT_EXTENSIONS
+
+# --- Routing logic merged from router.py (Phase 5) ---
+FileSupportChecker = Callable[[str | Path], bool]
+
+_IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
+_OCR_DOCUMENT_EXTENSIONS = {".pdf"}
+_VALID_TASK_TYPES: set[TaskType] = {"transcript", "convert", "ocr"}
+
+
+def _pdf_has_extractable_text(file_path: Path) -> bool:
+    """Best-effort check for text-layer PDFs before falling back to OCR."""
+    try:
+        import pymupdf
+    except ImportError:
+        return True
+    try:
+        with pymupdf.open(file_path) as document:
+            for page in document:
+                if page.get_text("text").strip():
+                    return True
+    except Exception:
+        return True
+    return False
+
+
+def get_input_route(
+    input_source: str,
+    is_supported_file: FileSupportChecker,
+    requested_task_type: TaskType | None = None,
+) -> InputRoute:
+    """Classify a source and select the processing task."""
+    if is_url(input_source):
+        if requested_task_type and requested_task_type != "transcript":
+            return InputRoute(source_kind="url", task_type=None)
+        return InputRoute(source_kind="url", task_type="transcript")
+
+    try:
+        file_path = Path(input_source)
+        if file_path.exists():
+            suffix = file_path.suffix.lower()
+            if requested_task_type == "ocr":
+                if suffix in _IMAGE_FILE_EXTENSIONS:
+                    return InputRoute(source_kind="image_file", task_type="ocr")
+                if suffix in _OCR_DOCUMENT_EXTENSIONS:
+                    return InputRoute(source_kind="document_file", task_type="ocr")
+                return InputRoute(source_kind="unknown", task_type=None)
+            if suffix in _IMAGE_FILE_EXTENSIONS:
+                return InputRoute(source_kind="image_file", task_type="ocr")
+            if suffix in _OCR_DOCUMENT_EXTENSIONS and not _pdf_has_extractable_text(
+                file_path
+            ):
+                return InputRoute(source_kind="document_file", task_type="ocr")
+            if suffix in AUDIO_FILE_EXTENSIONS:
+                if requested_task_type and requested_task_type != "transcript":
+                    return InputRoute(source_kind="audio_file", task_type=None)
+                return InputRoute(source_kind="audio_file", task_type="transcript")
+            if suffix in VIDEO_FILE_EXTENSIONS:
+                if requested_task_type and requested_task_type != "transcript":
+                    return InputRoute(source_kind="video_file", task_type=None)
+                return InputRoute(source_kind="video_file", task_type="transcript")
+            if is_supported_file(file_path):
+                if requested_task_type and requested_task_type != "convert":
+                    return InputRoute(source_kind="document_file", task_type=None)
+                return InputRoute(source_kind="document_file", task_type="convert")
+    except (OSError, ValueError):
+        pass
+
+    return InputRoute(source_kind="unknown", task_type=None)
+
+
+def ensure_supported_input(
+    input_source: str,
+    requested_task_type: TaskType | None = None,
+    *,
+    is_supported_file_fn: FileSupportChecker | None = None,
+) -> InputRoute:
+    """Validate and return supported input route, else raise domain error."""
+    if is_supported_file_fn is None:
+        is_supported_file_fn = is_supported_file
+    if requested_task_type is not None and requested_task_type not in _VALID_TASK_TYPES:
+        raise UnsupportedInputError(
+            "Unsupported task. Supported tasks: transcript, convert, ocr."
+        )
+
+    route = get_input_route(input_source, is_supported_file_fn, requested_task_type)
+    if route.task_type is None:
+        input_path = Path(input_source)
+        if not is_url(input_source) and input_path.suffix and not input_path.exists():
+            raise InputNotFoundError(f"Input file not found: {input_source}")
+        if requested_task_type == "ocr":
+            raise UnsupportedInputError(
+                "Unsupported OCR input. OCR supports image files "
+                "(.png, .jpg, .jpeg, .webp, .tif, .tiff) and PDF files."
+            )
+        raise UnsupportedInputError(
+            "Unsupported input source. Supported inputs: audio/video files, "
+            "video URLs, supported document files, and OCR-capable images/PDFs."
+        )
+    return route
+
 
 _DOCUMENT_ASSET_EXTENSIONS = {".docx", ".epub", ".odt"}
 _MARKITDOWN_FILE_EXTENSIONS = (
@@ -63,84 +163,51 @@ def is_supported_file(file_path: str | Path) -> bool:
 def _extract_title_from_content(
     content: str, fallback_title: str = "Untitled", for_filename: bool = False
 ) -> str:
-    """Extract and clean title from markdown text."""
+    """Extract and clean title from markdown text (simplified)."""
     if not content or not content.strip():
         return fallback_title
 
-    lines = content.strip().split("\n")
-    extracted_title = None
+    lines = [ln.strip() for ln in content.strip().split("\n") if ln.strip()]
 
+    extracted = None
     for line in lines:
-        line = line.strip()
         if line.startswith("# "):
-            extracted_title = line[2:].strip()
+            extracted = line[2:].strip()
             break
-
-    if not extracted_title and content.strip().startswith("---"):
-        in_frontmatter = False
-        for line in lines:
-            if line.strip() == "---":
-                if in_frontmatter:
-                    break
-                in_frontmatter = True
-                continue
-            if in_frontmatter and line.strip().startswith("title:"):
-                title_match = re.match(r'title:\s*["\']?([^"\']+)["\']?', line.strip())
-                if title_match:
-                    extracted_title = title_match.group(1).strip()
-                    break
-
-    if not extracted_title:
+    if not extracted:
         for i, line in enumerate(lines):
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                if next_line and (
-                    all(c == "=" for c in next_line) or all(c == "-" for c in next_line)
-                ):
-                    extracted_title = line.strip()
-                    break
-
-    if not extracted_title:
-        for line in lines[:5]:
-            line = line.strip()
-            if not line:
-                continue
-            if (
-                line.startswith("![")
-                or line.startswith("[]{")
-                or line.startswith(":::")
-                or line.startswith("<div")
-                or line.startswith("</div")
-                or "calibre" in line.lower()
-                or "kindle-cn" in line.lower()
+            if i + 1 < len(lines) and (
+                all(c == "=" for c in lines[i + 1])
+                or all(c == "-" for c in lines[i + 1])
             ):
-                continue
-            if 2 <= len(line) <= 100 and not line.lower().startswith("http"):
-                extracted_title = line
+                extracted = line
+                break
+    if not extracted:
+        for line in lines[:5]:
+            if (
+                line
+                and not line.startswith(("#", "!", "[", "<", "{", ":::", "---"))
+                and not line.lower().startswith("http")
+            ):
+                extracted = line
                 break
 
-    if not extracted_title:
+    if not extracted:
         return fallback_title
 
-    clean_text = re.sub(r"^#+\s*", "", extracted_title)
-    clean_text = re.sub(r"\*+([^*]+)\*+", r"\1", clean_text)
-    clean_text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean_text)
-    clean_text = re.sub(r"\{[^}]*\}", "", clean_text)
-    clean_text = re.sub(r"\[\^[^\]]*\](?:\([^)]*\))?", "", clean_text)
-    clean_text = re.sub(r"\^[^\]]*\]", "", clean_text)
-    clean_text = re.sub(r"#[a-zA-Z0-9_.-]+", "", clean_text)
-    clean_text = re.sub(r"\([^)]*\)", "", clean_text)
-    clean_text = re.sub(r'^["""\'\']+|["""\'\']+$', "", clean_text)
-    clean_text = re.sub(r"\s+", " ", clean_text).strip()
-    clean_text = re.sub(r"[。，、；：！？]+$", "", clean_text)
+    clean = re.sub(r"^#+\s*", "", extracted)
+    clean = re.sub(r"\*+([^*]+)\*+", r"\1", clean)
+    clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean)
+    clean = re.sub(r"\{[^}]*\}|\([^)]*\)|#\S+", "", clean)
+    clean = re.sub(r'^["\'\']+|["\'\']+$', "", clean)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    clean = re.sub(r"[。，、；：！？]+$", "", clean)
 
     if for_filename:
-        clean_text = re.sub(r'[<>:"/\\|?*]', "", clean_text)
-        clean_text = re.sub(r"\s+", "_", clean_text.strip())
-        if len(clean_text) > 50:
-            clean_text = clean_text[:50].rstrip("_")
+        clean = re.sub(r'[<>:"/\\|?*]', "", clean)
+        clean = re.sub(r"\s+", "_", clean)[:50].rstrip("_")
 
-    return clean_text or fallback_title
+    return clean or fallback_title
 
 
 def _combine_sections_for_processing(
@@ -407,16 +474,6 @@ async def convert_file_with_markitdown(
     )
 
 
-def ensure_supported_input(
-    input_source: str,
-    task_type: TaskType | None = None,
-    *,
-    is_supported_file_fn: FileSupportChecker = is_supported_file,
-) -> InputRoute:
-    """Validate and return the source/task route for a source."""
-    return ensure_supported_route(input_source, is_supported_file_fn, task_type)
-
-
 async def process_input(
     request: ProcessInput,
     *,
@@ -471,8 +528,6 @@ async def _process_local_file(
     process_file: LocalFileProcessor,
 ) -> ProcessResult:
     input_path = Path(request.input_source)
-    if not input_path.exists():
-        raise InputNotFoundError(f"Input file not found: {request.input_source}")
 
     text_context, output_dir = await process_file(
         input_path.as_posix(),

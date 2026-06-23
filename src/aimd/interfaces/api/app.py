@@ -8,7 +8,11 @@ from fastapi import FastAPI, HTTPException
 from logly import logger
 from pydantic import BaseModel, Field
 
-from aimd.interfaces.output import persist_result_output_if_requested
+from aimd.interfaces.output import (
+    MODEL_HELP_TEXT,
+    get_request_temp_dir,
+    persist_result_output_if_requested,
+)
 from aimd.core.models import ProcessInput, ProcessResult, TaskType
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
@@ -32,14 +36,7 @@ class ProcessRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Model for transcription, or OCR model. macOS OCR: "
-        "glm_ocr (default) or an mlx-vlm compatible Hugging Face model ID. "
-        "Linux/CUDA OCR: got_ocr (default), unlimited_ocr, glm_ocr, "
-        "or a Hugging Face model ID. "
-        "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
-        "and also supports other documented mlx-audio STT model IDs. "
-        "Linux/CUDA Transformers ASR supports Qwen/Qwen3-ASR-1.7B "
-        "(default) or Qwen/Qwen3-ASR-0.6B.",
+        description=MODEL_HELP_TEXT,
     )
     language: str | None = Field(
         default=None,
@@ -78,16 +75,6 @@ class ProcessResponse(BaseModel):
     platform: str | None = None
     output_file: str | None = None
     output_dir: str | None = None
-
-
-def _get_request_temp_dir() -> Path | None:
-    env_temp_dir = os.environ.get("AIMD_TEMP_DIR")
-    if not env_temp_dir:
-        return None
-
-    temp_dir = Path(env_temp_dir)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    return temp_dir
 
 
 def _build_process_input(
@@ -140,7 +127,7 @@ def create_app() -> FastAPI:
     @app.post("/v1/process", response_model=ProcessResponse)
     async def process(request: ProcessRequest) -> ProcessResponse:
         try:
-            temp_dir = _get_request_temp_dir()
+            temp_dir = get_request_temp_dir()
 
             result = await process_core_input(_build_process_input(request, temp_dir))
 
