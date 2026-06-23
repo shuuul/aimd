@@ -34,7 +34,7 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 - **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` on Apple Silicon or Qwen3-ASR on Linux/CUDA.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
-- **OCR task** for scanned PDFs and images, with `mlx4ocr` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
+- **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
 - **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
 
 ## Install
@@ -84,7 +84,7 @@ uv run aimd --help
 Platform notes:
 
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`.
-- macOS OCR uses `mlx4ocr` on Python 3.12+ and downloads OCR model weights on first use.
+- macOS OCR uses `mlx-vlm` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
 - Linux OCR uses the Transformers backend with CUDA.
 - Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
@@ -103,7 +103,7 @@ aimd page.png
 # Common options
 aimd audio.mp3 --output transcript.md
 aimd audio.wav --language zh
-aimd scan.pdf --model paddleocr_v6 --start 0 --end 2
+aimd scan.pdf --model glm_ocr --start 0 --end 2
 aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
 aimd "https://youtube.com/watch?v=..." --raw-transcript
 ```
@@ -149,14 +149,11 @@ Backend selection is automatic:
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
 | Transcription | Linux/CUDA / Transformers | `Qwen/Qwen3-ASR-1.7B` | Transformers | Yes | Default Linux/CUDA ASR model. |
 | Transcription | Linux/CUDA / Transformers | `Qwen/Qwen3-ASR-0.6B` | Transformers | No | Lower-memory Qwen3-ASR option. |
-| OCR | macOS Apple Silicon / mlx4ocr | `paddleocr_v6`, `ppocrv6`, `pp_ocrv6` | mlx4ocr `ppocrv6` | Yes | Uses the `medium` PP-OCRv6 variant by default. |
-| OCR | macOS Apple Silicon / mlx4ocr | `tiny`, `small`, `medium` | mlx4ocr `ppocrv6` | No | Explicit PP-OCRv6 variants. |
-| OCR | macOS Apple Silicon / mlx4ocr | `glm_ocr` | mlx4ocr `glm-ocr` | No | Optional mlx4ocr VLM backend. |
-| OCR | macOS Apple Silicon / mlx4ocr | `paddleocr_vl` | mlx4ocr `paddleocr-vl` | No | Optional mlx4ocr VLM backend. |
+| OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr`, `glm-ocr`, `mlx-community/GLM-OCR-bf16` | `mlx-community/GLM-OCR-bf16` | Yes | Default macOS MLX VLM OCR model. |
+| OCR | macOS Apple Silicon / mlx-vlm | Explicit Hugging Face model ID | Provided model ID | No | Any local `mlx-vlm` compatible OCR/image-text model. |
 | OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | Yes | Default Linux/CUDA OCR model. |
 | OCR | Linux/CUDA / Transformers | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | No | Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
 | OCR | Linux/CUDA / Transformers | `glm_ocr`, `glm-ocr`, `zai-org/GLM-OCR` | `zai-org/GLM-OCR` | No | May require a newer Transformers build than the PyPI baseline. |
-| OCR | Linux/CUDA / Transformers | `paddleocr_vl`, `paddleocr-vl`, `PaddlePaddle/PaddleOCR-VL-1.5` | `PaddlePaddle/PaddleOCR-VL-1.5` | No | May require optional runtime packages expected by upstream model code. |
 
 ### URLs
 
@@ -174,6 +171,8 @@ For authenticated or restricted content:
 aimd "https://youtube.com/watch?v=..." --cookies cookies.txt
 aimd "https://www.bilibili.com/video/BV..." --cookies-from-browser "chrome:default"
 ```
+
+When no cookie option is provided, URL extraction may try available browser cookie sources before falling back to unauthenticated access. Keep this behavior because it makes restricted media work out of the box, but explicit cookie options should fail fast when invalid. Transcript requests should also fail when subtitles and audio transcription both produce no text, instead of returning metadata-only Markdown as a successful transcript.
 
 ### Documents
 
@@ -202,13 +201,11 @@ aimd page.png
 aimd scan.pdf                                  # OCR if no extractable PDF text is found
 aimd scan.pdf --model got_ocr                  # Linux/CUDA VLM OCR
 aimd scan.pdf --model unlimited_ocr            # Linux/CUDA Baidu Unlimited-OCR
-aimd scan.pdf --model paddleocr_v6             # default PP-OCRv6 detector/recognizer
-aimd scan.pdf --model glm_ocr                  # optional mlx4ocr VLM backend
-aimd scan.pdf --model paddleocr_vl             # optional mlx4ocr VLM backend
+aimd scan.pdf --model glm_ocr                  # macOS mlx-vlm default, or Linux/CUDA GLM-OCR
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. macOS uses mlx4ocr, where the default OCR model is `paddleocr_v6` (mapped to mlx4ocr `ppocrv6` with the `medium` variant). `glm_ocr` and `paddleocr_vl` require mlx4ocr's optional VLM dependencies. Linux/CUDA uses the Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed, and `paddleocr_vl` maps to `PaddlePaddle/PaddleOCR-VL-1.5` when its optional runtime requirements are present. Traditional PP-OCRv6/`paddleocr_v6` is intentionally not routed through Transformers. PDF OCR on Linux uses the system `pdftoppm` executable from poppler when available.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. macOS uses `mlx-vlm` directly, where the default OCR model is `glm_ocr` (`mlx-community/GLM-OCR-bf16`), and explicit `mlx-vlm` compatible Hugging Face model IDs are accepted. Linux/CUDA uses the Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed. PaddleOCR aliases are intentionally not supported. PDF OCR on Linux uses the system `pdftoppm` executable from poppler when available.
 
 ### MarkItDown plugins
 
@@ -334,7 +331,7 @@ The package uses MarkItDown as the URL/local-file conversion contract and keeps 
 - `aimd.core.process.process_input()` sends URL and local-file work through `MarkItDown(enable_plugins=True)`.
 - Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
 - Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
-- `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. `aimd.plugins.asr` owns transcription backend selection, model validation, and the local audio/video MarkItDown plugin.
+- `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. It intentionally keeps automatic browser-cookie probing for convenience, while explicit cookie arguments and transcript/audio fallback failures should surface clear errors. `aimd.plugins.asr` owns transcription backend selection, model validation, and the local audio/video MarkItDown plugin.
 - `aimd.core.process` wraps MarkItDown markdown results into `TextContext` chunks.
 - CLI/API/MCP modules translate interface requests into core processing. Output file persistence is interface-owned and shared through `aimd.interfaces.output`; it is not part of `ProcessInput`.
 

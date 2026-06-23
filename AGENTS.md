@@ -108,6 +108,7 @@ flowchart TD
 - **Fail-fast preflight**: validate selected engines before expensive work.
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.
 - **Stable output contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
+- **URL cookie behavior**: keep automatic browser-cookie probing when no explicit cookie option is supplied; it is intentional user convenience for restricted media. Explicit cookie arguments should fail fast when invalid, and URL transcript/audio fallback failures should not be hidden behind metadata-only success results.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
 - **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on Linux/CUDA.
 - **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.
@@ -118,6 +119,8 @@ flowchart TD
 - Importing interface modules from `aimd.core` or feature packages.
 - Raising generic exceptions where a domain error exists.
 - Changing URL subtitle/cookie/audio fallback ordering without explicit tests.
+- Removing automatic URL browser-cookie probing without an explicit product decision; simplify surrounding error handling instead.
+- Returning metadata-only URL output as a successful transcript when subtitle extraction and audio transcription both failed.
 - Hard-coding stale audio model allow-lists or help text that blocks newer `mlx-audio` STT models.
 - Adding broad abstractions before OCR requirements prove they are needed.
 
@@ -193,7 +196,8 @@ uv version --bump patch  # or minor/major
 - Dev group includes API/MCP dependencies so tests run with `uv sync --dev`.
 - `torch`/`torchaudio` resolve from the PyTorch CPU wheel index on Darwin.
 - `defuddle` is a Node/TypeScript package; `aimd.plugins.url` registers the opt-in readable HTML converter and wraps `npx defuddle parse` rather than vendoring Node code.
-- URL extraction supports Netscape cookie files and browser cookie sources.
+- URL extraction supports Netscape cookie files, explicit browser cookie sources, and automatic browser-cookie probing when no cookie option is supplied. Invalid explicit cookie options should be reported directly.
+- URL transcript extraction should prefer subtitles, then audio transcription fallback; if both paths produce no text, treat it as a processing failure rather than a metadata-only success.
 - `--raw-transcript` preserves original SRT/VTT subtitle formatting; default strips subtitles to plain text.
 - `--temp-dir` and `AIMD_TEMP_DIR` redirect temporary downloads, transcoding, and document extraction.
 - URL and local file conversion use MarkItDown and installed `markitdown.plugin` entry points.

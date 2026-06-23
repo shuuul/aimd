@@ -15,7 +15,7 @@ The `aimd` package uses MarkItDown as the URL/local-file conversion contract and
 - `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction.
 - `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, ASR model validation, and platform backend selection.
 - `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents. EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
-- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs, with `mlx4ocr` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
+- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs, with `mlx-vlm` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
 
 Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 
@@ -62,7 +62,7 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 |------|-----------------|------------------------|
 | Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | `mlx-audio` STT models on Apple Silicon; Qwen3-ASR Transformers models on Linux/CUDA. |
 | Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` plugin entry points. |
-| OCR | MarkItDown + `aimd.plugins.ocr` plugin | `mlx4ocr` models on macOS/Apple Silicon; CUDA Transformers OCR aliases and explicit Hugging Face model IDs on Linux. |
+| OCR | MarkItDown + `aimd.plugins.ocr` plugin | `mlx-vlm` models on macOS/Apple Silicon; CUDA Transformers OCR aliases and explicit Hugging Face model IDs on Linux. |
 
 The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.plugins.asr.const` and `aimd.plugins.ocr.backends`.
 

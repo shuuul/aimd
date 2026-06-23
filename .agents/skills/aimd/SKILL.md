@@ -18,6 +18,8 @@ Use this skill when you need to turn source material into Markdown context for a
 - Validate local input paths before running OCR, document conversion, or transcription.
 - Save output with `--output` when the generated Markdown will be reused by another agent step.
 - Choose `--raw-transcript` only when timestamps/cues from subtitles are useful; otherwise use the default cleaned text.
+- For restricted URLs, prefer explicit `--cookies` or `--cookies-from-browser` when the user knows the needed login source. AIMD may auto-probe browser cookies when no cookie option is supplied, but invalid explicit cookie options should be treated as errors.
+- Treat a URL transcript result with no subtitle text and no audio transcription as a failure to prepare transcript context, not as useful metadata-only context.
 - For sandboxed environments, set `AIMD_TEMP_DIR` or pass `--temp-dir` to a writable directory.
 - Do not claim unsupported local inference: macOS local ML uses MLX; Linux local ASR/OCR expects CUDA.
 
@@ -86,6 +88,8 @@ For authenticated or restricted media:
 aimd "https://youtube.com/watch?v=..." --cookies cookies.txt --output transcript.md
 aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome --output transcript.md
 ```
+
+If the user does not provide cookies, AIMD may try available browser cookie sources automatically for convenience. Do not hide an invalid explicit cookie option or a failed audio transcription fallback; surface the error so the user can choose the right credential source or backend.
 
 Preserve original subtitle formatting only when needed:
 
