@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/shuuul/aimd/compare/v0.13.0...v0.13.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **url:** preserve complete YouTube transcripts ([a06829c](https://github.com/shuuul/aimd/commit/a06829c9a336680fe4b4a9308bbfec114a3ef6b2))
+
 ## [0.13.0](https://github.com/shuuul/aimd/compare/v0.12.0...v0.13.0) (2026-06-23)
 
 
