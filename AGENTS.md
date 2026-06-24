@@ -209,11 +209,13 @@ uv run pytest -q
 
 Release automation:
 
-- Commits to `main` run release-please, which creates or updates a release PR.
+- Release is centralized in `.github/workflows/release.yml`; do not add a separate tag-triggered or release-please workflow.
+- Commits to `main` run release-please, which creates or updates a release PR based on Conventional Commits.
 - The release PR updates `CHANGELOG.md`, `pyproject.toml`, and `.release-please-manifest.json`.
 - Before merging a release PR, run `uv lock` locally if `pyproject.toml` changed the project version, commit the resulting `uv.lock` update into the release PR, then run `uv run prek --all-files` and `uv run pytest -q`.
-- Review and merge the release PR to create the GitHub release/tag. Do not manually edit the generated changelog unless release notes need correction.
-- The existing tag-based release workflow builds distributions, smoke-installs them, attaches artifacts to the GitHub release, and publishes to PyPI.
+- Merging the release PR lets release-please create the tag and GitHub Release. The same `release.yml` workflow then builds distributions from that tag, smoke-installs them, attaches artifacts to the GitHub Release, and publishes to PyPI.
+- Do not manually push release tags or manually bump versions on normal feature/fix branches; let release-please own changelog, version, tag, and release creation unless explicitly doing emergency release maintenance.
+- Do not manually edit the generated changelog unless release notes need correction.
 
 For manual version bumps outside release-please, prefer avoiding them. If needed:
 

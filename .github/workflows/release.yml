@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -12,16 +12,35 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
   id-token: write
 
 jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Create or update release PR
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
   build:
     name: Build Python distributions
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,10 +53,9 @@ jobs:
           enable-cache: true
 
       - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          expected="${GITHUB_REF_NAME#v}"
+          expected="${RELEASE_TAG#v}"
           python - <<'PY' "$expected"
           import sys
           import tomllib
@@ -52,6 +70,8 @@ jobs:
               print(f"Tag {expected!r} does not match {name} version {actual!r}")
               raise SystemExit(1)
           PY
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Build aimd-tool distribution
         run: uv build --out-dir dist
@@ -65,7 +85,10 @@ jobs:
 
   smoke-install:
     name: Smoke install (${{ matrix.os }})
-    needs: build
+    needs:
+      - release-please
+      - build
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -77,6 +100,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -91,7 +116,7 @@ jobs:
       - name: Install released ref as uv tool
         run: >-
           uv tool install --force
-          "aimd-tool[all] @ git+https://github.com/${{ github.repository }}.git@${{ github.ref_name }}"
+          "aimd-tool[all] @ git+https://github.com/${{ github.repository }}.git@${{ needs.release-please.outputs.tag_name }}"
 
       - name: Verify installed executables
         shell: bash
@@ -111,11 +136,12 @@ jobs:
           PY
 
   github-release:
-    name: Publish GitHub Release
+    name: Attach artifacts to GitHub Release
     needs:
+      - release-please
       - build
       - smoke-install
-    if: startsWith(github.ref, 'refs/tags/')
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -128,13 +154,16 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: dist/*
 
   pypi-publish:
     name: Publish to PyPI
     needs:
+      - release-please
       - build
       - smoke-install
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
