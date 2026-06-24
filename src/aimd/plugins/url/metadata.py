@@ -51,11 +51,12 @@ async def extract_video_info(
         try:
             info_dict = await loop.run_in_executor(None, _extract_with_source)
             if info_dict:
+                info_dict["_aimd_cookie_source"] = source
                 logger.debug(f"Video info extracted with source: {source['name']}")
                 return info_dict
         except Exception as exc:
             last_error = exc
-            logger.warning(f"Video info extraction failed with {source['name']}: {exc}")
+            logger.debug(f"Video info extraction failed with {source['name']}: {exc}")
 
             if is_unsupported_url_error(exc):
                 raise UnsupportedInputError(f"Unsupported URL: {url}") from exc

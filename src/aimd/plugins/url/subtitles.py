@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Iterable
+from typing import Any
 
 from logly import logger
 
@@ -111,13 +112,17 @@ def get_preferred_languages(
     return default_priority
 
 
-async def download_subtitle(url: str, platform: str) -> str | None:
-    """Download subtitle content from URL using yt-dlp without cookies."""
+async def download_subtitle(
+    url: str,
+    platform: str,
+    cookie_source: dict[str, Any] | None = None,
+) -> str | None:
+    """Download subtitle content from URL using yt-dlp and the selected cookies."""
 
     def _download() -> str:
         with create_subtitle_ydl(
             platform=platform,
-            cookie_source={"use_cookies": False},
+            cookie_source=cookie_source or {"use_cookies": False},
         ) as ydl:
             response = ydl.urlopen(url)
             return response.read().decode("utf-8")
@@ -138,6 +143,9 @@ async def extract_subtitles(
     """Extract subtitles from video metadata with platform-specific handling."""
     subtitles = info_dict.get("subtitles", {})
     auto_subtitles = info_dict.get("automatic_captions", {})
+    cookie_source = info_dict.get("_aimd_cookie_source")
+    if not isinstance(cookie_source, dict):
+        cookie_source = None
 
     if not subtitles and not auto_subtitles:
         logger.info("No subtitles available")
@@ -209,7 +217,11 @@ async def extract_subtitles(
                 )
                 return None
 
-            subtitle_content = await download_subtitle(sub_url, platform)
+            subtitle_content = await download_subtitle(
+                sub_url,
+                platform,
+                cookie_source=cookie_source,
+            )
             if subtitle_content:
                 logger.info(f"Successfully extracted subtitles using {platform} format")
             return subtitle_content

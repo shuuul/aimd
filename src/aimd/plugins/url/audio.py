@@ -18,7 +18,7 @@ from .cookies import (
     is_cookie_source_unavailable_error,
     is_keyring_error,
 )
-from .ydl import apply_cookie_source, impersonation_available
+from .ydl import _base_ydl_opts, apply_cookie_source
 
 
 def detect_platform(url: str) -> str:
@@ -224,12 +224,13 @@ async def _try_download_with_format(
     """Attempt to download audio with specific format settings."""
 
     def _build_download_opts(cookie_source: dict[str, Any]) -> dict[str, Any]:
-        ydl_opts: dict[str, Any] = {
-            "quiet": True,
-            "no_warnings": True,
-            "format": format_selector,
-            "outtmpl": str(download_path / audio_filename) + ".%(ext)s",
-        }
+        ydl_opts: dict[str, Any] = _base_ydl_opts(platform)
+        ydl_opts.update(
+            {
+                "format": format_selector,
+                "outtmpl": str(download_path / audio_filename) + ".%(ext)s",
+            }
+        )
 
         if preferred_codec:
             ydl_opts["postprocessors"] = [
@@ -240,10 +241,7 @@ async def _try_download_with_format(
                 }
             ]
 
-        if platform == "youtube" and impersonation_available():
-            ydl_opts["impersonate"] = "chrome"
-
-        if cookie_source.get("use_cookies") and platform != "youtube":
+        if cookie_source.get("use_cookies"):
             apply_cookie_source(ydl_opts, cookie_source)
 
         return ydl_opts

@@ -13,7 +13,7 @@ def build_output_text(
 ) -> str:
     """Build persisted markdown text for the given task output."""
     if task_type == "transcript":
-        text = chunk_list[0] if chunk_list else ""
+        text = "\n\n".join(chunk_list)
         if not text:
             raise ValueError("Transcription returned empty content")
         return text

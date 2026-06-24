@@ -37,6 +37,35 @@ def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
     assert out.read_text(encoding="utf-8") == "hello"
 
 
+def test_cli_transcript_output_persists_all_chunks(monkeypatch, tmp_path: Path) -> None:
+    async def _fake_process_input(request):  # noqa: ARG001
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(
+                title="Demo Title",
+                chunk_list=["# Title\n\n## Content", "subtitle body"],
+            ),
+        )
+
+    monkeypatch.setattr(
+        cli_app,
+        "ensure_supported_input",
+        lambda _: InputRoute(source_kind="url", task_type="transcript"),
+    )
+    monkeypatch.setattr(
+        cli_app,
+        "process_input",
+        _fake_process_input,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["https://www.youtube.com/watch?v=test"])
+    assert result.exit_code == 0
+    out = Path("Demo_Title_transcript.md")
+    assert out.exists()
+    assert out.read_text(encoding="utf-8") == "# Title\n\n## Content\n\nsubtitle body"
+
+
 def test_cli_does_not_expose_task_option() -> None:
     result = runner.invoke(app, ["--help"])
 

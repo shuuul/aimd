@@ -15,7 +15,8 @@ from aimd.plugins.url.cookies import (
 )
 from aimd.plugins.url.metadata import extract_video_info
 from aimd.plugins.url._plugin import get_text_from_url
-from aimd.plugins.url.subtitles import get_preferred_languages
+from aimd.plugins.url.subtitles import extract_subtitles, get_preferred_languages
+from aimd.plugins.url.ydl import create_info_ydl
 
 
 @pytest.mark.asyncio
@@ -175,6 +176,76 @@ def test_build_cookie_sources_order_and_fallback() -> None:
         "cookiesfrombrowser:whale",
         "no-cookie",
     ]
+
+
+def test_create_info_ydl_does_not_print_subtitle_listing(monkeypatch) -> None:
+    seen_opts: list[dict] = []
+
+    class _FakeYDL:
+        def __init__(self, opts):
+            seen_opts.append(opts)
+
+    monkeypatch.setattr("aimd.plugins.url.ydl.impersonation_available", lambda: False)
+    monkeypatch.setattr("aimd.plugins.url.ydl.yt_dlp.YoutubeDL", _FakeYDL)
+
+    create_info_ydl(
+        platform="youtube",
+        cookie_source={"name": "no-cookie", "use_cookies": False},
+    )
+
+    assert seen_opts[-1]["writeautomaticsub"] is True
+    assert seen_opts[-1]["writesubtitles"] is True
+    assert seen_opts[-1]["skip_download"] is True
+    assert seen_opts[-1]["ignoreconfig"] is True
+    assert "logger" in seen_opts[-1]
+    assert "listsubtitles" not in seen_opts[-1]
+
+
+@pytest.mark.asyncio
+async def test_extract_subtitles_uses_metadata_cookie_source(monkeypatch) -> None:
+    seen_sources: list[dict] = []
+
+    class _FakeResponse:
+        def read(self):
+            return b"subtitle text"
+
+    class _FakeYDL:
+        def __init__(self, *, cookie_source):
+            seen_sources.append(cookie_source)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def urlopen(self, url):  # noqa: ARG002
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.subtitles.create_subtitle_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(cookie_source=cookie_source),  # noqa: ARG005
+    )
+    cookie_source = {
+        "name": "cookiesfrombrowser:chrome:default",
+        "use_cookies": True,
+        "cookiefile": None,
+        "cookiesfrombrowser": ("chrome", "default", None, None),
+    }
+
+    content = await extract_subtitles(
+        {
+            "automatic_captions": {
+                "en-orig": [{"ext": "srt", "url": "https://example.com/subs"}]
+            },
+            "_aimd_cookie_source": cookie_source,
+        },
+        "youtube",
+        None,
+    )
+
+    assert content == "subtitle text"
+    assert seen_sources == [cookie_source]
 
 
 def test_explicit_invalid_cookies_from_browser_fails_fast() -> None:
@@ -341,7 +412,7 @@ async def test_download_with_format_only_adds_postprocessor_when_codec_requested
         lambda **kwargs: [{"name": "no-cookie", "use_cookies": False}],
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.audio.impersonation_available",
+        "aimd.plugins.url.ydl.impersonation_available",
         lambda: False,
     )
     monkeypatch.setattr("aimd.plugins.url.audio.yt_dlp.YoutubeDL", _FakeYDL)
@@ -358,6 +429,8 @@ async def test_download_with_format_only_adds_postprocessor_when_codec_requested
     )
     assert result_no_codec is not None
     assert "postprocessors" not in seen_opts[-1]
+    assert seen_opts[-1]["ignoreconfig"] is True
+    assert "logger" in seen_opts[-1]
 
     result_with_codec = await _try_download_with_format(
         url="https://example.com/video",
@@ -371,6 +444,58 @@ async def test_download_with_format_only_adds_postprocessor_when_codec_requested
     )
     assert result_with_codec is not None
     assert seen_opts[-1]["postprocessors"][0]["preferredcodec"] == "m4a"
+
+
+@pytest.mark.asyncio
+async def test_download_with_format_applies_youtube_cookies(
+    monkeypatch, tmp_path: Path
+) -> None:
+    seen_opts: list[dict] = []
+
+    class _FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+            seen_opts.append(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def download(self, urls):  # noqa: ARG002
+            Path(f"{self.opts['outtmpl']}.webm").write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.audio.build_cookie_sources",
+        lambda **kwargs: [  # noqa: ARG005
+            {
+                "name": "cookiesfrombrowser:chrome:default",
+                "use_cookies": True,
+                "cookiefile": None,
+                "cookiesfrombrowser": ("chrome", "default", None, None),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "aimd.plugins.url.ydl.impersonation_available",
+        lambda: False,
+    )
+    monkeypatch.setattr("aimd.plugins.url.audio.yt_dlp.YoutubeDL", _FakeYDL)
+
+    result = await _try_download_with_format(
+        url="https://www.youtube.com/watch?v=test",
+        download_path=tmp_path,
+        audio_filename="sample_audio",
+        format_selector="bestaudio",
+        preferred_codec=None,
+        platform="youtube",
+        cookies_file=None,
+        cookies_from_browser=None,
+    )
+
+    assert result is not None
+    assert seen_opts[-1]["cookiesfrombrowser"] == ("chrome", "default", None, None)
 
 
 @pytest.mark.asyncio
@@ -411,7 +536,7 @@ async def test_download_with_format_surfaces_cookie_hint_after_bilibili_412(
         ],
     )
     monkeypatch.setattr(
-        "aimd.plugins.url.audio.impersonation_available",
+        "aimd.plugins.url.ydl.impersonation_available",
         lambda: False,
     )
     monkeypatch.setattr("aimd.plugins.url.audio.yt_dlp.YoutubeDL", _FakeYDL)
