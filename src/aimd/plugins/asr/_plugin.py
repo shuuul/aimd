@@ -14,7 +14,7 @@ from markitdown import (
 )
 from logly import logger
 
-from aimd.core.errors import UnsupportedInputError
+from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
 
 from .capabilities import select_transcription_backend
 from .const import AUDIO_EXTENSIONS, TRANSFORMERS_ASR_MODELS, VIDEO_FILE_EXTENSIONS
@@ -23,6 +23,53 @@ from .models.mlx import MLXAudioASRModel
 from .models.transformers import TransformersASRModel
 
 __plugin_interface_version__ = 1
+
+
+async def _transcribe_segment_with_fallback(
+    asr_model: ASRModel,
+    segment_path: Path,
+    backend: str,
+    language: str | None = None,
+    temp_dir: Path | None = None,
+) -> str:
+    """Transcribes a single audio path, checking for repetition and falling back to 8-bit."""
+    try:
+        text = await asr_model.transcribe(
+            segment_path, language=language, temp_dir=temp_dir
+        )
+    except ProcessingFailedError as e:
+        if "empty transcription" in str(e).lower():
+            return ""
+        raise
+
+    from .audio_utils import detect_repetition_loop, get_8bit_fallback_model
+
+    if detect_repetition_loop(text):
+        fallback_model_id = get_8bit_fallback_model(asr_model.model_id)
+        if fallback_model_id:
+            logger.warning(
+                f"Repetition loop detected with 4-bit model ({asr_model.model_id}). "
+                f"Switching to 8-bit fallback model: {fallback_model_id}"
+            )
+            if backend == "mlx":
+                fallback_model = MLXAudioASRModel(fallback_model_id)
+            else:
+                fallback_model = TransformersASRModel(fallback_model_id)
+
+            try:
+                text = await fallback_model.transcribe(
+                    segment_path, language=language, temp_dir=temp_dir
+                )
+            except ProcessingFailedError as e:
+                if "empty transcription" in str(e).lower():
+                    return ""
+                raise
+        else:
+            logger.warning(
+                "Repetition loop detected, but no 8-bit fallback model is available."
+            )
+
+    return text
 
 
 async def transcribe_file(
@@ -59,11 +106,55 @@ async def transcribe_file(
     else:
         asr_model = TransformersASRModel(model)
 
-    return await asr_model.transcribe(
-        file_path,
-        language=language,
-        temp_dir=temp_dir,
-    )
+    from .audio_utils import get_audio_duration, segment_audio
+
+    try:
+        duration = get_audio_duration(file_path)
+        logger.info(f"Audio/video duration is {duration:.2f} seconds")
+    except Exception as e:
+        logger.warning(
+            f"Could not determine audio/video duration: {e}. Processing without segmentation."
+        )
+        duration = 0.0
+
+    if duration > 600.0:
+        logger.info(
+            "Audio/video duration exceeds 10 minutes. Segmenting for transcription..."
+        )
+        segments = segment_audio(file_path, segment_time_secs=600.0, temp_dir=temp_dir)
+        try:
+            results = []
+            for i, segment_path in enumerate(segments):
+                logger.info(
+                    f"Transcribing segment {i + 1}/{len(segments)}: {segment_path.name}"
+                )
+                text = await _transcribe_segment_with_fallback(
+                    asr_model,
+                    segment_path,
+                    backend,
+                    language=language,
+                    temp_dir=temp_dir,
+                )
+                if text:
+                    results.append(text)
+
+            transcribed_text = " ".join(results).strip()
+            if not transcribed_text:
+                raise ProcessingFailedError(
+                    "ASR produced empty transcription for all segments"
+                )
+            return transcribed_text
+        finally:
+            for segment_path in segments:
+                segment_path.unlink(missing_ok=True)
+    else:
+        return await _transcribe_segment_with_fallback(
+            asr_model,
+            file_path,
+            backend,
+            language=language,
+            temp_dir=temp_dir,
+        )
 
 
 def _select_backend_for_model(model: str | None) -> str:
