@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/shuuul/aimd/compare/v0.14.1...v0.14.2) (2026-07-05)
+
+
+### Bug Fixes
+
+* **release:** publish patch via release-please ([0b0a6f3](https://github.com/shuuul/aimd/commit/0b0a6f358209a84c41cb4818ad95ec17802f8c05))
+
 ## [0.14.1](https://github.com/shuuul/aimd/compare/v0.13.1...v0.14.1) (2026-07-05)
 
 
