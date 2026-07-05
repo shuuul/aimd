@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.14.1](https://github.com/shuuul/aimd/compare/v0.13.1...v0.14.1) (2026-07-05)
+
+
+### Features
+
+* **asr:** add segmenting and 8-bit fallback for repetition loops
+
+
+### Bug Fixes
+
+* **deps:** keep MLX ASR compatible with Transformers 5.12
+* **logging:** support logly 0.2 logger configuration
+
+
+### Maintenance
+
+* update Python dependencies and pre-commit hooks
+
 ## [0.13.1](https://github.com/shuuul/aimd/compare/v0.13.0...v0.13.1) (2026-06-24)
 
 

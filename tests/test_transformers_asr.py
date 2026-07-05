@@ -20,7 +20,7 @@ from aimd.plugins.asr.qwen3_asr_transformers import (
 def test_register_qwen3_asr_transformers_config() -> None:
     register_qwen3_asr_transformers()
     config = AutoConfig.for_model("qwen3_asr")
-    assert isinstance(config, Qwen3ASRConfig)
+    assert config.model_type == Qwen3ASRConfig.model_type
 
 
 def test_explicit_qwen3_asr_model_selects_transformers_backend() -> None:

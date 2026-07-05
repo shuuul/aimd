@@ -16,12 +16,12 @@ from aimd.core.process import ensure_supported_input, process_input
 
 load_dotenv()
 
-logger.remove_all()
-logger.configure(color=True, auto_sink=False)
+logger.remove()
 logger.add(
-    "console",
-    filter_min_level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {module}:{function} - {message}",
+    "stderr",
+    level="INFO",
+    colorize=True,
+    format="{time:%Y-%m-%d %H:%M:%S} | {level: <8} | {module}:{function} - {message}",
 )
 
 app = typer.Typer(
@@ -56,12 +56,12 @@ def _configure_logging(log_level: str) -> None:
         )
         raise typer.Exit(1)
 
-    logger.remove_all()
-    logger.configure(color=True, auto_sink=False)
+    logger.remove()
     logger.add(
-        "console",
-        filter_min_level=str(log_level).upper(),
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {module}:{function} - {message}",
+        "stderr",
+        level=str(log_level).upper(),
+        colorize=True,
+        format="{time:%Y-%m-%d %H:%M:%S} | {level: <8} | {module}:{function} - {message}",
     )
 
     if str(log_level).upper() == "DEBUG":

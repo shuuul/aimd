@@ -18,6 +18,14 @@ def register_qwen3_asr_transformers() -> None:
     global _REGISTERED  # noqa: PLW0603
     if _REGISTERED:
         return
+    try:
+        AutoConfig.for_model("qwen3_asr")
+    except ValueError:
+        pass
+    else:
+        _REGISTERED = True
+        return
+
     AutoConfig.register("qwen3_asr", Qwen3ASRConfig)
     AutoModel.register(Qwen3ASRConfig, Qwen3ASRForConditionalGeneration)
     AutoProcessor.register(Qwen3ASRConfig, Qwen3ASRProcessor)

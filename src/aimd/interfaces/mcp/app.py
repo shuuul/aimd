@@ -14,7 +14,7 @@ from aimd.core.models import ProcessInput, ProcessResult
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
 
-logger.remove_all()
+logger.remove()
 
 mcp = FastMCP("aimd")
 

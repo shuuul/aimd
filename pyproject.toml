@@ -1,6 +1,6 @@
 [project]
 name = "aimd-tool"
-version = "0.14.0"
+version = "0.14.1"
 description = "Context preparation tool for LLM workflows."
 readme = { text = "Prepare LLM-ready context from URLs, audio/video, and documents.", content-type = "text/markdown" }
 authors = [
@@ -25,7 +25,7 @@ dependencies = [
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "torch>=2.9.1",
     "torchvision>=0.27.1",
-    "transformers>=4.57",
+    "transformers>=4.57,<5.13",
     "typer>=0.20.0",
     "yt-dlp[default]>=2025.11.12",
 ]
