@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing release tag to rebuild/publish (e.g. v0.15.0). Leave empty for release-please only."
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,15 +26,32 @@ jobs:
     name: Release Please
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.flags.outputs.release_created }}
+      tag_name: ${{ steps.flags.outputs.tag_name }}
     steps:
       - name: Create or update release PR
         id: release
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.tag_name == '' }}
         uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Resolve release outputs
+        id: flags
+        shell: bash
+        run: |
+          if [ -n "${MANUAL_TAG}" ]; then
+            echo "release_created=true" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${MANUAL_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_created=${RP_CREATED}" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${RP_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          MANUAL_TAG: ${{ inputs.tag_name }}
+          RP_CREATED: ${{ steps.release.outputs.release_created }}
+          RP_TAG: ${{ steps.release.outputs.tag_name }}
 
   build:
     name: Build Python distributions
@@ -132,7 +155,7 @@ jobs:
 
           assert aimd.core.__name__ == "aimd.core"
           assert aimd.interfaces.api.create_app().__class__.__name__ == "FastAPI"
-          assert aimd.interfaces.mcp.mcp.__class__.__name__ == "FastMCP"
+          assert aimd.interfaces.mcp.mcp.__class__.__name__ in {"FastMCP", "MCPServer"}
           PY
 
   github-release:
