@@ -3,6 +3,7 @@ import pytest
 from pathlib import Path
 import aimd.interfaces.mcp as mcp_app
 
+from aimd.core.errors import ProcessingFailedError
 from aimd.core.models import ProcessResult, TextContext
 
 
@@ -32,6 +33,28 @@ async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None
     assert result["task_type"] == "transcript"
     assert result["output_file"] is not None
     assert output_file.read_text(encoding="utf-8") == "hello"
+
+
+@pytest.mark.asyncio
+async def test_mcp_empty_transcript_output_is_processing_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _fake_process_input(request):  # noqa: ARG001
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="empty", chunk_list=[]),
+        )
+
+    monkeypatch.setattr(
+        "aimd.interfaces.mcp.app.process_core_input", _fake_process_input
+    )
+
+    output_file = tmp_path / "out.md"
+    with pytest.raises(
+        ProcessingFailedError, match="Transcription returned empty content"
+    ):
+        await mcp_app.process_input("input.mp3", output_file=str(output_file))
+    assert not output_file.exists()
 
 
 @pytest.mark.asyncio

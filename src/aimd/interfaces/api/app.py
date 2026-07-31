@@ -144,8 +144,6 @@ def create_app() -> FastAPI:
             )
         except AimdError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             logger.error(f"HTTP processing failed: {exc}")
             raise HTTPException(status_code=500, detail=str(exc)) from exc

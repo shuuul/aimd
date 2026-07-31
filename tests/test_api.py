@@ -72,6 +72,26 @@ def test_process_transcript_success_with_output_file(
     assert output_file.read_text(encoding="utf-8") == "hello transcript"
 
 
+def test_process_empty_transcript_output_is_processing_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
+    result = ProcessResult(
+        task_type="transcript",
+        text_context=TextContext(title="empty", chunk_list=[]),
+    )
+    client = _make_client(monkeypatch, process_result=result)
+
+    output_file = tmp_path / "out.md"
+    response = client.post(
+        "/v1/process",
+        json={"input_source": "input.mp3", "output_file": str(output_file)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Transcription returned empty content"
+    assert not output_file.exists()
+
+
 def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
     client = _make_client(
         monkeypatch, process_exc=BackendUnavailableError("unavailable")

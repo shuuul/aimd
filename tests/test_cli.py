@@ -3,7 +3,7 @@ from importlib import import_module
 
 from typer.testing import CliRunner
 
-from aimd.core.models import InputRoute, ProcessResult, TextContext
+from aimd.core.models import ProcessResult, TextContext
 
 
 cli_app = import_module("aimd.interfaces.cli.app")
@@ -18,13 +18,6 @@ def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
             text_context=TextContext(title="Demo Title", chunk_list=["hello"]),
         )
 
-    monkeypatch.setattr(
-        cli_app,
-        "ensure_supported_input",
-        lambda *args, **kwargs: InputRoute(
-            source_kind="audio_file", task_type="transcript"
-        ),
-    )
     monkeypatch.setattr(
         cli_app,
         "process_input",
@@ -49,11 +42,6 @@ def test_cli_transcript_output_persists_all_chunks(monkeypatch, tmp_path: Path) 
             ),
         )
 
-    monkeypatch.setattr(
-        cli_app,
-        "ensure_supported_input",
-        lambda *args, **kwargs: InputRoute(source_kind="url", task_type="transcript"),
-    )
     monkeypatch.setattr(
         cli_app,
         "process_input",
@@ -85,13 +73,6 @@ def test_cli_task_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
             text_context=TextContext(title="Page", chunk_list=["ocr text"]),
         )
 
-    monkeypatch.setattr(
-        cli_app,
-        "ensure_supported_input",
-        lambda source, requested=None: InputRoute(
-            source_kind="image_file", task_type=requested or "ocr"
-        ),
-    )
     monkeypatch.setattr(cli_app, "process_input", _fake_process_input)
     monkeypatch.chdir(tmp_path)
 
@@ -123,13 +104,6 @@ def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(
         cli_app,
-        "ensure_supported_input",
-        lambda *args, **kwargs: InputRoute(
-            source_kind="document_file", task_type="convert"
-        ),
-    )
-    monkeypatch.setattr(
-        cli_app,
         "process_input",
         _fake_process_input,
     )
@@ -138,3 +112,19 @@ def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
     result = runner.invoke(app, [str(tmp_path / "document.epub")])
     assert result.exit_code == 0
     assert "Successfully converted document with assets" in result.stdout
+
+
+def test_cli_rejects_empty_transcript_output(monkeypatch, tmp_path: Path) -> None:
+    async def _fake_process_input(request):  # noqa: ARG001
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="Empty", chunk_list=[]),
+        )
+
+    monkeypatch.setattr(cli_app, "process_input", _fake_process_input)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["input.mp3"])
+
+    assert result.exit_code == 1
+    assert not Path("Empty_transcript.md").exists()

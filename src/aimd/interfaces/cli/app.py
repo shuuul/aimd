@@ -12,7 +12,7 @@ from logly import logger
 from aimd.interfaces.output import MODEL_HELP_TEXT, persist_output
 from aimd.core.errors import AimdError
 from aimd.core.models import ProcessInput, TaskType
-from aimd.core.process import ensure_supported_input, process_input
+from aimd.core.process import process_input
 
 load_dotenv()
 
@@ -157,16 +157,7 @@ def process(
             raise typer.Exit(1)
         requested_task = cast(TaskType, normalized_task)
 
-    try:
-        route = ensure_supported_input(input_source, requested_task)
-        task_type = route.task_type
-    except AimdError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
     logger.info(f"Input: {input_source}")
-    logger.info(f"Source: {route.source_kind}")
-    logger.info(f"Task: {task_type}")
 
     async def run_processing() -> None:
         try:
@@ -190,6 +181,7 @@ def process(
                     raw_transcript=raw_transcript,
                 )
             )
+            logger.info(f"Task: {result.task_type}")
 
             if result.platform:
                 logger.info(f"Platform: {result.platform}")
@@ -246,7 +238,7 @@ def process(
                 "transcript": "Transcription",
                 "convert": "Conversion",
                 "ocr": "OCR",
-            }.get(task_type, "Processing")
+            }.get(requested_task, "Processing")
             logger.error(f"{task_name} failed: {e}")
             raise typer.Exit(1)
 

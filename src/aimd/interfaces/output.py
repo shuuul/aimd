@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from aimd.core.errors import ProcessingFailedError
 from aimd.core.models import ProcessResult
 
 
@@ -14,7 +15,7 @@ def build_output_text(
     """Build persisted markdown text for the given task output."""
     text = "\n\n".join(chunk_list)
     if task_type == "transcript" and not text:
-        raise ValueError("Transcription returned empty content")
+        raise ProcessingFailedError("Transcription returned empty content")
     return text
 
 
