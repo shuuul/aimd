@@ -14,7 +14,7 @@
     <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
-    <img src="https://img.shields.io/badge/version-0.12.1-blue" alt="Version 0.12.1">
+    <img src="https://img.shields.io/github/v/release/shuuul/aimd" alt="Latest release">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -31,7 +31,7 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 - **One input command** for URLs, audio/video files, EPUB documents, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
 - **URL extraction** through bundled `aimd.plugins.url`: yt-dlp transcript URLs such as podcasts, YouTube, and Bilibili, plus opt-in readable HTML extraction through Defuddle.
-- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, or Qwen3-ASR through native Transformers (`transformers>=5.13`) on CUDA-capable non-Darwin platforms and as an explicit opt-in model path on macOS.
+- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, or Qwen3-ASR through native Transformers (`transformers>=5.14.1`) on CUDA-capable non-Darwin platforms and as an explicit opt-in model path on macOS.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
 - **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
@@ -86,7 +86,7 @@ Platform notes:
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`; this remains the default backend.
 - macOS OCR uses `mlx-vlm` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
-- Explicit `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) transcription model IDs use native Transformers Qwen3-ASR (`transformers>=5.13`); on macOS this is an opt-in MPS path, not the default.
+- Explicit `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) transcription model IDs use native Transformers Qwen3-ASR (`transformers>=5.14.1`); on macOS this is an opt-in MPS path, not the default.
 - Linux OCR uses the Transformers backend with CUDA.
 - Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
 
@@ -304,18 +304,12 @@ Useful maintenance commands:
 ```bash
 uv run prek autoupdate
 uv build
-uv version --bump patch
 ```
 
-Release a tagged version:
-
-```bash
-# Make sure the package version matches the tag, then push a v-prefixed tag.
-git tag v0.12.1
-git push origin v0.12.1
-```
-
-The release workflow builds the single `aimd-tool` distribution, smoke-installs the tool on Linux and macOS, creates a GitHub Release, and publishes that distribution to PyPI using the `UV_PUBLISH_TOKEN` repository secret.
+Releases are managed by release-please. Commits to `main` update a release PR;
+merging that PR creates the tag and GitHub Release. The release workflow then builds
+the single `aimd-tool` distribution, smoke-installs it on Linux and macOS, and
+publishes it to PyPI.
 
 Project layout:
 

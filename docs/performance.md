@@ -19,7 +19,7 @@ This document records practical performance expectations for `aimd` processing p
 |------|--------|--------------|------------------------------|
 | Transcription | `mlx` | Quantized Qwen3-ASR | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
 | Transcription | `mlx` | Whisper, Distil-Whisper, Parakeet, Nemotron, Voxtral, VibeVoice, Qwen2-Audio | Performance is delegated to `mlx-audio`; model size and upstream generation behavior dominate. |
-| Transcription | `transformers` | Qwen3-ASR | Default on CUDA-capable non-Darwin platforms and explicit opt-in on macOS/MPS when a `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) model ID is provided. Uses native Transformers Qwen3-ASR (`transformers>=5.13`); no vendored model code, `qwen-asr`, vLLM, or SGLang runtime. The 0.6B-hf model is the lower-memory option; 1.7B-hf is the default quality-oriented CUDA option. |
+| Transcription | `transformers` | Qwen3-ASR | Default on CUDA-capable non-Darwin platforms and explicit opt-in on macOS/MPS when a `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) model ID is provided. Uses native Transformers Qwen3-ASR (`transformers>=5.14.1`); no vendored model code, `qwen-asr`, vLLM, or SGLang runtime. The 0.6B-hf model is the lower-memory option; 1.7B-hf is the default quality-oriented CUDA option. |
 | OCR | `mlx-vlm` | GLM-OCR or explicit mlx-vlm compatible VLMs | macOS VLM OCR path. Heavier than classic detector/recognizer OCR but avoids a separate OCR wrapper layer. |
 | OCR | `transformers` | GOT-OCR | Default Linux/CUDA OCR path; uses a generic Transformers image-text generation flow. |
 | OCR | `transformers` | Unlimited-OCR | Linux/CUDA VLM OCR path using Baidu's custom `infer`/`infer_multi` API and trusted remote code. Results are read from the model's saved output files. |
@@ -27,7 +27,7 @@ This document records practical performance expectations for `aimd` processing p
 
 ## Apple Silicon ASR comparison
 
-MPS can run Qwen3-ASR through native Transformers (`transformers>=5.13`), but macOS still defaults to MLX. In our smoke/latency checks, the MPS path was viable and useful as an explicit `Qwen/Qwen3-ASR-*-hf` opt-in, but the quantized MLX models remained the better default for Apple Silicon because they are simpler to maintain, smaller, and at least as fast in warm-cache runs.
+MPS can run Qwen3-ASR through native Transformers (`transformers>=5.14.1`), but macOS still defaults to MLX. In our smoke/latency checks, the MPS path was viable and useful as an explicit `Qwen/Qwen3-ASR-*-hf` opt-in, but the quantized MLX models remained the better default for Apple Silicon because they are simpler to maintain, smaller, and at least as fast in warm-cache runs.
 
 Input shapes differed slightly between runs, so treat these as practical observations rather than a strict leaderboard.
 
@@ -51,7 +51,7 @@ The following are functional smoke tests, not benchmarks. They verify that heavy
 | Date | Hardware | Command/path | Input | Observed result |
 |------|----------|--------------|-------|-----------------|
 | 2026-06-22 | NVIDIA GeForce RTX 5090, Linux/WSL2 | `process_ocr(..., model="unlimited_ocr")` | Generated 512×160 PNG containing `Hello OCR 123` | Returned `HelloOCR 123` after first loading `baidu/Unlimited-OCR`. |
-| 2026-06-23 | Apple Silicon, macOS, Transformers 5.12.1 / MPS | `transcribe_file(..., model="Qwen/Qwen3-ASR-0.6B", language="zh")` | Generated short Chinese WAV | Historical smoke: non-empty Chinese text via vendored Transformers backend. Prefer `Qwen/Qwen3-ASR-0.6B-hf` with `transformers>=5.13` now. |
+| 2026-06-23 | Apple Silicon, macOS, Transformers 5.12.1 / MPS | `transcribe_file(..., model="Qwen/Qwen3-ASR-0.6B", language="zh")` | Generated short Chinese WAV | Historical smoke: non-empty Chinese text via vendored Transformers backend. Prefer `Qwen/Qwen3-ASR-0.6B-hf` with `transformers>=5.14.1` now. |
 
 ## Measurement guidance
 
@@ -74,7 +74,7 @@ For API/MCP model-reuse measurements, start the server once and send repeated re
 
 ## Dependency-upgrade smoke tests
 
-Qwen3-ASR uses native Transformers support (`transformers>=5.13`, `Qwen/Qwen3-ASR-*-hf`). Before upgrading Transformers, run the normal tests and the opt-in real inference smoke:
+Qwen3-ASR uses native Transformers support (`transformers>=5.14.1`, `Qwen/Qwen3-ASR-*-hf`). Before upgrading Transformers, run the normal tests and the opt-in real inference smoke:
 
 ```bash
 uv run pytest -q tests/test_transformers_asr.py tests/test_capabilities.py

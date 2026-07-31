@@ -258,14 +258,13 @@ async def _try_download_with_format(
         cookies_from_browser=cookies_from_browser,
     )
 
-    loop = asyncio.get_running_loop()
     last_error: Exception | None = None
     auth_required_seen = False
     cookie_source_issue_seen = False
 
     for source in sources:
         try:
-            await loop.run_in_executor(None, _download_with_source, source)
+            await asyncio.to_thread(_download_with_source, source)
             break
         except Exception as exc:
             last_error = exc

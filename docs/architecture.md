@@ -60,7 +60,7 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 
 | Task | Backend boundary | Supported model source |
 |------|-----------------|------------------------|
-| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | `mlx-audio` STT models by default on Apple Silicon; Qwen3-ASR via native Transformers (`transformers>=5.13`, `Qwen/Qwen3-ASR-*-hf`) on CUDA-capable non-Darwin platforms and as an explicit opt-in on macOS/MPS. |
+| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | `mlx-audio` STT models by default on Apple Silicon; Qwen3-ASR via native Transformers (`transformers>=5.14.1`, `Qwen/Qwen3-ASR-*-hf`) on CUDA-capable non-Darwin platforms and as an explicit opt-in on macOS/MPS. |
 | Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` plugin entry points. |
 | OCR | MarkItDown + `aimd.plugins.ocr` plugin | `mlx-vlm` models on macOS/Apple Silicon; CUDA Transformers OCR aliases and explicit Hugging Face model IDs on Linux. |
 

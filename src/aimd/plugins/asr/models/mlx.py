@@ -77,8 +77,7 @@ class MLXAudioASRModel:
                 result = stt_model.generate(str(audio_path), **generate_kwargs)
                 return result.text.strip()
 
-            loop = asyncio.get_running_loop()
-            transcribed_text = await loop.run_in_executor(None, _transcribe)
+            transcribed_text = await asyncio.to_thread(_transcribe)
 
             if not transcribed_text:
                 raise ProcessingFailedError("mlx-audio produced empty transcription")

@@ -2,14 +2,13 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from aimd.core.errors import ProcessingFailedError
-from aimd.core.models import ProcessResult
+from aimd.core.models import ProcessResult, TaskType
 
 
 def build_output_text(
-    task_type: Literal["transcript", "convert", "ocr"],
+    task_type: TaskType,
     chunk_list: list[str],
 ) -> str:
     """Build persisted markdown text for the given task output."""
@@ -21,7 +20,7 @@ def build_output_text(
 
 def persist_output(
     output_file: Path,
-    task_type: Literal["transcript", "convert", "ocr"],
+    task_type: TaskType,
     chunk_list: list[str],
 ) -> Path:
     """Write task output to disk and return resolved path."""

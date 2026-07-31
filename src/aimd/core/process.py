@@ -4,7 +4,6 @@ import asyncio
 import io
 import re
 from collections.abc import Awaitable, Callable
-from functools import partial
 from pathlib import Path
 
 from logly import logger
@@ -420,9 +419,8 @@ def _raise_from_markitdown_failure(exc: BaseException) -> None:
 
 async def _run_markitdown(fn, /, *args, **kwargs):
     """Run MarkItDown off the event loop and normalize conversion failures."""
-    loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(None, partial(fn, *args, **kwargs))
+        return await asyncio.to_thread(fn, *args, **kwargs)
     except Exception as exc:
         _raise_from_markitdown_failure(exc)
 

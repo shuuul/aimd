@@ -29,10 +29,15 @@ def _page_to_markdown(page: OCRPage, total_pages: int) -> str:
     return f"## Page {page.page_index + 1}\n\n{text}".strip()
 
 
+def _ocr_result_chunks(result: OCRResult) -> list[str]:
+    """Build non-empty page-oriented markdown chunks from an OCR result."""
+    chunks = [_page_to_markdown(page, len(result.pages)) for page in result.pages]
+    return [chunk for chunk in chunks if chunk]
+
+
 def _ocr_result_to_markdown(result: OCRResult) -> tuple[str, str]:
     """Build title + markdown from a backend OCR result."""
-    chunks = [_page_to_markdown(page, len(result.pages)) for page in result.pages]
-    chunks = [chunk for chunk in chunks if chunk]
+    chunks = _ocr_result_chunks(result)
     if not chunks:
         raise ProcessingFailedError("OCR returned empty content")
     return result.title, "\n\n".join(chunks)
@@ -76,26 +81,6 @@ async def _recognize_ocr_result(
     return result
 
 
-async def _recognize_ocr(
-    input_path: str | Path,
-    model: str | None = None,
-    language: str | None = None,
-    start: int | None = None,
-    end: int | None = None,
-    temp_dir: Path | None = None,
-) -> tuple[str, str]:
-    """Run OCR and return title + markdown without final TextContext shaping."""
-    result = await _recognize_ocr_result(
-        input_path,
-        model=model,
-        language=language,
-        start=start,
-        end=end,
-        temp_dir=temp_dir,
-    )
-    return _ocr_result_to_markdown(result)
-
-
 def _recognize_ocr_sync(
     input_path: str | Path,
     model: str | None = None,
@@ -105,8 +90,8 @@ def _recognize_ocr_sync(
     temp_dir: Path | None = None,
 ) -> DocumentConverterResult:
     """Synchronous MarkItDown boundary: title + markdown only."""
-    title, markdown = asyncio.run(
-        _recognize_ocr(
+    result = asyncio.run(
+        _recognize_ocr_result(
             input_path,
             model=model,
             language=language,
@@ -115,6 +100,7 @@ def _recognize_ocr_sync(
             temp_dir=temp_dir,
         )
     )
+    title, markdown = _ocr_result_to_markdown(result)
     return DocumentConverterResult(title=title, markdown=markdown)
 
 
@@ -135,10 +121,9 @@ async def process_ocr(
         end=end,
         temp_dir=temp_dir,
     )
-    chunks = [_page_to_markdown(page, len(result.pages)) for page in result.pages]
     return TextContext(
         title=result.title,
-        chunk_list=[chunk for chunk in chunks if chunk],
+        chunk_list=_ocr_result_chunks(result),
         split_header_level=2,
     )
 

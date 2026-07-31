@@ -45,7 +45,7 @@ MLX_AUDIO_MODELS = {
     "mlx-community/Qwen2-Audio-7B-Instruct-4bit": "Qwen2-Audio 7B Instruct (4-bit)",
 }
 
-# Native Transformers Qwen3-ASR checkpoints (transformers>=5.13).
+# Native Transformers Qwen3-ASR checkpoints (transformers>=5.14.1).
 TRANSFORMERS_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B-hf"
 TRANSFORMERS_ASR_MODELS = {
     "Qwen/Qwen3-ASR-1.7B-hf": "Qwen3-ASR 1.7B native HF (default)",

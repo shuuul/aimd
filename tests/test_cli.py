@@ -94,6 +94,7 @@ def test_cli_rejects_invalid_task(monkeypatch, tmp_path: Path) -> None:
 
 def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
     output_dir = tmp_path / "doc"
+    warnings: list[str] = []
 
     async def _fake_process_input(request):  # noqa: ARG001
         return ProcessResult(
@@ -107,11 +108,20 @@ def test_cli_convert_epub_output_dir(monkeypatch, tmp_path: Path) -> None:
         "process_input",
         _fake_process_input,
     )
+    monkeypatch.setattr(cli_app.logger, "warning", warnings.append)
 
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, [str(tmp_path / "document.epub")])
+    ignored_output = tmp_path / "ignored.md"
+    result = runner.invoke(
+        app,
+        [str(tmp_path / "document.epub"), "--output", str(ignored_output)],
+    )
     assert result.exit_code == 0
     assert "Successfully converted document with assets" in result.stdout
+    assert warnings == [
+        "Ignoring --output for document asset conversions; output is a directory."
+    ]
+    assert not ignored_output.exists()
 
 
 def test_cli_rejects_empty_transcript_output(monkeypatch, tmp_path: Path) -> None:

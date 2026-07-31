@@ -128,8 +128,7 @@ async def download_subtitle(
             return response.read().decode("utf-8")
 
     try:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _download)
+        return await asyncio.to_thread(_download)
     except Exception as exc:
         logger.error(f"Failed to download subtitle from {url}: {exc}")
         return None

@@ -188,6 +188,11 @@ def process(
 
             if result.task_type == "convert" and result.output_dir is not None:
                 input_path = Path(input_source)
+                if output_file is not None:
+                    logger.warning(
+                        "Ignoring --output for document asset conversions; "
+                        "output is a directory."
+                    )
                 logger.info(f"Document converted with assets to: {result.output_dir}")
                 logger.info(f"Main file: {result.output_dir / f'{input_path.stem}.md'}")
                 logger.info(f"Images extracted to: {result.output_dir / 'images'}")

@@ -1,7 +1,6 @@
 """Media metadata extraction for URL transcript processing."""
 
 import asyncio
-from functools import partial
 from typing import Any
 
 from logly import logger
@@ -27,7 +26,6 @@ async def extract_video_info(
     cookies_from_browser: str | None,
 ) -> dict[str, Any]:
     """Extract video information using yt-dlp with cookie-source fallback chain."""
-    loop = asyncio.get_running_loop()
     sources = build_cookie_sources(
         platform=platform,
         cookies_file=cookies_file,
@@ -50,9 +48,7 @@ async def extract_video_info(
 
     for source in sources:
         try:
-            info_dict = await loop.run_in_executor(
-                None, partial(_extract_with_source, source)
-            )
+            info_dict = await asyncio.to_thread(_extract_with_source, source)
             if info_dict:
                 info_dict["_aimd_cookie_source"] = source
                 logger.debug(f"Video info extracted with source: {source['name']}")

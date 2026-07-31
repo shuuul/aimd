@@ -92,8 +92,7 @@ class TransformersASRModel:
             def _transcribe() -> str:
                 return _transcribe_qwen(audio_path, self.model_id, language)
 
-            loop = asyncio.get_running_loop()
-            transcribed_text = await loop.run_in_executor(None, _transcribe)
+            transcribed_text = await asyncio.to_thread(_transcribe)
 
             if not transcribed_text:
                 raise ProcessingFailedError("Qwen3-ASR produced empty transcription")
@@ -161,9 +160,9 @@ def _require_native_qwen3_asr() -> None:
     """Fail fast when the installed Transformers build lacks native Qwen3-ASR."""
     import transformers
 
-    if _parse_version_tuple(transformers.__version__) < (5, 13):
+    if _parse_version_tuple(transformers.__version__) < (5, 14, 1):
         raise ProcessingFailedError(
-            "Native Qwen3-ASR requires transformers>=5.13.0 "
+            "Native Qwen3-ASR requires transformers>=5.14.1 "
             f"(installed {transformers.__version__})."
         )
     try:
@@ -278,7 +277,7 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
     if not hasattr(processor, "apply_transcription_request"):
         raise ProcessingFailedError(
             "Installed transformers processor lacks apply_transcription_request; "
-            "upgrade to transformers>=5.13 for native Qwen3-ASR."
+            "upgrade to transformers>=5.14.1 for native Qwen3-ASR."
         )
 
     inputs = processor.apply_transcription_request(
