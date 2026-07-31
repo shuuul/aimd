@@ -1,10 +1,10 @@
-from pathlib import Path
 from importlib import import_module
+from pathlib import Path
 
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from aimd.core.models import ProcessResult, TextContext
-
 
 cli_app = import_module("aimd.interfaces.cli.app")
 app = cli_app.app
@@ -57,10 +57,9 @@ def test_cli_transcript_output_persists_all_chunks(monkeypatch, tmp_path: Path) 
 
 
 def test_cli_exposes_task_option() -> None:
-    result = runner.invoke(app, ["--help"])
-
-    assert result.exit_code == 0
-    assert "--task" in result.stdout
+    command = get_command(app)
+    task_option = next(param for param in command.params if param.name == "task")
+    assert "--task" in task_option.opts
 
 
 def test_cli_task_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
