@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/shuuul/aimd/compare/v0.14.2...v0.15.0) (2026-07-31)
+
+
+### Features
+
+* **asr:** migrate to native Transformers Qwen3-ASR-hf ([1fc2c2d](https://github.com/shuuul/aimd/commit/1fc2c2df36447aeefec58d92ee1d68cbb60dafb7))
+
 ## [0.14.2](https://github.com/shuuul/aimd/compare/v0.14.1...v0.14.2) (2026-07-05)
 
 
