@@ -104,7 +104,7 @@ aimd page.png
 # Common options
 aimd audio.mp3 --output transcript.md
 aimd audio.wav --language zh
-aimd scan.pdf --model glm_ocr --start 0 --end 2
+aimd scan.pdf --task ocr --start 0 --end 2
 aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
 aimd "https://youtube.com/watch?v=..." --raw-transcript
 ```
@@ -152,10 +152,11 @@ Passing an explicit transcription model ID such as `Qwen/Qwen3-ASR-0.6B-hf` (or 
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
 | Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-1.7B-hf` | Native Transformers Qwen3-ASR | Yes on CUDA Transformers | Default CUDA Transformers ASR model; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-1.7B` resolves here. |
 | Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-0.6B-hf` | Native Transformers Qwen3-ASR | No | Lower-memory Qwen3-ASR option; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-0.6B` resolves here. |
-| OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr`, `glm-ocr`, `mlx-community/GLM-OCR-bf16` | `mlx-community/GLM-OCR-bf16` | Yes | Default macOS MLX VLM OCR model. |
+| OCR | macOS Apple Silicon / mlx-vlm | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | Yes | Default macOS MLX VLM OCR model. Requires `mlx-vlm>=0.6.4` (PR #1427). Each page/image uses single-image gundam mode (`cropping=True`, `image_size=640`); long PDFs are OCR'd page-by-page for reliable page boundaries. |
+| OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr`, `glm-ocr`, `mlx-community/GLM-OCR-bf16` | `mlx-community/GLM-OCR-bf16` | No | Lighter macOS MLX VLM OCR option. |
 | OCR | macOS Apple Silicon / mlx-vlm | Explicit Hugging Face model ID | Provided model ID | No | Any local `mlx-vlm` compatible OCR/image-text model. |
-| OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | Yes | Default Linux/CUDA OCR model. |
-| OCR | Linux/CUDA / Transformers | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | No | Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
+| OCR | Linux/CUDA / Transformers | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | Yes | Default Linux/CUDA OCR model. Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
+| OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | No | Lighter Linux/CUDA VLM OCR option that works with the current PyPI Transformers release. |
 | OCR | Linux/CUDA / Transformers | `glm_ocr`, `glm-ocr`, `zai-org/GLM-OCR` | `zai-org/GLM-OCR` | No | May require a newer Transformers build than the PyPI baseline. |
 
 ### URLs
@@ -202,13 +203,13 @@ The EPUB pipeline preserves spine order, extracts images, converts chapters thro
 ```bash
 aimd page.png
 aimd scan.pdf                                  # OCR if no extractable PDF text is found
-aimd scan.pdf --model got_ocr                  # Linux/CUDA VLM OCR
-aimd scan.pdf --model unlimited_ocr            # Linux/CUDA Baidu Unlimited-OCR
-aimd scan.pdf --model glm_ocr                  # macOS mlx-vlm default, or Linux/CUDA GLM-OCR
+aimd scan.pdf --task ocr                       # Force OCR; default model is unlimited_ocr
+aimd scan.pdf --model got_ocr                  # Linux/CUDA lighter VLM OCR
+aimd scan.pdf --model glm_ocr                  # macOS lighter mlx-vlm option, or Linux/CUDA GLM-OCR
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. macOS uses `mlx-vlm` directly, where the default OCR model is `glm_ocr` (`mlx-community/GLM-OCR-bf16`), and explicit `mlx-vlm` compatible Hugging Face model IDs are accepted. Linux/CUDA uses the Transformers backend. Its default is `got_ocr` (`stepfun-ai/GOT-OCR-2.0-hf`) because it works with the current PyPI Transformers release. `unlimited_ocr` maps to `baidu/Unlimited-OCR` and uses the model's custom `infer`/`infer_multi` API. `glm_ocr` maps to `zai-org/GLM-OCR` when a new-enough Transformers build is installed. PaddleOCR aliases are intentionally not supported. PDF OCR renders pages with PyMuPDF before model inference.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. Both platforms default to `unlimited_ocr` (`baidu/Unlimited-OCR`). macOS uses `mlx-vlm` (requires `mlx-vlm>=0.6.4`, first shipped in PR #1427 / v0.6.4): each page/image uses single-image gundam mode (`cropping=True`, `image_size=640`, prompt `document parsing.`), Baidu's sliding-window no-repeat n-gram guard (`ngram_size=35`, `window=128`), and `max_tokens=8192`. Long PDFs are OCR'd page-by-page so page boundaries stay reliable (one-shot multipage generation can drop `<PAGE>` segments). Without the n-gram guard, some pages loop until max tokens and become pathologically slow. Explicit `mlx-vlm` compatible Hugging Face model IDs and `glm_ocr` remain available on macOS. Linux/CUDA uses the Transformers backend with Baidu's custom `infer`/`infer_multi` API for Unlimited-OCR; `got_ocr` and `glm_ocr` remain available as alternatives. PaddleOCR aliases are intentionally not supported. PDF OCR renders pages with PyMuPDF before model inference.
 
 ### MarkItDown plugins
 

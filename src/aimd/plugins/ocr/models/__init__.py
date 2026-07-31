@@ -12,7 +12,7 @@ from .unlimited import (
     read_unlimited_ocr_output_files,
 )
 
-DEFAULT_TRANSFORMERS_OCR_MODEL = "got_ocr"
+DEFAULT_TRANSFORMERS_OCR_MODEL = "unlimited_ocr"
 TRANSFORMERS_OCR_MODEL_ALIASES = {
     "got_ocr": GOT_OCR_MODEL_ID,
     "got-ocr": GOT_OCR_MODEL_ID,

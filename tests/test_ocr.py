@@ -18,7 +18,11 @@ from aimd.plugins.ocr.models import (
 )
 from aimd.plugins.ocr.models.generic import GenericTransformersOCRModel
 from aimd.plugins.ocr.models.got import GOTOCRModel
-from aimd.plugins.ocr.models.mlx import resolve_mlx_vlm_model
+from aimd.plugins.ocr.models.mlx import (
+    MLXVLMOCRModel,
+    SlidingWindowNoRepeatNgramProcessor,
+    resolve_mlx_vlm_model,
+)
 from aimd.plugins.ocr.models.unlimited import (
     UnlimitedOCRModel,
     normalize_unlimited_ocr_output,
@@ -60,7 +64,10 @@ def test_select_ocr_backend_rejects_unsupported_platform(monkeypatch) -> None:
 
 
 def test_resolve_mlx_vlm_model_maps_aimd_names() -> None:
-    assert resolve_mlx_vlm_model(None) == "mlx-community/GLM-OCR-bf16"
+    assert resolve_mlx_vlm_model(None) == "baidu/Unlimited-OCR"
+    assert resolve_mlx_vlm_model("unlimited_ocr") == "baidu/Unlimited-OCR"
+    assert resolve_mlx_vlm_model("unlimited-ocr") == "baidu/Unlimited-OCR"
+    assert resolve_mlx_vlm_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
     assert resolve_mlx_vlm_model("glm_ocr") == "mlx-community/GLM-OCR-bf16"
     assert resolve_mlx_vlm_model("org/custom-model") == "org/custom-model"
 
@@ -71,12 +78,12 @@ def test_resolve_mlx_vlm_model_rejects_paddleocr_aliases() -> None:
 
 
 def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
-    assert resolve_transformers_ocr_model(None) == "stepfun-ai/GOT-OCR-2.0-hf"
-    assert resolve_transformers_ocr_model("got_ocr") == "stepfun-ai/GOT-OCR-2.0-hf"
+    assert resolve_transformers_ocr_model(None) == "baidu/Unlimited-OCR"
     assert resolve_transformers_ocr_model("unlimited_ocr") == "baidu/Unlimited-OCR"
     assert (
         resolve_transformers_ocr_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
     )
+    assert resolve_transformers_ocr_model("got_ocr") == "stepfun-ai/GOT-OCR-2.0-hf"
     assert resolve_transformers_ocr_model("glm_ocr") == "zai-org/GLM-OCR"
     assert resolve_transformers_ocr_model("org/custom-model") == "org/custom-model"
 
@@ -150,6 +157,202 @@ def test_mlx_vlm_image_uses_python_package(monkeypatch, tmp_path: Path):
     assert captured["max_tokens"] == 4096
 
 
+def test_mlx_vlm_unlimited_ocr_image_uses_gundam_settings(
+    monkeypatch, tmp_path: Path
+) -> None:
+    image = tmp_path / "scan.png"
+    image.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _FakeModel:
+        config = "config"
+
+    def _load(model_id):  # noqa: ANN001
+        captured["model_id"] = model_id
+        return _FakeModel(), "processor"
+
+    def _apply_chat_template(processor, config, prompt, **kwargs):  # noqa: ANN001
+        captured["processor"] = processor
+        captured["config"] = config
+        captured["prompt"] = prompt
+        captured.update(kwargs)
+        return f"<image>{prompt}"
+
+    def _generate(model, processor, prompt, **kwargs):  # noqa: ANN001
+        captured["generate_model"] = model
+        captured["generate_processor"] = processor
+        captured["formatted_prompt"] = prompt
+        captured.update(kwargs)
+        return types.SimpleNamespace(text="recognized unlimited")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm",
+        types.SimpleNamespace(
+            __version__="0.6.4",
+            load=_load,
+            generate=_generate,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.prompt_utils",
+        types.SimpleNamespace(apply_chat_template=_apply_chat_template),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.models.unlimited_ocr",
+        types.ModuleType("mlx_vlm.models.unlimited_ocr"),
+    )
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model_id", None)
+
+    result = MLXVLMOCRBackend().recognize(image, model="unlimited_ocr")
+
+    assert result == OCRResult(
+        title="scan",
+        pages=(OCRPage(page_index=None, text="recognized unlimited"),),
+    )
+    assert captured["model_id"] == "baidu/Unlimited-OCR"
+    assert captured["prompt"] == "document parsing."
+    assert captured["num_images"] == 1
+    assert captured["image"] == [image.as_posix()]
+    assert captured["max_tokens"] == 8192
+    assert captured["temperature"] == 0.0
+    assert captured["cropping"] is True
+    assert captured["image_size"] == 640
+    assert captured["base_size"] == 1024
+    assert captured.get("logits_processors") is not None
+    assert len(captured["logits_processors"]) == 1
+
+
+def test_mlx_vlm_unlimited_ocr_pdf_runs_page_by_page(
+    monkeypatch, tmp_path: Path
+) -> None:
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_text("x", encoding="utf-8")
+    render_dir = tmp_path / "rendered"
+    render_dir.mkdir()
+    page_paths = [render_dir / "page-1.png", render_dir / "page-2.png"]
+    for page_path in page_paths:
+        page_path.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {"images": [], "prompts": [], "num_images": []}
+
+    class _FakeModel:
+        config = "config"
+
+    def _load(model_id):  # noqa: ANN001
+        captured["model_id"] = model_id
+        return _FakeModel(), "processor"
+
+    def _apply_chat_template(processor, config, prompt, **kwargs):  # noqa: ANN001
+        captured["prompts"].append(prompt)
+        captured["num_images"].append(kwargs.get("num_images"))
+        return f"<image>{prompt}"
+
+    def _generate(model, processor, prompt, **kwargs):  # noqa: ANN001, ARG001
+        captured["images"].append(kwargs["image"][0])
+        captured.setdefault("generate_kwargs", []).append(
+            {
+                "max_tokens": kwargs.get("max_tokens"),
+                "temperature": kwargs.get("temperature"),
+                "cropping": kwargs.get("cropping"),
+                "image_size": kwargs.get("image_size"),
+                "base_size": kwargs.get("base_size"),
+                "logits_processors": kwargs.get("logits_processors"),
+            }
+        )
+        page_no = len(captured["images"])
+        return types.SimpleNamespace(text=f"page {page_no} body")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm",
+        types.SimpleNamespace(
+            __version__="0.6.8",
+            load=_load,
+            generate=_generate,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.prompt_utils",
+        types.SimpleNamespace(apply_chat_template=_apply_chat_template),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.models.unlimited_ocr",
+        types.ModuleType("mlx_vlm.models.unlimited_ocr"),
+    )
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model_id", None)
+    monkeypatch.setattr(
+        "aimd.plugins.ocr.backends._render_pdf_pages",
+        lambda input_path, **kwargs: tuple(enumerate(page_paths)),  # noqa: ARG005
+    )
+
+    pages = MLXVLMOCRBackend()._recognize_pdf_or_document(
+        pdf,
+        model="unlimited_ocr",
+        start=0,
+        end=1,
+        temp_dir=tmp_path,
+    )
+
+    assert pages == (
+        OCRPage(page_index=0, text="page 1 body"),
+        OCRPage(page_index=1, text="page 2 body"),
+    )
+    assert captured["model_id"] == "baidu/Unlimited-OCR"
+    assert captured["prompts"] == ["document parsing.", "document parsing."]
+    assert captured["num_images"] == [1, 1]
+    assert captured["images"] == [path.as_posix() for path in page_paths]
+    assert len(captured["generate_kwargs"]) == 2
+    for kwargs in captured["generate_kwargs"]:
+        assert kwargs["max_tokens"] == 8192
+        assert kwargs["temperature"] == 0.0
+        assert kwargs["cropping"] is True
+        assert kwargs["image_size"] == 640
+        assert kwargs["base_size"] == 1024
+        assert kwargs["logits_processors"] is not None
+        assert len(kwargs["logits_processors"]) == 1
+
+
+def test_sliding_window_no_repeat_ngram_processor_bans_repeated_tail() -> None:
+    mx = pytest.importorskip("mlx.core")
+    processor = SlidingWindowNoRepeatNgramProcessor(ngram_size=3, window=16)
+    # Sequence ends with prefix (1, 2); historical ngram (1, 2, 9) should ban 9.
+    tokens = mx.array([7, 1, 2, 9, 3, 1, 2])
+    logits = mx.zeros((20,), dtype=mx.float32)
+    out = processor(tokens, logits)
+    assert float(out[9]) == float("-inf")
+    assert float(out[0]) == 0.0
+
+
+def test_mlx_vlm_unlimited_ocr_rejects_old_mlx_vlm(monkeypatch, tmp_path: Path) -> None:
+    image = tmp_path / "scan.png"
+    image.write_text("x", encoding="utf-8")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm",
+        types.SimpleNamespace(__version__="0.6.3", load=lambda *_a, **_k: None),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.prompt_utils",
+        types.SimpleNamespace(apply_chat_template=lambda *_a, **_k: "prompt"),
+    )
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model_id", None)
+
+    with pytest.raises(BackendUnavailableError, match="mlx-vlm>=0.6.4"):
+        MLXVLMOCRModel("unlimited_ocr").recognize_image(image)
+
+
 def test_mlx_vlm_pdf_uses_python_package(monkeypatch, tmp_path: Path):
     pdf = tmp_path / "scan.pdf"
     pdf.write_text("x", encoding="utf-8")
@@ -191,7 +394,7 @@ def test_mlx_vlm_pdf_uses_python_package(monkeypatch, tmp_path: Path):
 
     pages = MLXVLMOCRBackend()._recognize_pdf_or_document(
         pdf,
-        model=None,
+        model="glm_ocr",
         start=0,
         end=2,
         temp_dir=tmp_path,

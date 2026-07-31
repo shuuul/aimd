@@ -1,17 +1,33 @@
 """mlx-vlm OCR model adapter."""
 
+from __future__ import annotations
+
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 
-DEFAULT_OCR_MODEL = "glm_ocr"
+DEFAULT_OCR_MODEL = "unlimited_ocr"
 MLX_VLM_MODEL_ALIASES = {
     "glm_ocr": "mlx-community/GLM-OCR-bf16",
     "glm-ocr": "mlx-community/GLM-OCR-bf16",
     "mlx-community/glm-ocr-bf16": "mlx-community/GLM-OCR-bf16",
+    "unlimited_ocr": "baidu/Unlimited-OCR",
+    "unlimited-ocr": "baidu/Unlimited-OCR",
+    "baidu/unlimited-ocr": "baidu/Unlimited-OCR",
 }
 MLX_VLM_DEFAULT_PROMPT = "Text Recognition:"
+# mlx-vlm added Unlimited-OCR in PR #1427, first released in v0.6.4.
+MLX_VLM_UNLIMITED_OCR_MIN_VERSION = (0, 6, 4)
+UNLIMITED_OCR_MODEL_ID = "baidu/Unlimited-OCR"
+UNLIMITED_OCR_SINGLE_PROMPT = "document parsing."
+# Practical per-page cap. Upstream docs show 32768, but without an n-gram guard
+# Unlimited-OCR can loop ("R. R. R. ...") until max_tokens and burn minutes/page.
+UNLIMITED_OCR_MAX_TOKENS = 8192
+# Baidu single-image example values (SlidingWindowNoRepeatNgramProcessor).
+UNLIMITED_OCR_NGRAM_SIZE = 35
+UNLIMITED_OCR_NGRAM_WINDOW = 128
 
 _cached_mlx_vlm_model = None
 _cached_mlx_vlm_processor = None
@@ -28,8 +44,16 @@ def resolve_mlx_vlm_model(model: str | None) -> str:
         return requested.strip()
     raise ProcessingFailedError(
         "Unsupported MLX VLM OCR model. Supported models: glm_ocr, "
-        "or an explicit mlx-vlm compatible Hugging Face model ID."
+        "unlimited_ocr, or an explicit mlx-vlm compatible Hugging Face model ID."
     )
+
+
+def _is_unlimited_ocr_model(model_id: str) -> bool:
+    """Return True when the resolved model is Baidu Unlimited-OCR."""
+    return model_id.strip().lower() in {
+        UNLIMITED_OCR_MODEL_ID.lower(),
+        "baidu/unlimited-ocr",
+    } or model_id.strip().lower().endswith("/unlimited-ocr")
 
 
 class MLXVLMOCRModel:
@@ -40,10 +64,19 @@ class MLXVLMOCRModel:
 
     def recognize_image(self, image_path: Path) -> str:
         model, processor = _load_mlx_vlm_model(self.model_id)
+        if _is_unlimited_ocr_model(self.model_id):
+            return _generate_unlimited_ocr_text(model, processor, image_path)
         return _generate_mlx_vlm_text(model, processor, image_path)
 
     def recognize_images(self, image_paths: list[Path]) -> list[str]:
         model, processor = _load_mlx_vlm_model(self.model_id)
+        if _is_unlimited_ocr_model(self.model_id):
+            # Page-by-page single-image gundam mode. One-shot multipage generation
+            # drops <PAGE> segments on long PDFs (observed 30/41), so do not batch.
+            return [
+                _generate_unlimited_ocr_text(model, processor, image_path)
+                for image_path in image_paths
+            ]
         return [
             _generate_mlx_vlm_text(model, processor, image_path)
             for image_path in image_paths
@@ -60,11 +93,45 @@ def _load_mlx_vlm_modules():
         ) from exc
 
 
+def _parse_version_tuple(version: str) -> tuple[int, ...]:
+    """Parse a dotted version prefix into comparable ints."""
+    parts: list[int] = []
+    for piece in version.split("+")[0].split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _require_mlx_vlm_unlimited_support() -> None:
+    """Fail fast when installed mlx-vlm cannot run Unlimited-OCR."""
+    mlx_vlm, _prompt_utils = _load_mlx_vlm_modules()
+    version = getattr(mlx_vlm, "__version__", "0")
+    if _parse_version_tuple(version) < MLX_VLM_UNLIMITED_OCR_MIN_VERSION:
+        min_version = ".".join(str(part) for part in MLX_VLM_UNLIMITED_OCR_MIN_VERSION)
+        raise BackendUnavailableError(
+            f"Unlimited-OCR on macOS requires mlx-vlm>={min_version} "
+            f"(installed {version}). Upgrade with `uv sync`, then retry."
+        )
+    try:
+        import_module("mlx_vlm.models.unlimited_ocr")
+    except ImportError as exc:
+        min_version = ".".join(str(part) for part in MLX_VLM_UNLIMITED_OCR_MIN_VERSION)
+        raise BackendUnavailableError(
+            "Installed mlx-vlm build lacks Unlimited-OCR support "
+            f"(requires mlx-vlm>={min_version}). Upgrade with `uv sync`, then retry."
+        ) from exc
+
+
 def _load_mlx_vlm_model(model_id: str) -> tuple[object, object]:
     """Load or return cached mlx-vlm model state."""
     global _cached_mlx_vlm_model, _cached_mlx_vlm_processor, _cached_mlx_vlm_model_id  # noqa: PLW0603
     if _cached_mlx_vlm_model is not None and _cached_mlx_vlm_model_id == model_id:
         return _cached_mlx_vlm_model, _cached_mlx_vlm_processor
+
+    if _is_unlimited_ocr_model(model_id):
+        _require_mlx_vlm_unlimited_support()
 
     mlx_vlm, _prompt_utils = _load_mlx_vlm_modules()
     try:
@@ -104,4 +171,132 @@ def _generate_mlx_vlm_text(
     text = str(getattr(result, "text", result)).strip()
     if not text:
         raise ProcessingFailedError("MLX VLM OCR produced empty content")
+    return text
+
+
+class SlidingWindowNoRepeatNgramProcessor:
+    """Block n-gram repetitions within a sliding window (Baidu Unlimited-OCR).
+
+    Port of ``SlidingWindowNoRepeatNgramProcessor`` from baidu/Unlimited-OCR for
+    mlx-vlm's ``logits_processors`` hook: ``processor(tokens, logits) -> logits``.
+    ``tokens`` is the generated-token stream (not the full prompt).
+    """
+
+    def __init__(
+        self,
+        ngram_size: int,
+        window: int,
+        whitelist_token_ids: set[int] | None = None,
+    ) -> None:
+        if ngram_size < 1:
+            raise ValueError("ngram_size must be >= 1")
+        if window < 1:
+            raise ValueError("window must be >= 1")
+        self.ngram_size = ngram_size
+        self.window = window
+        self.whitelist = set(whitelist_token_ids or ())
+
+    def __call__(self, tokens: Any, logits: Any) -> Any:
+        mx = import_module("mlx.core")
+        sequence = _as_int_list(tokens)
+        if len(sequence) < self.ngram_size:
+            return logits
+
+        search_start = max(0, len(sequence) - self.window)
+        search_end = len(sequence) - self.ngram_size + 1
+        if search_end <= search_start:
+            return logits
+
+        if self.ngram_size > 1:
+            current_prefix = tuple(sequence[-(self.ngram_size - 1) :])
+        else:
+            current_prefix = ()
+
+        banned: set[int] = set()
+        for idx in range(search_start, search_end):
+            ngram = sequence[idx : idx + self.ngram_size]
+            if self.ngram_size == 1 or tuple(ngram[:-1]) == current_prefix:
+                banned.add(int(ngram[-1]))
+        banned.difference_update(self.whitelist)
+        if not banned:
+            return logits
+
+        # logits: [vocab] or [batch, vocab]
+        vocab = int(logits.shape[-1])
+        banned_ids = [token_id for token_id in banned if 0 <= token_id < vocab]
+        if not banned_ids:
+            return logits
+        idx = mx.array(banned_ids)
+        updates = mx.full((len(banned_ids),), float("-inf"), dtype=logits.dtype)
+        if getattr(logits, "ndim", 1) == 1:
+            return mx.put_along_axis(
+                logits[None, :], idx[None, :], updates[None, :], axis=1
+            )[0]
+        batch = int(logits.shape[0])
+        batch_idx = mx.broadcast_to(idx[None, :], (batch, len(banned_ids)))
+        batch_updates = mx.broadcast_to(updates[None, :], (batch, len(banned_ids)))
+        return mx.put_along_axis(logits, batch_idx, batch_updates, axis=1)
+
+
+def _as_int_list(tokens: Any) -> list[int]:
+    """Normalize mlx/numpy/list token streams to a flat int list."""
+    if tokens is None:
+        return []
+    if hasattr(tokens, "reshape"):
+        flat = tokens.reshape(-1)
+        if hasattr(flat, "tolist"):
+            return [int(x) for x in flat.tolist()]
+    if isinstance(tokens, (list, tuple)):
+        out: list[int] = []
+        for item in tokens:
+            if isinstance(item, (list, tuple)):
+                out.extend(int(x) for x in item)
+            else:
+                out.append(int(item))
+        return out
+    try:
+        return [int(tokens)]
+    except (TypeError, ValueError):
+        return []
+
+
+def _generate_unlimited_ocr_text(
+    model: object,
+    processor: object,
+    image_path: Path,
+) -> str:
+    """Run Unlimited-OCR via mlx-vlm in upstream single-image gundam mode."""
+    mlx_vlm, prompt_utils = _load_mlx_vlm_modules()
+    config = getattr(model, "config", None)
+    formatted_prompt = prompt_utils.apply_chat_template(
+        processor,
+        config,
+        UNLIMITED_OCR_SINGLE_PROMPT,
+        num_images=1,
+    )
+    # Upstream gundam mode: 1024 global view + 640 local crops.
+    # Enable Baidu's sliding-window no-repeat n-gram guard (examples use 35/128).
+    ngram_processor = SlidingWindowNoRepeatNgramProcessor(
+        UNLIMITED_OCR_NGRAM_SIZE,
+        UNLIMITED_OCR_NGRAM_WINDOW,
+    )
+    try:
+        result = mlx_vlm.generate(
+            model,
+            processor,
+            formatted_prompt,
+            image=[image_path.as_posix()],
+            max_tokens=UNLIMITED_OCR_MAX_TOKENS,
+            temperature=0.0,
+            cropping=True,
+            image_size=640,
+            base_size=1024,
+            logits_processors=[ngram_processor],
+        )
+    except Exception as exc:  # noqa: BLE001 - upstream model errors vary
+        raise ProcessingFailedError(f"Unlimited-OCR inference failed: {exc}") from exc
+
+    text = str(getattr(result, "text", result)).strip()
+    if not text:
+        raise ProcessingFailedError("Unlimited-OCR produced empty content")
     return text

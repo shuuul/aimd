@@ -66,9 +66,11 @@ def persist_result_output_if_requested(
 
 
 MODEL_HELP_TEXT = (
-    "Model for transcription, or OCR model. macOS OCR: glm_ocr "
-    "(default) or an mlx-vlm compatible Hugging Face model ID. "
-    "Linux/CUDA OCR: got_ocr (default), unlimited_ocr, glm_ocr, "
+    "Model for transcription, or OCR model. Default OCR on both "
+    "platforms is unlimited_ocr (baidu/Unlimited-OCR). "
+    "macOS OCR: unlimited_ocr (default, mlx-vlm>=0.6.4), glm_ocr, "
+    "or an mlx-vlm compatible Hugging Face model ID. "
+    "Linux/CUDA OCR: unlimited_ocr (default), got_ocr, glm_ocr, "
     "or a Hugging Face model ID. "
     "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
     "and also supports other documented mlx-audio STT model IDs. "
