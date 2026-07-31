@@ -1,10 +1,7 @@
 """Transformers ASR backend implementation for Qwen3-ASR."""
 
 import asyncio
-import shutil
-import subprocess
 import threading
-import warnings
 from pathlib import Path
 
 from logly import logger
@@ -12,14 +9,9 @@ from logly import logger
 from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
 
 from ..audio_utils import convert_to_wav_if_needed
-from ..const import TRANSFORMERS_ASR_DEFAULT_MODEL
-
-# Silence noisy upstream transformers generation warnings. These are benign and
-# would otherwise pollute CLI output.
-warnings.filterwarnings(
-    "ignore",
-    message=r"The following generation flags are not valid.*",
-    category=UserWarning,
+from ..const import (
+    TRANSFORMERS_ASR_DEFAULT_MODEL,
+    resolve_transformers_asr_model,
 )
 
 LANGUAGE_CODE_TO_NAME = {
@@ -45,15 +37,24 @@ LANGUAGE_CODE_TO_NAME = {
     "da": "Danish",
     "fi": "Finnish",
     "ms": "Malay",
+    "yue": "Cantonese",
+    "cs": "Czech",
+    "fil": "Filipino",
+    "fa": "Persian",
+    "el": "Greek",
+    "hu": "Hungarian",
+    "mk": "Macedonian",
+    "ro": "Romanian",
 }
-QWEN3_ASR_PAD_TOKEN_ID = 151645
 
 
 class TransformersASRModel:
-    """Qwen3-ASR Transformers model adapter."""
+    """Qwen3-ASR Transformers model adapter (native HF backend)."""
 
     def __init__(self, model_id: str | None = None) -> None:
-        self.model_id = model_id or TRANSFORMERS_ASR_DEFAULT_MODEL
+        self.model_id = resolve_transformers_asr_model(
+            model_id or TRANSFORMERS_ASR_DEFAULT_MODEL
+        )
 
     async def transcribe(
         self,
@@ -62,9 +63,9 @@ class TransformersASRModel:
         language: str | None = None,
         temp_dir: Path | None = None,
     ) -> str:
-        """Transcribe audio using Qwen3-ASR through local Transformers classes."""
+        """Transcribe audio using native Transformers Qwen3-ASR."""
         try:
-            import torch  # type: ignore
+            import torch  # type: ignore  # noqa: F401
         except ImportError:
             raise ProcessingFailedError(
                 "PyTorch is not installed. Required for Transformers ASR backend."
@@ -77,7 +78,7 @@ class TransformersASRModel:
                 "transformers is required for Transformers ASR backend."
             )
 
-        device = _select_device(torch)
+        device = _select_device()
         logger.info(
             "Transcribing with Qwen3-ASR model on Transformers backend: "
             f"{self.model_id}, device: {device}, language: {language or 'auto'}"
@@ -134,8 +135,10 @@ def _resolve_language(language: str | None) -> str | None:
     )
 
 
-def _select_device(torch) -> str:  # noqa: ANN001
+def _select_device() -> str:
     """Select the best available PyTorch device for local Transformers ASR."""
+    import torch
+
     if torch.cuda.is_available():
         return "cuda"
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
@@ -143,13 +146,42 @@ def _select_device(torch) -> str:  # noqa: ANN001
     return "cpu"
 
 
+def _parse_version_tuple(version: str) -> tuple[int, ...]:
+    """Parse a dotted version prefix into comparable ints."""
+    parts: list[int] = []
+    for piece in version.split("+")[0].split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _require_native_qwen3_asr() -> None:
+    """Fail fast when the installed Transformers build lacks native Qwen3-ASR."""
+    import transformers
+
+    if _parse_version_tuple(transformers.__version__) < (5, 13):
+        raise ProcessingFailedError(
+            "Native Qwen3-ASR requires transformers>=5.13.0 "
+            f"(installed {transformers.__version__})."
+        )
+    try:
+        from transformers import AutoModelForMultimodalLM  # noqa: F401
+    except ImportError as exc:
+        raise ProcessingFailedError(
+            "Installed transformers build lacks AutoModelForMultimodalLM "
+            "required for native Qwen3-ASR."
+        ) from exc
+
+
 def _get_model_and_processor(model_name: str):
-    """Load or return cached Qwen3-ASR Transformers model and processor."""
+    """Load or return cached native Qwen3-ASR Transformers model and processor."""
     global _cached_model, _cached_processor, _cached_model_name, _cached_device  # noqa: PLW0603
 
     import torch
 
-    device = _select_device(torch)
+    device = _select_device()
     if (
         _cached_model is not None
         and _cached_model_name == model_name
@@ -165,13 +197,9 @@ def _get_model_and_processor(model_name: str):
         ):
             return _cached_model, _cached_processor
 
-        from transformers import AutoModel, AutoProcessor
+        _require_native_qwen3_asr()
+        from transformers import AutoModelForMultimodalLM, AutoProcessor
 
-        from aimd.plugins.asr.qwen3_asr_transformers import (
-            register_qwen3_asr_transformers,
-        )
-
-        register_qwen3_asr_transformers()
         dtype = (
             torch.bfloat16
             if device == "cuda"
@@ -180,11 +208,8 @@ def _get_model_and_processor(model_name: str):
             if device in {"cuda", "mps"}
             else torch.float32
         )
-        _cached_processor = AutoProcessor.from_pretrained(
-            model_name,
-            fix_mistral_regex=True,
-        )
-        _cached_model = AutoModel.from_pretrained(
+        _cached_processor = AutoProcessor.from_pretrained(model_name)
+        _cached_model = AutoModelForMultimodalLM.from_pretrained(
             model_name,
             dtype=dtype,
         ).to(device)
@@ -213,123 +238,95 @@ def _ensure_pad_token(model: object) -> None:
             gen_config.pad_token_id = eos[0] if isinstance(eos, (list, tuple)) else eos
 
 
-def _model_device_and_dtype(model: object):
-    """Return the first parameter device/dtype for tensor placement."""
-    first_parameter = next(model.parameters())
-    return first_parameter.device, first_parameter.dtype
-
-
 def _inputs_to_model_device(inputs, model: object):
     """Move processor tensors to model device without casting token ids."""
     import torch
 
-    device, dtype = _model_device_and_dtype(model)
-    return {
-        key: (
-            (
-                value.to(device=device, dtype=dtype)
-                if torch.is_floating_point(value)
-                else value.to(device=device)
-            )
-            if isinstance(value, torch.Tensor)
-            else value
-        )
-        for key, value in inputs.items()
-    }
+    first_parameter = next(model.parameters())
+    device = first_parameter.device
+    dtype = first_parameter.dtype
+    moved = {}
+    for key, value in inputs.items():
+        if isinstance(value, torch.Tensor):
+            if torch.is_floating_point(value):
+                moved[key] = value.to(device=device, dtype=dtype)
+            else:
+                moved[key] = value.to(device=device)
+        else:
+            moved[key] = value
+    return moved
 
 
-def _load_audio_array(audio_path: Path):
-    """Load a mono 16 kHz float32 waveform for Qwen3-ASR processor input."""
-    import numpy as np
+def _parse_qwen_output(output: str, forced_language: str | None = None) -> str:
+    """Extract transcription text from Qwen3-ASR generated output.
 
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        raise ProcessingFailedError(
-            "Qwen3-ASR audio loading requires ffmpeg to produce 16 kHz mono PCM."
-        )
-    result = subprocess.run(
-        [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(audio_path),
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-f",
-            "f32le",
-            "-",
-        ],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        raise ProcessingFailedError(
-            f"ffmpeg audio decode failed: {result.stderr.decode(errors='replace')}"
-        )
-    audio = np.frombuffer(result.stdout, dtype=np.float32)
-    if audio.size == 0:
-        raise ProcessingFailedError("Decoded audio is empty")
-    return np.clip(audio, -1.0, 1.0)
-
-
-def _build_prompt(processor: object, language: str | None) -> str:
-    """Build Qwen3-ASR audio chat prompt."""
-    messages = [
-        {"role": "system", "content": ""},
-        {"role": "user", "content": [{"type": "audio", "audio": ""}]},
-    ]
-    prompt = processor.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=False,
-    )
-    if language is not None:
-        prompt += f"language {language}<asr_text>"
-    return prompt
-
-
-def _parse_qwen_output(output: str, forced_language: str | None) -> str:
-    """Extract transcription text from Qwen3-ASR generated output."""
+    ``forced_language`` is retained for call-site compatibility; native decoding
+    already strips the language prefix via ``<asr_text>`` when present.
+    """
+    del forced_language
     text = output.strip()
-    if forced_language is not None:
-        return text
     marker = "<asr_text>"
     if marker in text:
         return text.split(marker, 1)[1].strip()
+    if "assistant\n" in text:
+        text = text.split("assistant\n", 1)[-1].strip()
     return text
 
 
 def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) -> str:
-    """Run Qwen3-ASR through Hugging Face Transformers."""
+    """Run native Hugging Face Qwen3-ASR transcription."""
     import torch
 
     resolved_language = _resolve_language(language)
     asr_model, processor = _get_model_and_processor(model_name)
-    audio = _load_audio_array(audio_path)
-    prompt = _build_prompt(processor, resolved_language)
-    inputs = processor(
-        text=[prompt],
-        audio=[audio],
-        return_tensors="pt",
-        padding=True,
+
+    if not hasattr(processor, "apply_transcription_request"):
+        raise ProcessingFailedError(
+            "Installed transformers processor lacks apply_transcription_request; "
+            "upgrade to transformers>=5.13 for native Qwen3-ASR."
+        )
+
+    inputs = processor.apply_transcription_request(
+        audio=str(audio_path),
+        language=resolved_language,
     )
     inputs = _inputs_to_model_device(inputs, asr_model)
     input_ids = inputs["input_ids"]
 
-    with _generation_lock, torch.no_grad():
+    with _generation_lock, torch.inference_mode():
         generated = asr_model.generate(
             **inputs,
             max_new_tokens=4096,
-            pad_token_id=QWEN3_ASR_PAD_TOKEN_ID,
+            do_sample=False,
         )
 
     generated_ids = getattr(generated, "sequences", generated)
-    decoded = processor.batch_decode(
-        generated_ids[:, input_ids.shape[1] :],
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
-    )
-    return _parse_qwen_output(decoded[0], resolved_language).strip()
+    new_tokens = generated_ids[:, input_ids.shape[1] :]
+
+    if hasattr(processor, "decode"):
+        try:
+            decoded = processor.decode(
+                new_tokens,
+                return_format="transcription_only",
+            )
+            if isinstance(decoded, list):
+                return str(decoded[0]).strip()
+            return str(decoded).strip()
+        except TypeError:
+            # Older processor.decode signatures without return_format.
+            pass
+
+    if hasattr(processor, "batch_decode"):
+        text = processor.batch_decode(
+            new_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0]
+    elif hasattr(processor, "tokenizer"):
+        text = processor.tokenizer.decode(
+            new_tokens[0],
+            skip_special_tokens=True,
+        )
+    else:
+        raise ProcessingFailedError("Qwen3-ASR processor cannot decode outputs")
+    return _parse_qwen_output(text, resolved_language).strip()

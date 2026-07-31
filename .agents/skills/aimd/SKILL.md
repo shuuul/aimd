@@ -111,7 +111,7 @@ Model examples:
 
 ```bash
 aimd audio.wav --model mlx-community/Qwen3-ASR-1.7B-4bit --output transcript.md # macOS Apple Silicon
-aimd audio.wav --model Qwen/Qwen3-ASR-1.7B --output transcript.md               # Linux/CUDA
+aimd audio.wav --model Qwen/Qwen3-ASR-1.7B-hf --output transcript.md            # Linux/CUDA
 ```
 
 ## Documents, PDFs, and text files

@@ -75,8 +75,9 @@ MODEL_HELP_TEXT = (
     "or a Hugging Face model ID. "
     "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
     "and also supports other documented mlx-audio STT model IDs. "
-    "CUDA Transformers ASR supports Qwen/Qwen3-ASR-1.7B "
-    "(default) or Qwen/Qwen3-ASR-0.6B."
+    "CUDA Transformers ASR supports Qwen/Qwen3-ASR-1.7B-hf "
+    "(default) or Qwen/Qwen3-ASR-0.6B-hf "
+    "(legacy Qwen/Qwen3-ASR-* IDs still resolve to -hf)."
 )
 
 

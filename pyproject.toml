@@ -25,7 +25,7 @@ dependencies = [
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "torch>=2.9.1",
     "torchvision>=0.27.1",
-    "transformers>=4.57,<5.13",
+    "transformers>=5.13",
     "typer>=0.20.0",
     "yt-dlp[default]>=2025.11.12",
 ]

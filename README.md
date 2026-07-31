@@ -31,7 +31,7 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 - **One input command** for URLs, audio/video files, EPUB documents, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
 - **URL extraction** through bundled `aimd.plugins.url`: yt-dlp transcript URLs such as podcasts, YouTube, and Bilibili, plus opt-in readable HTML extraction through Defuddle.
-- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, or Qwen3-ASR through the local Transformers backend on CUDA-capable non-Darwin platforms and as an explicit opt-in model path on macOS.
+- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, or Qwen3-ASR through native Transformers (`transformers>=5.13`) on CUDA-capable non-Darwin platforms and as an explicit opt-in model path on macOS.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
 - **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
@@ -86,7 +86,7 @@ Platform notes:
 - macOS transcription is optimized for Apple Silicon through `mlx-audio`; this remains the default backend.
 - macOS OCR uses `mlx-vlm` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
-- Explicit `Qwen/Qwen3-ASR-*` transcription model IDs use AIMD's local Transformers Qwen3-ASR implementation; on macOS this is an opt-in MPS path, not the default.
+- Explicit `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) transcription model IDs use native Transformers Qwen3-ASR (`transformers>=5.13`); on macOS this is an opt-in MPS path, not the default.
 - Linux OCR uses the Transformers backend with CUDA.
 - Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
 
@@ -127,7 +127,7 @@ Backend selection is automatic:
 | macOS Apple Silicon | MLX | Uses `mlx-audio` when available. |
 | CUDA-capable non-Darwin | Transformers | Uses Qwen3-ASR through Transformers when CUDA is available. |
 
-Passing an explicit transcription model ID such as `Qwen/Qwen3-ASR-0.6B` opts into the local Transformers Qwen3-ASR backend, including on macOS/MPS. The automatic macOS backend remains MLX because the quantized MLX models are usually faster and lower-maintenance on Apple Silicon.
+Passing an explicit transcription model ID such as `Qwen/Qwen3-ASR-0.6B-hf` (or the legacy alias `Qwen/Qwen3-ASR-0.6B`) opts into the native Transformers Qwen3-ASR backend, including on macOS/MPS. The automatic macOS backend remains MLX because the quantized MLX models are usually faster and lower-maintenance on Apple Silicon.
 
 ### Supported models
 
@@ -150,8 +150,8 @@ Passing an explicit transcription model ID such as `Qwen/Qwen3-ASR-0.6B` opts in
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` | mlx-audio STT | No | Voxtral Mini 4B Realtime, fp16. |
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/VibeVoice-ASR-bf16` | mlx-audio STT | No | VibeVoice-ASR, bf16; upstream model may include diarization/timestamps. |
 | Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
-| Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-1.7B` | Local Transformers Qwen3-ASR | Yes on CUDA Transformers | Default CUDA Transformers ASR model; explicit opt-in on macOS. |
-| Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-0.6B` | Local Transformers Qwen3-ASR | No | Lower-memory Qwen3-ASR option; explicit opt-in on macOS. |
+| Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-1.7B-hf` | Native Transformers Qwen3-ASR | Yes on CUDA Transformers | Default CUDA Transformers ASR model; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-1.7B` resolves here. |
+| Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-0.6B-hf` | Native Transformers Qwen3-ASR | No | Lower-memory Qwen3-ASR option; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-0.6B` resolves here. |
 | OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr`, `glm-ocr`, `mlx-community/GLM-OCR-bf16` | `mlx-community/GLM-OCR-bf16` | Yes | Default macOS MLX VLM OCR model. |
 | OCR | macOS Apple Silicon / mlx-vlm | Explicit Hugging Face model ID | Provided model ID | No | Any local `mlx-vlm` compatible OCR/image-text model. |
 | OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | Yes | Default Linux/CUDA OCR model. |

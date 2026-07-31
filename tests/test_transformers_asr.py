@@ -7,24 +7,42 @@ import pytest
 from transformers import AutoConfig
 
 from aimd.plugins.asr._plugin import _select_backend_for_model
+from aimd.plugins.asr.const import (
+    TRANSFORMERS_ASR_DEFAULT_MODEL,
+    resolve_transformers_asr_model,
+)
 from aimd.plugins.asr.models.transformers import (
     _parse_qwen_output,
     _resolve_language,
 )
-from aimd.plugins.asr.qwen3_asr_transformers import (
-    Qwen3ASRConfig,
-    register_qwen3_asr_transformers,
-)
 
 
-def test_register_qwen3_asr_transformers_config() -> None:
-    register_qwen3_asr_transformers()
+def test_native_transformers_registers_qwen3_asr_config() -> None:
     config = AutoConfig.for_model("qwen3_asr")
-    assert config.model_type == Qwen3ASRConfig.model_type
+    assert config.model_type == "qwen3_asr"
 
 
 def test_explicit_qwen3_asr_model_selects_transformers_backend() -> None:
+    assert _select_backend_for_model("Qwen/Qwen3-ASR-0.6B-hf") == "transformers"
     assert _select_backend_for_model("Qwen/Qwen3-ASR-0.6B") == "transformers"
+    assert _select_backend_for_model("Qwen/Qwen3-ASR-1.7B-hf") == "transformers"
+
+
+def test_resolve_transformers_asr_model_maps_legacy_ids() -> None:
+    assert (
+        resolve_transformers_asr_model("Qwen/Qwen3-ASR-0.6B")
+        == "Qwen/Qwen3-ASR-0.6B-hf"
+    )
+    assert (
+        resolve_transformers_asr_model("Qwen/Qwen3-ASR-1.7B")
+        == "Qwen/Qwen3-ASR-1.7B-hf"
+    )
+    assert (
+        resolve_transformers_asr_model("Qwen/Qwen3-ASR-0.6B-hf")
+        == "Qwen/Qwen3-ASR-0.6B-hf"
+    )
+    assert resolve_transformers_asr_model(None) == TRANSFORMERS_ASR_DEFAULT_MODEL
+    assert TRANSFORMERS_ASR_DEFAULT_MODEL.endswith("-hf")
 
 
 def test_resolve_qwen_language_code() -> None:
@@ -56,7 +74,7 @@ def test_parse_qwen_output_falls_back_to_plain_text() -> None:
 async def test_qwen3_asr_transformers_real_inference_smoke(tmp_path: Path) -> None:
     """Run a skipped-by-default real Qwen3-ASR inference smoke.
 
-    This intentionally downloads/loads Qwen/Qwen3-ASR-0.6B if it is not already
+    This intentionally downloads/loads Qwen/Qwen3-ASR-0.6B-hf if it is not already
     cached. It is meant for dependency-upgrade validation, not normal CI.
     """
     from aimd.plugins.asr._plugin import transcribe_file
@@ -93,5 +111,7 @@ async def test_qwen3_asr_transformers_real_inference_smoke(tmp_path: Path) -> No
             check=True,
         )
 
-    text = await transcribe_file(audio_path, language="zh", model="Qwen/Qwen3-ASR-0.6B")
+    text = await transcribe_file(
+        audio_path, language="zh", model="Qwen/Qwen3-ASR-0.6B-hf"
+    )
     assert text.strip()

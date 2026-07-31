@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from logly import logger
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from aimd.interfaces.output import (
     get_request_temp_dir,
@@ -16,7 +16,7 @@ from aimd.core.errors import AimdError
 
 logger.remove()
 
-mcp = FastMCP("aimd")
+mcp = MCPServer("aimd")
 
 
 def _process_result_payload(
