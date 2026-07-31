@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from aimd.interfaces.api.app import create_app
 from aimd.core.models import ProcessResult, TextContext
+from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import (
     BackendUnavailableError,
     ProcessingFailedError,
@@ -85,3 +86,33 @@ def test_process_maps_processing_failed_error_to_http_500(monkeypatch) -> None:
     response = client.post("/v1/process", json={"input_source": "audio.wav"})
     assert response.status_code == 500
     assert response.json()["detail"] == "boom"
+
+
+def test_process_preserves_backend_unavailable_from_processor(
+    monkeypatch, tmp_path: Path
+) -> None:
+    audio = tmp_path / "audio.wav"
+    audio.write_text("x", encoding="utf-8")
+
+    async def _process_file(*args):  # noqa: ANN002
+        raise BackendUnavailableError("ASR backend unavailable on this host")
+
+    async def _process_url(*args):  # noqa: ANN002
+        raise AssertionError("should not process URL")
+
+    async def _real_process(request):
+        return await process_core_input(
+            request,
+            process_url=_process_url,
+            process_file=_process_file,
+            is_supported_file_fn=lambda _: True,
+        )
+
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.process_core_input",
+        _real_process,
+    )
+    client = TestClient(create_app())
+    response = client.post("/v1/process", json={"input_source": str(audio)})
+    assert response.status_code == 422
+    assert "ASR backend unavailable" in response.json()["detail"]

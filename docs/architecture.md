@@ -13,9 +13,9 @@ The `aimd` package uses MarkItDown as the URL/local-file conversion contract and
 - `aimd.interfaces.api`: FastAPI-backed HTTP API module (`aimd.interfaces.api:main`).
 - `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
 - `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Logic lives directly under `aimd.plugins.url/` (flattened).
-- `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, and platform backend selection (backends flattened, no separate models/ subdir).
+- `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, and platform backend selection. Backend implementations live under `aimd.plugins.asr.models` (`mlx`, `transformers`).
 - `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents (cleaner inlined). EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
-- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs (models/ collapsed to single models.py), with `mlx-vlm` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
+- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs. Engine implementations live under `aimd.plugins.ocr.models` (`mlx`, `got`, `unlimited`, `generic`), with `mlx-vlm` on macOS/Apple Silicon and CUDA Transformers OCR models on Linux.
 
 Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 
@@ -67,6 +67,20 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.plugins.asr.const` and `aimd.plugins.ocr.backends`.
 
 For performance expectations and benchmarking guidance, see [Performance](performance.md).
+
+## MarkItDown Worker And Domain-Error Normalization
+
+Core runs MarkItDown conversion off the event loop via `_run_markitdown()` (`asyncio` executor). Failures are normalized by `_raise_from_markitdown_failure()`:
+
+1. Bare `AimdError` subclasses re-raise unchanged.
+2. MarkItDown `FileConversionException` aggregates are scanned in converter-attempt order, and the first nested `AimdError` cause/context is restored.
+3. Any other exception is wrapped as `ProcessingFailedError`.
+
+Feature plugins own mapping at their boundary:
+
+- Missing external backends (`pandoc`, `npx`, ASR engines) -> `BackendUnavailableError`
+- Missing input paths -> `InputNotFoundError`
+- Conversion/transcription failures -> `ProcessingFailedError`
 
 ## Error Handling
 

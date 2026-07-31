@@ -8,21 +8,25 @@ import re
 from typing import Awaitable, Callable
 
 from logly import logger
-from markitdown import MarkItDown, StreamInfo
+from markitdown import FileConversionException, MarkItDown, StreamInfo
 
 from aimd.plugins.asr.const import AUDIO_EXTENSIONS
-from .errors import InputNotFoundError, ProcessingFailedError, UnsupportedInputError
+from .errors import (
+    AimdError,
+    InputNotFoundError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
 from .models import InputRoute, ProcessInput, ProcessResult, TaskType, TextContext
 
 from aimd.plugins.asr.const import AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 from aimd.plugins.url import detect_platform, is_url
 from aimd.plugins.doc import PANDOC_DOCUMENT_EXTENSIONS
+from aimd.plugins.ocr.const import IMAGE_FILE_EXTENSIONS, OCR_DOCUMENT_EXTENSIONS
 
 # --- Routing logic merged from router.py (Phase 5) ---
 FileSupportChecker = Callable[[str | Path], bool]
 
-_IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
-_OCR_DOCUMENT_EXTENSIONS = {".pdf"}
 _VALID_TASK_TYPES: set[TaskType] = {"transcript", "convert", "ocr"}
 
 
@@ -58,14 +62,14 @@ def get_input_route(
         if file_path.exists():
             suffix = file_path.suffix.lower()
             if requested_task_type == "ocr":
-                if suffix in _IMAGE_FILE_EXTENSIONS:
+                if suffix in IMAGE_FILE_EXTENSIONS:
                     return InputRoute(source_kind="image_file", task_type="ocr")
-                if suffix in _OCR_DOCUMENT_EXTENSIONS:
+                if suffix in OCR_DOCUMENT_EXTENSIONS:
                     return InputRoute(source_kind="document_file", task_type="ocr")
                 return InputRoute(source_kind="unknown", task_type=None)
-            if suffix in _IMAGE_FILE_EXTENSIONS:
+            if suffix in IMAGE_FILE_EXTENSIONS:
                 return InputRoute(source_kind="image_file", task_type="ocr")
-            if suffix in _OCR_DOCUMENT_EXTENSIONS and not _pdf_has_extractable_text(
+            if suffix in OCR_DOCUMENT_EXTENSIONS and not _pdf_has_extractable_text(
                 file_path
             ):
                 return InputRoute(source_kind="document_file", task_type="ocr")
@@ -160,9 +164,7 @@ def is_supported_file(file_path: str | Path) -> bool:
     return Path(file_path).suffix.lower() in _MARKITDOWN_FILE_EXTENSIONS
 
 
-def _extract_title_from_content(
-    content: str, fallback_title: str = "Untitled", for_filename: bool = False
-) -> str:
+def _extract_title_from_content(content: str, fallback_title: str = "Untitled") -> str:
     """Extract and clean title from markdown text (simplified)."""
     if not content or not content.strip():
         return fallback_title
@@ -202,10 +204,6 @@ def _extract_title_from_content(
     clean = re.sub(r'^["\'\']+|["\'\']+$', "", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     clean = re.sub(r"[。，、；：！？]+$", "", clean)
-
-    if for_filename:
-        clean = re.sub(r'[<>:"/\\|?*]', "", clean)
-        clean = re.sub(r"\s+", "_", clean)[:50].rstrip("_")
 
     return clean or fallback_title
 
@@ -380,6 +378,53 @@ def _text_context_from_markdown(
     )
 
 
+def _iter_exception_chain(exc: BaseException):
+    """Yield an exception and its cause/context chain without cycles."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        yield current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+
+
+def _extract_aimd_error_from_file_conversion(
+    exc: FileConversionException,
+) -> tuple[AimdError, object | None] | None:
+    """Restore the first domain error from MarkItDown's ordered attempts."""
+    for attempt in exc.attempts or []:
+        exc_info = attempt.exc_info
+        if not exc_info or exc_info[1] is None:
+            continue
+        for candidate in _iter_exception_chain(exc_info[1]):
+            if isinstance(candidate, AimdError):
+                return candidate, candidate.__traceback__
+    return None
+
+
+def _raise_from_markitdown_failure(exc: BaseException) -> None:
+    """Re-raise domain errors hidden in MarkItDown aggregates; wrap unknowns."""
+    if isinstance(exc, AimdError):
+        raise exc
+    if isinstance(exc, FileConversionException):
+        restored = _extract_aimd_error_from_file_conversion(exc)
+        if restored is not None:
+            aimd_error, traceback = restored
+            if traceback is not None:
+                raise aimd_error.with_traceback(traceback)
+            raise aimd_error
+    raise ProcessingFailedError(str(exc)) from exc
+
+
+async def _run_markitdown(fn, /, *args, **kwargs):
+    """Run MarkItDown off the event loop and normalize conversion failures."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, partial(fn, *args, **kwargs))
+    except Exception as exc:
+        _raise_from_markitdown_failure(exc)
+
+
 async def convert_url_with_markitdown(
     url: str,
     language: str | None = None,
@@ -391,23 +436,19 @@ async def convert_url_with_markitdown(
     raw_transcript: bool = False,
 ) -> tuple[TextContext, str]:
     """Convert a URL through MarkItDown and AIMD's bundled URL plugin."""
-    md = MarkItDown(enable_plugins=True)
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        partial(
-            md.convert_stream,
-            io.BytesIO(),
-            stream_info=StreamInfo(url=url),
-            task_type="transcript",
-            language=language,
-            model=model,
-            save_original_path=save_original_path,
-            cookies_file=cookies_file,
-            cookies_from_browser=cookies_from_browser,
-            temp_dir=temp_dir,
-            raw_transcript=raw_transcript,
-        ),
+    md = MarkItDown(enable_builtins=False, enable_plugins=True)
+    result = await _run_markitdown(
+        md.convert_stream,
+        io.BytesIO(),
+        stream_info=StreamInfo(url=url),
+        task_type="transcript",
+        language=language,
+        model=model,
+        save_original_path=save_original_path,
+        cookies_file=cookies_file,
+        cookies_from_browser=cookies_from_browser,
+        temp_dir=temp_dir,
+        raw_transcript=raw_transcript,
     )
 
     return (
@@ -446,21 +487,20 @@ async def convert_file_with_markitdown(
         else None
     )
 
-    md = MarkItDown(enable_plugins=True)
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        partial(
-            md.convert,
-            input_path,
-            language=language,
-            model=model,
-            temp_dir=temp_dir,
-            output_dir=output_dir,
-            task_type=task_type,
-            start=start,
-            end=end,
-        ),
+    aimd_owned_route = task_type in {"transcript", "ocr"} or (
+        task_type == "convert" and suffix in PANDOC_DOCUMENT_EXTENSIONS
+    )
+    md = MarkItDown(enable_builtins=not aimd_owned_route, enable_plugins=True)
+    result = await _run_markitdown(
+        md.convert,
+        input_path,
+        language=language,
+        model=model,
+        temp_dir=temp_dir,
+        output_dir=output_dir,
+        task_type=task_type,
+        start=start,
+        end=end,
     )
     markdown = result.markdown
     return (
@@ -495,7 +535,7 @@ async def process_input(
         if route.source_kind == "url":
             return await _process_url(request, process_url)
         return await _process_local_file(request, task_type, process_file)
-    except (InputNotFoundError, UnsupportedInputError, ProcessingFailedError):
+    except AimdError:
         raise
     except Exception as exc:
         raise ProcessingFailedError(str(exc)) from exc

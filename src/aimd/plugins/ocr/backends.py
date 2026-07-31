@@ -11,10 +11,9 @@ from aimd.core.errors import (
     ProcessingFailedError,
 )
 
+from .const import IMAGE_FILE_EXTENSIONS
 from .models import create_transformers_ocr_model
 from .models.mlx import MLXVLMOCRModel
-
-IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
 
 
 @dataclass(frozen=True, slots=True)

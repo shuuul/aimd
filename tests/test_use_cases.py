@@ -1,11 +1,22 @@
 from pathlib import Path
+import sys
 
 import pytest
+from markitdown import FileConversionException
+from markitdown._exceptions import FailedConversionAttempt
 
 import aimd.core.process as process_mod
 from aimd.core.models import ProcessInput, TextContext
-from aimd.core.process import get_input_route, process_input
-from aimd.core.errors import UnsupportedInputError
+from aimd.core.process import (
+    convert_file_with_markitdown,
+    get_input_route,
+    process_input,
+)
+from aimd.core.errors import (
+    BackendUnavailableError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
 
 
 async def _unexpected_process_url(*args, **kwargs):  # noqa: ANN002, ANN003
@@ -223,3 +234,146 @@ async def test_use_case_unsupported_input_raises() -> None:
             process_file=_unexpected_process_file,
             is_supported_file_fn=lambda _: False,
         )
+
+
+@pytest.mark.asyncio
+async def test_process_input_preserves_backend_unavailable_error(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "a.mp3"
+    audio.write_text("x", encoding="utf-8")
+
+    async def _process_file(*args):  # noqa: ANN002
+        raise BackendUnavailableError("no ASR backend available")
+
+    with pytest.raises(BackendUnavailableError, match="no ASR backend available"):
+        await process_input(
+            ProcessInput(input_source=str(audio)),
+            process_url=_unexpected_process_url,
+            process_file=_process_file,
+            is_supported_file_fn=lambda _: True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_markitdown_restores_aimd_error_from_file_conversion() -> None:
+    domain_error = BackendUnavailableError("backend missing")
+
+    def _convert() -> None:
+        raise FileConversionException(
+            attempts=[
+                FailedConversionAttempt(
+                    converter=object(),
+                    exc_info=(RuntimeError, RuntimeError("noise"), None),
+                ),
+                FailedConversionAttempt(
+                    converter=object(),
+                    exc_info=(
+                        BackendUnavailableError,
+                        domain_error,
+                        domain_error.__traceback__,
+                    ),
+                ),
+            ]
+        )
+
+    with pytest.raises(BackendUnavailableError, match="backend missing") as caught:
+        await process_mod._run_markitdown(_convert)
+
+    assert caught.value is domain_error
+    assert isinstance(caught.value.__context__, FileConversionException)
+
+
+@pytest.mark.asyncio
+async def test_run_markitdown_preserves_domain_error_cause_and_traceback() -> None:
+    def _raise_domain_error() -> None:
+        try:
+            raise OSError("backend import failed")
+        except OSError as cause:
+            raise BackendUnavailableError("backend missing") from cause
+
+    try:
+        _raise_domain_error()
+    except BackendUnavailableError as domain_error:
+        original_traceback = domain_error.__traceback__
+        try:
+            raise RuntimeError("converter wrapper") from domain_error
+        except RuntimeError:
+            wrapper_exc_info = sys.exc_info()
+
+    def _convert() -> None:
+        raise FileConversionException(
+            attempts=[
+                FailedConversionAttempt(converter=object(), exc_info=wrapper_exc_info)
+            ]
+        )
+
+    with pytest.raises(BackendUnavailableError, match="backend missing") as caught:
+        await process_mod._run_markitdown(_convert)
+
+    assert isinstance(caught.value.__cause__, OSError)
+    traceback = caught.value.__traceback__
+    while traceback is not None and traceback is not original_traceback:
+        traceback = traceback.tb_next
+    assert traceback is original_traceback
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("suffix", "task_type", "patch_target"),
+    [
+        (".mp3", "transcript", "aimd.plugins.asr._plugin._transcribe_file_sync"),
+        (".png", "ocr", "aimd.plugins.ocr._plugin._recognize_ocr_sync"),
+        (".epub", "convert", "aimd.plugins.doc._plugin.process_doc_with_assets"),
+    ],
+)
+async def test_aimd_owned_routes_do_not_fall_through_to_markitdown_builtins(
+    monkeypatch,
+    tmp_path: Path,
+    suffix: str,
+    task_type: str,
+    patch_target: str,
+) -> None:
+    source = tmp_path / f"input{suffix}"
+    source.write_bytes(b"fake")
+
+    def _raise_backend_unavailable(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise BackendUnavailableError("owned converter unavailable")
+
+    monkeypatch.setattr(patch_target, _raise_backend_unavailable)
+
+    with pytest.raises(BackendUnavailableError, match="owned converter unavailable"):
+        await convert_file_with_markitdown(source, task_type=task_type)
+
+
+@pytest.mark.asyncio
+async def test_run_markitdown_wraps_unknown_conversion_failure() -> None:
+    unknown = ValueError("converter exploded")
+
+    def _convert() -> None:
+        raise FileConversionException(
+            attempts=[
+                FailedConversionAttempt(
+                    converter=object(),
+                    exc_info=(ValueError, unknown, None),
+                )
+            ]
+        )
+
+    with pytest.raises(ProcessingFailedError, match="converter exploded") as caught:
+        await process_mod._run_markitdown(_convert)
+
+    assert isinstance(caught.value.__cause__, FileConversionException)
+
+
+@pytest.mark.asyncio
+async def test_run_markitdown_wraps_plain_unknown_exception() -> None:
+    def _convert() -> None:
+        raise RuntimeError("unexpected markitdown failure")
+
+    with pytest.raises(
+        ProcessingFailedError, match="unexpected markitdown failure"
+    ) as caught:
+        await process_mod._run_markitdown(_convert)
+
+    assert isinstance(caught.value.__cause__, RuntimeError)

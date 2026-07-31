@@ -135,15 +135,21 @@ def segment_audio(
         "1",
         str(out_path_template),
     ]
+    parent = out_path_template.parent
+    glob_pattern = f"{prefix}*.wav"
+
+    def _cleanup_partial_segments() -> None:
+        for partial in parent.glob(glob_pattern):
+            partial.unlink(missing_ok=True)
+
     logger.info(f"Segmenting audio into {segment_time_secs}s chunks")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        _cleanup_partial_segments()
         raise ProcessingFailedError(
             f"ffmpeg audio segmentation failed: {result.stderr}"
         )
 
-    parent = out_path_template.parent
-    glob_pattern = f"{prefix}*.wav"
     generated_segments = sorted(parent.glob(glob_pattern))
 
     if not generated_segments:

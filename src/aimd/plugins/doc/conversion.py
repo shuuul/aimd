@@ -18,6 +18,13 @@ from pathlib import Path
 
 from logly import logger
 
+from aimd.core.errors import (
+    BackendUnavailableError,
+    InputNotFoundError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
+
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp"}
 _PANDOC_MARKDOWN_FORMAT = "markdown_mmd-raw_html"
@@ -443,10 +450,12 @@ def _run_pandoc(
             check=False,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError("Pandoc CLI is required for this document format") from exc
+        raise BackendUnavailableError(
+            "Pandoc CLI is required for this document format"
+        ) from exc
 
     if result.returncode != 0:
-        raise RuntimeError(
+        raise ProcessingFailedError(
             f"Pandoc conversion failed for {input_file.name}: {result.stderr.strip()}"
         )
 
@@ -513,7 +522,9 @@ def _process_epub_with_assets(
             with zipfile.ZipFile(file_path, "r") as zip_ref:
                 zip_ref.extractall(temp_path)
         except zipfile.BadZipFile as e:
-            raise RuntimeError(f"Invalid EPUB file (not a valid ZIP): {e}") from e
+            raise ProcessingFailedError(
+                f"Invalid EPUB file (not a valid ZIP): {e}"
+            ) from e
 
         oebps_dir = _find_oebps_dir(temp_path)
         _extract_images(oebps_dir, images_dir)
@@ -526,7 +537,7 @@ def _process_epub_with_assets(
             spine_files = sorted(html_files)
 
         if not spine_files:
-            raise RuntimeError("No HTML/XHTML chapter files found in EPUB")
+            raise ProcessingFailedError("No HTML/XHTML chapter files found in EPUB")
 
         chapter_files: list[tuple[str, str]] = []
         for html_file in spine_files:
@@ -545,12 +556,14 @@ def _process_epub_with_assets(
                 clean_markdown(out_md)
                 content = out_md.read_text(encoding="utf-8")
                 chapter_files.append((basename, content))
+            except BackendUnavailableError:
+                raise
             except Exception as e:
                 logger.warning(f"Failed to convert {html_file.name}: {e}")
                 continue
 
         if not chapter_files:
-            raise RuntimeError("Failed to convert any HTML files to markdown")
+            raise ProcessingFailedError("Failed to convert any HTML files to markdown")
 
         combined_content = "\n\n---\n\n".join(
             content.strip() for _, content in chapter_files
@@ -582,11 +595,13 @@ def process_doc_with_assets(
     file_path = Path(file_path)
 
     if not file_path.exists():
-        raise FileNotFoundError(f"Document file not found: {file_path}")
+        raise InputNotFoundError(f"Document file not found: {file_path}")
 
     input_format = PANDOC_INPUT_FORMAT_BY_EXTENSION.get(file_path.suffix.lower())
     if input_format is None:
-        raise RuntimeError(f"Unsupported Pandoc document format: {file_path.suffix}")
+        raise UnsupportedInputError(
+            f"Unsupported Pandoc document format: {file_path.suffix}"
+        )
 
     if input_format == "epub":
         return _process_epub_with_assets(

@@ -16,9 +16,8 @@ from markitdown import (
 from aimd.core.errors import InputNotFoundError, ProcessingFailedError
 from aimd.core.models import TextContext
 
-from .backends import OCRPage, create_ocr_backend
-
-OCR_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
+from .backends import OCRPage, OCRResult, create_ocr_backend
+from .const import OCR_EXTENSIONS
 
 __plugin_interface_version__ = 1
 
@@ -30,15 +29,24 @@ def _page_to_markdown(page: OCRPage, total_pages: int) -> str:
     return f"## Page {page.page_index + 1}\n\n{text}".strip()
 
 
-async def process_ocr(
+def _ocr_result_to_markdown(result: OCRResult) -> tuple[str, str]:
+    """Build title + markdown from a backend OCR result."""
+    chunks = [_page_to_markdown(page, len(result.pages)) for page in result.pages]
+    chunks = [chunk for chunk in chunks if chunk]
+    if not chunks:
+        raise ProcessingFailedError("OCR returned empty content")
+    return result.title, "\n\n".join(chunks)
+
+
+async def _recognize_ocr_result(
     input_path: str | Path,
     model: str | None = None,
     language: str | None = None,
     start: int | None = None,
     end: int | None = None,
     temp_dir: Path | None = None,
-) -> TextContext:
-    """Process a scanned PDF or image with OCR and return TextContext."""
+) -> OCRResult:
+    """Validate an OCR request and return the backend result."""
     path = Path(input_path)
     if not path.exists():
         raise InputNotFoundError(f"Input file not found: {input_path}")
@@ -63,11 +71,76 @@ async def process_ocr(
         end=end,
         temp_dir=temp_dir,
     )
-    chunks = [_page_to_markdown(page, len(result.pages)) for page in result.pages]
-    chunks = [chunk for chunk in chunks if chunk]
-    if not chunks:
+    if not any(page.text.strip() for page in result.pages):
         raise ProcessingFailedError("OCR returned empty content")
-    return TextContext(title=result.title, chunk_list=chunks, split_header_level=2)
+    return result
+
+
+async def _recognize_ocr(
+    input_path: str | Path,
+    model: str | None = None,
+    language: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
+    temp_dir: Path | None = None,
+) -> tuple[str, str]:
+    """Run OCR and return title + markdown without final TextContext shaping."""
+    result = await _recognize_ocr_result(
+        input_path,
+        model=model,
+        language=language,
+        start=start,
+        end=end,
+        temp_dir=temp_dir,
+    )
+    return _ocr_result_to_markdown(result)
+
+
+def _recognize_ocr_sync(
+    input_path: str | Path,
+    model: str | None = None,
+    language: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
+    temp_dir: Path | None = None,
+) -> DocumentConverterResult:
+    """Synchronous MarkItDown boundary: title + markdown only."""
+    title, markdown = asyncio.run(
+        _recognize_ocr(
+            input_path,
+            model=model,
+            language=language,
+            start=start,
+            end=end,
+            temp_dir=temp_dir,
+        )
+    )
+    return DocumentConverterResult(title=title, markdown=markdown)
+
+
+async def process_ocr(
+    input_path: str | Path,
+    model: str | None = None,
+    language: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
+    temp_dir: Path | None = None,
+) -> TextContext:
+    """Compatibility API returning the original page-oriented TextContext."""
+    result = await _recognize_ocr_result(
+        input_path,
+        model=model,
+        language=language,
+        start=start,
+        end=end,
+        temp_dir=temp_dir,
+    )
+    chunks = [_page_to_markdown(page, len(result.pages)) for page in result.pages]
+    return TextContext(
+        title=result.title,
+        chunk_list=[chunk for chunk in chunks if chunk],
+        split_header_level=2,
+    )
 
 
 def process_ocr_sync(
@@ -78,7 +151,7 @@ def process_ocr_sync(
     end: int | None = None,
     temp_dir: Path | None = None,
 ) -> TextContext:
-    """Synchronous MarkItDown boundary for OCR conversion."""
+    """Synchronous compatibility wrapper around process_ocr."""
     return asyncio.run(
         process_ocr(
             input_path,
@@ -116,16 +189,11 @@ class AimdOCRConverter(DocumentConverter):
         stream_info: StreamInfo,
         **kwargs: Any,
     ) -> DocumentConverterResult:
-        result = process_ocr_sync(
+        return _recognize_ocr_sync(
             Path(stream_info.local_path),
             model=kwargs.get("model"),
             language=kwargs.get("language"),
             start=kwargs.get("start"),
             end=kwargs.get("end"),
             temp_dir=kwargs.get("temp_dir"),
-        )
-
-        return DocumentConverterResult(
-            title=result.title,
-            markdown="\n\n".join(result.chunk_list),
         )

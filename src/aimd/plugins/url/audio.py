@@ -10,7 +10,7 @@ from logly import logger
 
 from aimd.plugins.asr import transcribe_file
 
-from aimd.core.errors import ProcessingFailedError
+from aimd.core.errors import AimdError, ProcessingFailedError
 from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
@@ -134,7 +134,7 @@ async def _download_and_transcribe_audio(
         if transcribed_text and len(transcribed_text) > 10:
             return transcribed_text
         return None
-    except ProcessingFailedError:
+    except AimdError:
         raise
     except Exception as exc:
         logger.error(f"Failed to extract content from audio: {exc}")
@@ -205,6 +205,8 @@ async def download_audio(
             )
             if audio_file and audio_file.exists():
                 return audio_file
+        except AimdError:
+            raise
         except Exception as exc:
             logger.warning(f"Format strategy '{description}' failed: {exc}")
 

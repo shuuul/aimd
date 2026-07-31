@@ -3,10 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
+from aimd.core.errors import (
+    BackendUnavailableError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
 from aimd.plugins.url.audio import (
+    _download_and_transcribe_audio,
     _try_download_with_format,
     download_audio,
+    extract_content_from_audio,
 )
 from aimd.plugins.url.cookies import (
     build_cookie_sources,
@@ -592,6 +598,75 @@ async def test_url_audio_preserves_processing_failed_error(monkeypatch) -> None:
         ProcessingFailedError, match="Authenticated cookies are required"
     ):
         await get_text_from_url("https://www.bilibili.com/video/BV1")
+
+
+@pytest.mark.asyncio
+async def test_url_audio_path_preserves_backend_unavailable_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    audio_path = tmp_path / "audio.m4a"
+    audio_path.write_text("x", encoding="utf-8")
+
+    async def _mock_download_audio(**kwargs):  # noqa: ARG001
+        return audio_path
+
+    async def _mock_transcribe_file(*args, **kwargs):  # noqa: ANN002, ARG001
+        raise BackendUnavailableError("no usable ASR backend")
+
+    monkeypatch.setattr("aimd.plugins.url.audio.download_audio", _mock_download_audio)
+    monkeypatch.setattr("aimd.plugins.url.audio.transcribe_file", _mock_transcribe_file)
+
+    with pytest.raises(BackendUnavailableError, match="no usable ASR backend"):
+        await _download_and_transcribe_audio(
+            info_dict={"title": "Example", "id": "id1"},
+            url="https://www.youtube.com/watch?v=test",
+            download_path=tmp_path,
+            language=None,
+            model=None,
+            save_original_path=None,
+            cookies_file=None,
+            cookies_from_browser=None,
+            temp_dir=tmp_path,
+        )
+
+
+@pytest.mark.asyncio
+async def test_extract_content_from_audio_soft_falls_back_on_generic_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _mock_download_audio(**kwargs):  # noqa: ARG001
+        raise RuntimeError("network blip")
+
+    monkeypatch.setattr("aimd.plugins.url.audio.download_audio", _mock_download_audio)
+
+    result = await extract_content_from_audio(
+        info_dict={"title": "Example", "id": "id1"},
+        url="https://www.youtube.com/watch?v=test",
+        language=None,
+        temp_dir=tmp_path,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_download_audio_preserves_domain_error_from_format_attempt(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def _raise_domain_error(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise ProcessingFailedError("authenticated cookies are required")
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.audio._try_download_with_format", _raise_domain_error
+    )
+
+    with pytest.raises(
+        ProcessingFailedError, match="authenticated cookies are required"
+    ):
+        await download_audio(
+            info_dict={"title": "Example", "id": "id1"},
+            url="https://www.bilibili.com/video/BV1",
+            download_path=tmp_path,
+        )
 
 
 def test_get_preferred_languages_prefers_original_when_language_unspecified() -> None:

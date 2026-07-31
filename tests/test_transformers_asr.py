@@ -8,7 +8,10 @@ from transformers import AutoConfig
 
 from aimd.plugins.asr._plugin import _select_backend_for_model
 from aimd.plugins.asr.const import (
+    QWEN_ASR_DEFAULT_MODEL,
+    QWEN_ASR_MODELS,
     TRANSFORMERS_ASR_DEFAULT_MODEL,
+    TRANSFORMERS_ASR_MODELS,
     resolve_transformers_asr_model,
 )
 from aimd.plugins.asr.models.transformers import (
@@ -20,6 +23,11 @@ from aimd.plugins.asr.models.transformers import (
 def test_native_transformers_registers_qwen3_asr_config() -> None:
     config = AutoConfig.for_model("qwen3_asr")
     assert config.model_type == "qwen3_asr"
+
+
+def test_legacy_qwen_constants_remain_compatible_aliases() -> None:
+    assert QWEN_ASR_DEFAULT_MODEL == TRANSFORMERS_ASR_DEFAULT_MODEL
+    assert QWEN_ASR_MODELS is TRANSFORMERS_ASR_MODELS
 
 
 def test_explicit_qwen3_asr_model_selects_transformers_backend() -> None:

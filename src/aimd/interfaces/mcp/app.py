@@ -10,7 +10,7 @@ from aimd.interfaces.output import (
     get_request_temp_dir,
     persist_result_output_if_requested,
 )
-from aimd.core.models import ProcessInput, ProcessResult
+from aimd.core.models import ProcessInput, ProcessResult, TaskType
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
 
@@ -45,7 +45,7 @@ async def healthz() -> dict[str, str]:
 @mcp.tool()
 async def process_input(
     input_source: str,
-    task_type: str | None = None,
+    task_type: TaskType | None = None,
     model: str | None = None,
     language: str | None = None,
     start: int | None = None,

@@ -8,9 +8,14 @@ import pytest
 from aimd.plugins.asr.audio_utils import (
     SUPPORTED_AUDIO_FORMATS,
     convert_to_wav_if_needed,
+    segment_audio,
 )
 from aimd.plugins.asr.const import AUDIO_EXTENSIONS, MLX_AUDIO_MODELS
-from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
+from aimd.core.errors import (
+    InputNotFoundError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
 from aimd.plugins.asr.models.mlx import _resolve_language
 from aimd.plugins.asr import transcribe_file
 
@@ -135,3 +140,42 @@ class TestGetTextFromAudioAcceptsMp4a:
         src.write_text("fake", encoding="utf-8")
         with pytest.raises(UnsupportedInputError, match="Unsupported file format"):
             await transcribe_file(src, temp_dir=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_missing_input_raises_input_not_found(self, tmp_path: Path) -> None:
+        missing = tmp_path / "missing.mp3"
+        with pytest.raises(InputNotFoundError, match="Audio/video file not found"):
+            await transcribe_file(missing, temp_dir=tmp_path)
+
+
+class TestSegmentAudioCleanup:
+    """segment_audio removes partial files when ffmpeg fails."""
+
+    def test_segment_audio_cleans_partials_on_ffmpeg_failure(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "long.wav"
+        src.write_text("fake", encoding="utf-8")
+
+        def _fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+            # Simulate ffmpeg writing a partial segment then failing.
+            (tmp_path / "seg_long_000.wav").write_text("partial", encoding="utf-8")
+            result = MagicMock()
+            result.returncode = 1
+            result.stderr = "ffmpeg boom"
+            return result
+
+        with (
+            patch(
+                "aimd.plugins.asr.audio_utils.shutil.which",
+                return_value="/usr/bin/ffmpeg",
+            ),
+            patch(
+                "aimd.plugins.asr.audio_utils.subprocess.run",
+                side_effect=_fake_run,
+            ),
+        ):
+            with pytest.raises(ProcessingFailedError, match="segmentation failed"):
+                segment_audio(src, segment_time_secs=600.0, temp_dir=tmp_path)
+
+        assert list(tmp_path.glob("seg_long_*.wav")) == []

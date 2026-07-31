@@ -25,6 +25,24 @@ from aimd.plugins.ocr.models.unlimited import (
     read_unlimited_ocr_output_files,
 )
 from aimd.plugins.ocr import process_ocr
+from aimd.plugins.ocr.const import (
+    IMAGE_FILE_EXTENSIONS,
+    OCR_DOCUMENT_EXTENSIONS,
+    OCR_EXTENSIONS,
+)
+
+
+def test_ocr_extension_constants_are_centralized() -> None:
+    assert IMAGE_FILE_EXTENSIONS == {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".tif",
+        ".tiff",
+    }
+    assert OCR_DOCUMENT_EXTENSIONS == {".pdf"}
+    assert OCR_EXTENSIONS == IMAGE_FILE_EXTENSIONS | OCR_DOCUMENT_EXTENSIONS
 
 
 def test_select_ocr_backend_selects_platform_defaults(monkeypatch) -> None:
@@ -328,7 +346,7 @@ def test_read_unlimited_ocr_output_files_fallback(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_ocr_wraps_backend_result_as_text_context(
+async def test_process_ocr_preserves_page_oriented_compatibility_result(
     monkeypatch, tmp_path: Path
 ) -> None:
     image = tmp_path / "page.png"
@@ -368,3 +386,151 @@ async def test_process_ocr_rejects_invalid_page_range(tmp_path: Path) -> None:
 
     with pytest.raises(ProcessingFailedError):
         await process_ocr(pdf, start=2, end=1)
+
+
+def test_ocr_plugin_markdown_single_page_without_page_headers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from markitdown import MarkItDown
+
+    image = tmp_path / "scan.png"
+    image.write_bytes(b"fake image")
+
+    class _FakeBackend:
+        def recognize(self, input_path, **kwargs):  # noqa: ANN001, ARG002
+            return OCRResult(
+                title="scan",
+                pages=(OCRPage(page_index=None, text="single page text"),),
+            )
+
+    monkeypatch.setattr(
+        "aimd.plugins.ocr._plugin.create_ocr_backend", lambda: _FakeBackend()
+    )
+
+    result = MarkItDown(enable_plugins=True).convert(image, task_type="ocr")
+
+    assert result.title == "scan"
+    assert result.markdown == "single page text"
+    assert "## Page" not in result.markdown
+
+
+def test_ocr_plugin_markdown_multipage_uses_page_headers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from markitdown import MarkItDown
+
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
+    class _FakeBackend:
+        def recognize(self, input_path, **kwargs):  # noqa: ANN001, ARG002
+            return OCRResult(
+                title="scan",
+                pages=(
+                    OCRPage(page_index=0, text="page one body"),
+                    OCRPage(page_index=1, text="page two body"),
+                ),
+            )
+
+    monkeypatch.setattr(
+        "aimd.plugins.ocr._plugin.create_ocr_backend", lambda: _FakeBackend()
+    )
+
+    result = MarkItDown(enable_plugins=True).convert(pdf, task_type="ocr")
+
+    assert result.title == "scan"
+    assert result.markdown == (
+        "## Page 1\n\npage one body\n\n## Page 2\n\npage two body"
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_input_ocr_text_context_owned_by_core(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from aimd.core.models import ProcessInput
+    from aimd.core.process import process_input
+
+    image = tmp_path / "scan.png"
+    image.write_bytes(b"fake image")
+    page_one = "A" * 300
+    page_two = "B" * 300
+
+    class _FakeBackend:
+        def recognize(self, input_path, **kwargs):  # noqa: ANN001, ARG002
+            return OCRResult(
+                title="scan",
+                pages=(
+                    OCRPage(page_index=0, text=page_one),
+                    OCRPage(page_index=1, text=page_two),
+                ),
+            )
+
+    monkeypatch.setattr(
+        "aimd.plugins.ocr._plugin.create_ocr_backend", lambda: _FakeBackend()
+    )
+
+    async def _process_file_with_small_chunks(
+        file_path,
+        language=None,
+        model=None,
+        temp_dir=None,
+        task_type=None,
+        start=None,
+        end=None,
+    ):  # noqa: ANN001
+        from aimd.core.process import convert_file_with_markitdown
+
+        return await convert_file_with_markitdown(
+            file_path,
+            language=language,
+            model=model,
+            temp_dir=temp_dir,
+            task_type=task_type,
+            start=start,
+            end=end,
+            max_chunk_size=400,
+        )
+
+    result = await process_input(
+        ProcessInput(input_source=image.as_posix(), task_type="ocr"),
+        process_file=_process_file_with_small_chunks,
+    )
+
+    assert result.task_type == "ocr"
+    assert result.text_context.title == "scan"
+    assert len(result.text_context.chunk_list) >= 2
+    assert result.text_context.split_header_level == 2
+    assert any("## Page 1" in chunk for chunk in result.text_context.chunk_list)
+    assert any("## Page 2" in chunk for chunk in result.text_context.chunk_list)
+
+
+@pytest.mark.asyncio
+async def test_process_input_ocr_short_markdown_has_no_split_metadata(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from aimd.core.models import ProcessInput
+    from aimd.core.process import process_input
+
+    image = tmp_path / "page.png"
+    image.write_bytes(b"fake image")
+
+    class _FakeBackend:
+        def recognize(self, input_path, **kwargs):  # noqa: ANN001, ARG002
+            return OCRResult(
+                title="page",
+                pages=(OCRPage(page_index=None, text="short ocr text"),),
+            )
+
+    monkeypatch.setattr(
+        "aimd.plugins.ocr._plugin.create_ocr_backend", lambda: _FakeBackend()
+    )
+
+    result = await process_input(
+        ProcessInput(input_source=image.as_posix(), task_type="ocr"),
+    )
+
+    assert result.task_type == "ocr"
+    assert result.text_context.title == "page"
+    assert result.text_context.chunk_list == ["short ocr text"]
+    assert result.text_context.split_header_level is None

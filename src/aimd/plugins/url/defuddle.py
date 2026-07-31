@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 import subprocess
 
+from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
+
 
 @dataclass(slots=True, frozen=True)
 class DefuddleResult:
@@ -38,17 +40,27 @@ def extract_html_with_defuddle(
     if markdown:
         command.append("--markdown")
 
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise BackendUnavailableError(
+            f"npx is required for Defuddle HTML extraction ({npx_command} not found)"
+        ) from exc
+
     if completed.returncode != 0:
         stderr = completed.stderr.strip() or completed.stdout.strip()
-        raise RuntimeError(f"defuddle failed: {stderr}")
+        raise ProcessingFailedError(f"defuddle failed: {stderr}")
 
-    payload = json.loads(completed.stdout)
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ProcessingFailedError(f"defuddle returned invalid JSON: {exc}") from exc
+
     content = payload.get("contentMarkdown") or payload.get("content") or ""
     return DefuddleResult(
         content=content,

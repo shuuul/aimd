@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-23
-**Version:** 0.12.1
+**Generated:** 2026-07-31
+**Version:** 0.15.0
 **Branch:** main
 
 ## OVERVIEW
@@ -32,9 +32,9 @@ src/aimd/
 ├── core/           # Interface-independent routing, models, MarkItDown wrapping
 └── plugins/        # Bundled MarkItDown plugins and implementations
     ├── url/        # URL transcript/readable HTML extraction
-    ├── asr/        # Local audio/video transcription
+    ├── asr/        # Local audio/video transcription (+ models/ mlx|transformers)
     ├── doc/        # Pandoc-backed document conversion
-    └── ocr/        # OCR for scanned PDFs/images
+    └── ocr/        # OCR for scanned PDFs/images (+ models/ mlx|got|unlimited|generic)
 ```
 
 Tests live under `tests/`; architecture notes live in `docs/architecture.md`.
@@ -50,7 +50,7 @@ flowchart TD
     Models["aimd.core.models\nProcessInput / ProcessResult / InputRoute"]
     Process["aimd.core.process\nrouting + interface-independent orchestration"]
 
-    MID["aimd.core.process\nMarkItDown(enable_plugins=True) -> TextContext"]
+    MID["aimd.core.process\nMarkItDown worker + domain-error normalize"]
     Markdown["aimd.core.process\nchunk + title shaping"]
 
     URLPlugin["aimd.plugins.url MarkItDown plugin\nURL transcript + Defuddle HTML"]
@@ -83,25 +83,26 @@ flowchart TD
 |------|----------|-------|
 | Input routing | `src/aimd/core/process.py` | Maps source_kind + task_type into an `InputRoute`. |
 | Core processing | `src/aimd/core/process.py` | Sends URL and local-file work through MarkItDown and wraps Markdown into `TextContext`. |
-| Local file conversion | `src/aimd/core/process.py` | Calls `MarkItDown(enable_plugins=True)` and wraps Markdown into `TextContext`. |
+| Local file conversion | `src/aimd/core/process.py` | Runs MarkItDown off-loop via `_run_markitdown`, normalizes aggregate failures, wraps Markdown into `TextContext`. |
 | URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in readable HTML extraction. Logic lives directly under `src/aimd/plugins/url/` (flattened, no transcript/ subpackage). |
 | Request/result models | `src/aimd/core/models.py` | `ProcessInput`, `ProcessResult`, `TaskType`; output files are interface-owned. |
 | Output persistence | `src/aimd/interfaces/output.py` | Shared CLI/API/MCP markdown persistence helpers. |
-| CLI | `src/aimd/interfaces/cli/app.py` | Typer command, user output, local file persistence. |
+| CLI | `src/aimd/interfaces/cli/app.py` | Typer command (`--task` parity with API/MCP), user output, local file persistence. |
 | HTTP API | `src/aimd/interfaces/api/app.py` | `/healthz`, `/v1/process`. |
-| MCP server | `src/aimd/interfaces/mcp/app.py` | `healthz`, `process_input`. |
+| MCP server | `src/aimd/interfaces/mcp/app.py` | `healthz`, `process_input` (validates `task_type`). |
 | Engine preflight | `src/aimd/plugins/asr/capabilities.py` | Audio engine availability and auto-resolution. |
-| ASR processing | `src/aimd/plugins/asr/` | MarkItDown plugin for local audio/video transcription, model validation, ffmpeg transcoding. |
+| ASR processing | `src/aimd/plugins/asr/` | MarkItDown plugin for local audio/video transcription; backends in `asr/models/`. |
 | Markdown shaping | `src/aimd/core/process.py` | Chunking and title extraction for MarkItDown/URL output. |
 | Document conversion | `src/aimd/plugins/doc/` | MarkItDown plugin, Pandoc-supported formats, EPUB cleanup/image extraction. |
-| OCR conversion | `src/aimd/plugins/ocr/` | MarkItDown plugin, OCR engines, image/scanned PDF processing. |
+| OCR conversion | `src/aimd/plugins/ocr/` | MarkItDown plugin; engines in `ocr/models/`, image/scanned PDF processing. |
 
 ## CONVENTIONS
 
 - **Async-first**: processing paths are async through core and feature modules.
 - **Core is interface-independent**: CLI/API/MCP live in `aimd.interfaces.cli`, `aimd.interfaces.api`, and `aimd.interfaces.mcp`; `aimd.core` must not import them.
 - **Route model**: classify inputs with `InputRoute(source_kind, task_type)`; `source_kind` is the supplied input kind, `task_type` selects processing logic.
-- **MarkItDown contract**: URL and local-file conversion go through `MarkItDown(enable_plugins=True)`; bundled feature modules register MarkItDown plugins.
+- **MarkItDown contract**: URL and local-file conversion go through `MarkItDown(enable_plugins=True)` on a worker thread; core restores nested domain errors from MarkItDown aggregates before wrapping unknowns as `ProcessingFailedError`.
+- **Feature error boundaries**: missing backends (`pandoc`/`npx`/ASR) -> `BackendUnavailableError`; missing inputs -> `InputNotFoundError`; conversion failures -> `ProcessingFailedError`.
 - **Output ownership**: `output_file` belongs to CLI/API/MCP interfaces, not `ProcessInput` or `ProcessResult`; use `aimd.interfaces.output` for shared persistence.
 - **Fail-fast preflight**: validate platform-selected backends and requested models before expensive work.
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.

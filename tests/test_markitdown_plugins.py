@@ -4,7 +4,6 @@ from pathlib import Path
 
 from markitdown import MarkItDown, StreamInfo
 
-from aimd.core.models import TextContext
 from aimd.plugins.url._plugin import UrlTextResult
 
 
@@ -55,16 +54,20 @@ def test_ocr_plugin_converts_when_markitdown_requests_ocr(
     image = tmp_path / "page.png"
     image.write_bytes(b"fake image")
 
-    def _process_ocr_sync(*args, **kwargs):  # noqa: ANN002, ANN003
+    def _recognize_ocr_sync(*args, **kwargs):  # noqa: ANN002, ANN003
+        from markitdown import DocumentConverterResult
+
         assert args[0] == image
         assert kwargs["model"] == "tiny"
         assert kwargs["language"] == "zh"
         assert kwargs["start"] == 0
         assert kwargs["end"] == 1
         assert kwargs["temp_dir"] == tmp_path
-        return TextContext(title="page", chunk_list=["ocr text"])
+        return DocumentConverterResult(title="page", markdown="ocr text")
 
-    monkeypatch.setattr("aimd.plugins.ocr._plugin.process_ocr_sync", _process_ocr_sync)
+    monkeypatch.setattr(
+        "aimd.plugins.ocr._plugin._recognize_ocr_sync", _recognize_ocr_sync
+    )
 
     result = MarkItDown(enable_plugins=True).convert(
         image,
@@ -162,3 +165,38 @@ def test_url_plugin_converts_when_markitdown_requests_defuddle(
 
     assert result.title == "Article"
     assert result.markdown == "# Article\n\nReadable text"
+
+
+def test_defuddle_missing_npx_raises_backend_unavailable(monkeypatch) -> None:
+    import pytest
+
+    from aimd.core.errors import BackendUnavailableError
+    from aimd.plugins.url.defuddle import extract_html_with_defuddle
+
+    def _raise_missing(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise FileNotFoundError("npx")
+
+    monkeypatch.setattr("aimd.plugins.url.defuddle.subprocess.run", _raise_missing)
+
+    with pytest.raises(BackendUnavailableError, match="npx is required"):
+        extract_html_with_defuddle("https://example.com/article")
+
+
+def test_defuddle_nonzero_exit_raises_processing_failed(monkeypatch) -> None:
+    import pytest
+
+    from aimd.core.errors import ProcessingFailedError
+    from aimd.plugins.url.defuddle import extract_html_with_defuddle
+
+    class _Result:
+        returncode = 1
+        stderr = "defuddle boom"
+        stdout = ""
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.defuddle.subprocess.run",
+        lambda *args, **kwargs: _Result(),
+    )
+
+    with pytest.raises(ProcessingFailedError, match="defuddle failed"):
+        extract_html_with_defuddle("https://example.com/article")

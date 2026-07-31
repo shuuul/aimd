@@ -47,22 +47,22 @@ MLX_AUDIO_MODELS = {
 
 # Native Transformers Qwen3-ASR checkpoints (transformers>=5.13).
 TRANSFORMERS_ASR_DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B-hf"
-QWEN_ASR_MODELS = {
+TRANSFORMERS_ASR_MODELS = {
     "Qwen/Qwen3-ASR-1.7B-hf": "Qwen3-ASR 1.7B native HF (default)",
     "Qwen/Qwen3-ASR-0.6B-hf": "Qwen3-ASR 0.6B native HF",
     # Legacy non-hf IDs remain accepted and resolve to the native -hf checkpoints.
     "Qwen/Qwen3-ASR-1.7B": "Qwen3-ASR 1.7B (legacy alias → 1.7B-hf)",
     "Qwen/Qwen3-ASR-0.6B": "Qwen3-ASR 0.6B (legacy alias → 0.6B-hf)",
 }
-TRANSFORMERS_ASR_MODELS = QWEN_ASR_MODELS
+
+# Backwards-compatible names retained for callers importing the older Qwen constants.
+QWEN_ASR_MODELS = TRANSFORMERS_ASR_MODELS
+QWEN_ASR_DEFAULT_MODEL = TRANSFORMERS_ASR_DEFAULT_MODEL
 
 _LEGACY_TRANSFORMERS_ASR_MODEL_MAP = {
     "Qwen/Qwen3-ASR-1.7B": "Qwen/Qwen3-ASR-1.7B-hf",
     "Qwen/Qwen3-ASR-0.6B": "Qwen/Qwen3-ASR-0.6B-hf",
 }
-
-# Backwards-compatible names for callers importing the older Qwen constants.
-QWEN_ASR_DEFAULT_MODEL = TRANSFORMERS_ASR_DEFAULT_MODEL
 
 
 def resolve_transformers_asr_model(model: str | None) -> str:

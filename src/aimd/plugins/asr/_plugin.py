@@ -14,7 +14,11 @@ from markitdown import (
 )
 from logly import logger
 
-from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
+from aimd.core.errors import (
+    InputNotFoundError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
 
 from .capabilities import select_transcription_backend
 from .const import AUDIO_EXTENSIONS, TRANSFORMERS_ASR_MODELS, VIDEO_FILE_EXTENSIONS
@@ -82,7 +86,7 @@ async def transcribe_file(
     file_path = Path(file_path)
 
     if not file_path.exists():
-        raise UnsupportedInputError(f"Audio/video file not found: {file_path}")
+        raise InputNotFoundError(f"Audio/video file not found: {file_path}")
 
     file_ext = file_path.suffix.lower()
     if file_ext not in AUDIO_EXTENSIONS:

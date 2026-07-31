@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 import re
-from typing import Optional
+from typing import cast, Optional
 
 import typer
 from dotenv import load_dotenv
@@ -11,7 +11,7 @@ from logly import logger
 
 from aimd.interfaces.output import MODEL_HELP_TEXT, persist_output
 from aimd.core.errors import AimdError
-from aimd.core.models import ProcessInput
+from aimd.core.models import ProcessInput, TaskType
 from aimd.core.process import ensure_supported_input, process_input
 
 load_dotenv()
@@ -73,6 +73,11 @@ def process(
     input_source: str = typer.Argument(
         ...,
         help="Audio file, video file, video URL, document, image, or scanned PDF to process",
+    ),
+    task: Optional[str] = typer.Option(
+        None,
+        "--task",
+        help="Optional explicit task: transcript, convert, or ocr. Defaults to auto-routing.",
     ),
     output_file: Optional[Path] = typer.Option(
         None,
@@ -141,8 +146,19 @@ def process(
     """Process audio/video/url/doc inputs to markdown."""
     _configure_logging(log_level)
 
+    requested_task: TaskType | None = None
+    if task is not None:
+        normalized_task = task.strip().lower()
+        if normalized_task not in {"transcript", "convert", "ocr"}:
+            typer.echo(
+                "Error: Unsupported task. Supported tasks: transcript, convert, ocr.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        requested_task = cast(TaskType, normalized_task)
+
     try:
-        route = ensure_supported_input(input_source)
+        route = ensure_supported_input(input_source, requested_task)
         task_type = route.task_type
     except AimdError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -162,6 +178,7 @@ def process(
             result = await process_input(
                 ProcessInput(
                     input_source=input_source,
+                    task_type=requested_task,
                     model=model,
                     language=language,
                     start=start,

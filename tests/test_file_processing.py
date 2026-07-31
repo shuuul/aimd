@@ -2,9 +2,17 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from aimd.core.errors import (
+    BackendUnavailableError,
+    InputNotFoundError,
+    ProcessingFailedError,
+)
 from aimd.core.process import _split_markdown_by_headers
 from aimd.plugins.doc.conversion import (
     PANDOC_INPUT_FORMAT_BY_EXTENSION,
+    _run_pandoc,
     process_doc_with_assets,
 )
 
@@ -139,3 +147,53 @@ def test_process_pandoc_document_uses_detected_reader(
     assert seen["input_format"] == "rst"
     assert result.title == "Paper"
     assert result.markdown == "# Paper\n\nBody"
+
+
+def test_process_doc_missing_input_raises_input_not_found(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.epub"
+    with pytest.raises(InputNotFoundError, match="Document file not found"):
+        process_doc_with_assets(missing)
+
+
+def test_run_pandoc_missing_binary_raises_backend_unavailable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "paper.rst"
+    source.write_text("x", encoding="utf-8")
+    output = tmp_path / "out.md"
+
+    def _raise_missing(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise FileNotFoundError("pandoc")
+
+    monkeypatch.setattr("aimd.plugins.doc.conversion.subprocess.run", _raise_missing)
+
+    with pytest.raises(BackendUnavailableError, match="Pandoc CLI is required"):
+        _run_pandoc(
+            input_file=source,
+            input_format="rst",
+            output_file=output,
+        )
+
+
+def test_run_pandoc_nonzero_exit_raises_processing_failed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "paper.rst"
+    source.write_text("x", encoding="utf-8")
+    output = tmp_path / "out.md"
+
+    class _Result:
+        returncode = 1
+        stderr = "boom"
+
+    monkeypatch.setattr(
+        "aimd.plugins.doc.conversion.subprocess.run",
+        lambda *args, **kwargs: _Result(),
+    )
+
+    with pytest.raises(ProcessingFailedError, match="Pandoc conversion failed"):
+        _run_pandoc(
+            input_file=source,
+            input_format="rst",
+            output_file=output,
+        )

@@ -17,11 +17,9 @@ dependencies = [
     "mlx-audio>=0.4.4; sys_platform == 'darwin'",
     "mlx-vlm>=0.6.3; sys_platform == 'darwin' and python_version >= '3.12'",
     "pillow>=12.2.0",
-    "psutil>=7.2.2",
     "pydantic>=2.0.0",
     "pymupdf>=1.27.2.3",
     "python-dotenv>=1.1.1",
-    "rich>=13.9.4",
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "torch>=2.9.1",
     "torchvision>=0.27.1",
@@ -57,7 +55,6 @@ url = "aimd.plugins.url"
 
 [dependency-groups]
 dev = [
-    "jupyter>=1.1.1",
     "prek>=0.2.13",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.1.0",
@@ -65,7 +62,6 @@ dev = [
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
     "mcp>=1.18.0",
-    "httpx2>=2.4.0",
 ]
 
 [tool.uv.sources]
