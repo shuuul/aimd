@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/shuuul/aimd/compare/v0.15.0...v0.15.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **release:** accept mcp 2.0 MCPServer in smoke install ([583086f](https://github.com/shuuul/aimd/commit/583086fbea6a6261466d1a0a589ebc923312ee45))
+
 ## [0.15.0](https://github.com/shuuul/aimd/compare/v0.14.2...v0.15.0) (2026-07-31)
 
 
