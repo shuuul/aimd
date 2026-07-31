@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/shuuul/aimd/compare/v0.15.0...v0.16.0) (2026-07-31)
+
+
+### Features
+
+* **core:** harden processing boundaries ([f23fbb2](https://github.com/shuuul/aimd/commit/f23fbb257673aec4e591c1e1b73f60a853febd46))
+* **ocr:** default to Unlimited-OCR with mlx-vlm support ([a5540e7](https://github.com/shuuul/aimd/commit/a5540e790f424e22650309a5e34c9f121d9ef75a))
+
+
+### Bug Fixes
+
+* **interfaces:** unify routing and empty output errors ([3e36c4b](https://github.com/shuuul/aimd/commit/3e36c4b7f3aa47a5468f0f050df25b6671dadc00))
+* **release:** accept mcp 2.0 MCPServer in smoke install ([583086f](https://github.com/shuuul/aimd/commit/583086fbea6a6261466d1a0a589ebc923312ee45))
+
 ## [0.15.0](https://github.com/shuuul/aimd/compare/v0.14.2...v0.15.0) (2026-07-31)
 
 
