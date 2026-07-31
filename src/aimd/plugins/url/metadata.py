@@ -1,11 +1,13 @@
 """Media metadata extraction for URL transcript processing."""
 
 import asyncio
+from functools import partial
 from typing import Any
 
 from logly import logger
 
 from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
+
 from .cookies import (
     AUTH_REQUIRED_PLATFORMS,
     build_cookie_sources,
@@ -39,17 +41,18 @@ async def extract_video_info(
     auth_required_seen = False
     cookie_source_issue_seen = False
 
+    def _extract_with_source(cookie_source: dict[str, Any]) -> dict[str, Any]:
+        with create_info_ydl(
+            platform=platform,
+            cookie_source=cookie_source,
+        ) as ydl:
+            return ydl.extract_info(url, download=False)
+
     for source in sources:
-
-        def _extract_with_source() -> dict[str, Any]:
-            with create_info_ydl(
-                platform=platform,
-                cookie_source=source,
-            ) as ydl:
-                return ydl.extract_info(url, download=False)
-
         try:
-            info_dict = await loop.run_in_executor(None, _extract_with_source)
+            info_dict = await loop.run_in_executor(
+                None, partial(_extract_with_source, source)
+            )
             if info_dict:
                 info_dict["_aimd_cookie_source"] = source
                 logger.debug(f"Video info extracted with source: {source['name']}")

@@ -51,10 +51,11 @@ class MLXAudioASRModel:
 
         try:
             from mlx_audio.stt import load as load_stt
-        except ImportError:
+        except ImportError as exc:
             raise ProcessingFailedError(
-                "mlx-audio library is not installed. Install it: pip install mlx-audio"
-            )
+                "mlx-audio is not installed. Install project dependencies with "
+                "`uv sync`, then retry."
+            ) from exc
 
         resolved_language = _resolve_language(self.model_id, language)
         logger.info(
@@ -76,7 +77,7 @@ class MLXAudioASRModel:
                 result = stt_model.generate(str(audio_path), **generate_kwargs)
                 return result.text.strip()
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             transcribed_text = await loop.run_in_executor(None, _transcribe)
 
             if not transcribed_text:

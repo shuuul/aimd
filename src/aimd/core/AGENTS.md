@@ -42,7 +42,7 @@ Python's `tempfile` module with a configurable base directory:
 
 In sandboxed environments where `/tmp` may not be writable, set `AIMD_TEMP_DIR`
 to redirect temp I/O. The `temp_dir` field flows through `ProcessInput` →
-use-cases → infrastructure functions via the `dir=` parameter of
+core processing → feature plugins via the `dir=` parameter of
 `tempfile.TemporaryDirectory` and `tempfile.NamedTemporaryFile`. ASR temp files are implemented in `aimd.plugins.asr`; document extraction temp files are implemented in `aimd.plugins.doc`.
 
 ## SUBTITLE FORMATTING

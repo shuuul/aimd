@@ -6,13 +6,13 @@ from typing import Any
 from logly import logger
 from mcp.server.mcpserver import MCPServer
 
+from aimd.core.errors import AimdError
+from aimd.core.models import ProcessInput, ProcessResult, TaskType
+from aimd.core.process import process_input as process_core_input
 from aimd.interfaces.output import (
     get_request_temp_dir,
     persist_result_output_if_requested,
 )
-from aimd.core.models import ProcessInput, ProcessResult, TaskType
-from aimd.core.process import process_input as process_core_input
-from aimd.core.errors import AimdError
 
 logger.remove()
 
@@ -77,6 +77,10 @@ async def process_input(
         )
 
         persisted = persist_result_output_if_requested(result, output_file)
+        if persisted.ignored_output_file:
+            logger.warning(
+                "Ignoring output_file for document asset conversions; output is a directory."
+            )
         return _process_result_payload(
             result,
             output_file=persisted.output_file,

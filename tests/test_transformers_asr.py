@@ -60,18 +60,11 @@ def test_resolve_qwen_language_code() -> None:
 
 
 def test_parse_qwen_output_extracts_asr_text() -> None:
-    assert (
-        _parse_qwen_output("language English<asr_text>Hello world", None)
-        == "Hello world"
-    )
-
-
-def test_parse_qwen_output_keeps_forced_language_text() -> None:
-    assert _parse_qwen_output("Hello world", "English") == "Hello world"
+    assert _parse_qwen_output("language English<asr_text>Hello world") == "Hello world"
 
 
 def test_parse_qwen_output_falls_back_to_plain_text() -> None:
-    assert _parse_qwen_output("Hello world", None) == "Hello world"
+    assert _parse_qwen_output("Hello world") == "Hello world"
 
 
 @pytest.mark.skipif(

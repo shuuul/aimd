@@ -1,16 +1,24 @@
 """Core input processing orchestration."""
 
 import asyncio
-from functools import partial
 import io
-from pathlib import Path
 import re
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from functools import partial
+from pathlib import Path
 
 from logly import logger
 from markitdown import FileConversionException, MarkItDown, StreamInfo
 
-from aimd.plugins.asr.const import AUDIO_EXTENSIONS
+from aimd.plugins.asr.const import (
+    AUDIO_EXTENSIONS,
+    AUDIO_FILE_EXTENSIONS,
+    VIDEO_FILE_EXTENSIONS,
+)
+from aimd.plugins.doc import PANDOC_DOCUMENT_EXTENSIONS
+from aimd.plugins.ocr.const import IMAGE_FILE_EXTENSIONS, OCR_DOCUMENT_EXTENSIONS
+from aimd.plugins.url import detect_platform, is_url
+
 from .errors import (
     AimdError,
     InputNotFoundError,
@@ -19,12 +27,6 @@ from .errors import (
 )
 from .models import InputRoute, ProcessInput, ProcessResult, TaskType, TextContext
 
-from aimd.plugins.asr.const import AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
-from aimd.plugins.url import detect_platform, is_url
-from aimd.plugins.doc import PANDOC_DOCUMENT_EXTENSIONS
-from aimd.plugins.ocr.const import IMAGE_FILE_EXTENSIONS, OCR_DOCUMENT_EXTENSIONS
-
-# --- Routing logic merged from router.py (Phase 5) ---
 FileSupportChecker = Callable[[str | Path], bool]
 
 _VALID_TASK_TYPES: set[TaskType] = {"transcript", "convert", "ocr"}
@@ -527,9 +529,8 @@ async def process_input(
         request.task_type,
         is_supported_file_fn=is_supported_file_fn,
     )
+    assert route.task_type is not None
     task_type = route.task_type
-    if task_type is None:
-        raise UnsupportedInputError("Unsupported input source.")
 
     try:
         if route.source_kind == "url":

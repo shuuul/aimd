@@ -66,17 +66,17 @@ class TransformersASRModel:
         """Transcribe audio using native Transformers Qwen3-ASR."""
         try:
             import torch  # type: ignore  # noqa: F401
-        except ImportError:
+        except ImportError as exc:
             raise ProcessingFailedError(
                 "PyTorch is not installed. Required for Transformers ASR backend."
-            )
+            ) from exc
 
         try:
             import transformers  # type: ignore[import-untyped]  # noqa: F401
-        except ImportError:
+        except ImportError as exc:
             raise ProcessingFailedError(
                 "transformers is required for Transformers ASR backend."
-            )
+            ) from exc
 
         device = _select_device()
         logger.info(
@@ -92,7 +92,7 @@ class TransformersASRModel:
             def _transcribe() -> str:
                 return _transcribe_qwen(audio_path, self.model_id, language)
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             transcribed_text = await loop.run_in_executor(None, _transcribe)
 
             if not transcribed_text:
@@ -257,13 +257,8 @@ def _inputs_to_model_device(inputs, model: object):
     return moved
 
 
-def _parse_qwen_output(output: str, forced_language: str | None = None) -> str:
-    """Extract transcription text from Qwen3-ASR generated output.
-
-    ``forced_language`` is retained for call-site compatibility; native decoding
-    already strips the language prefix via ``<asr_text>`` when present.
-    """
-    del forced_language
+def _parse_qwen_output(output: str) -> str:
+    """Extract transcription text from Qwen3-ASR generated output."""
     text = output.strip()
     marker = "<asr_text>"
     if marker in text:
@@ -329,4 +324,4 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
         )
     else:
         raise ProcessingFailedError("Qwen3-ASR processor cannot decode outputs")
-    return _parse_qwen_output(text, resolved_language).strip()
+    return _parse_qwen_output(text).strip()

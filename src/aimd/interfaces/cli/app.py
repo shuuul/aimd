@@ -232,7 +232,7 @@ def process(
             typer.echo(f"Output saved to {final_output_file}")
         except AimdError as e:
             logger.error(str(e))
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
         except Exception as e:
             task_name = {
                 "transcript": "Transcription",
@@ -240,7 +240,7 @@ def process(
                 "ocr": "OCR",
             }.get(requested_task, "Processing")
             logger.error(f"{task_name} failed: {e}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     asyncio.run(run_processing())
 
