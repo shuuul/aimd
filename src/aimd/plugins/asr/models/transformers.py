@@ -12,6 +12,7 @@ from aimd.core.errors import (
     UnsupportedInputError,
 )
 from aimd.core.precision import normalize_transformers_precision
+from aimd.core.version import parse_version_tuple
 
 from ..audio_utils import convert_to_wav_if_needed
 from ..const import (
@@ -158,22 +159,11 @@ def _select_device() -> str:
     return "cpu"
 
 
-def _parse_version_tuple(version: str) -> tuple[int, ...]:
-    """Parse a dotted version prefix into comparable ints."""
-    parts: list[int] = []
-    for piece in version.split("+")[0].split("."):
-        digits = "".join(ch for ch in piece if ch.isdigit())
-        if not digits:
-            break
-        parts.append(int(digits))
-    return tuple(parts)
-
-
 def _require_native_qwen3_asr() -> None:
     """Fail fast when the installed Transformers build lacks native Qwen3-ASR."""
     import transformers
 
-    if _parse_version_tuple(transformers.__version__) < (5, 14, 1):
+    if parse_version_tuple(transformers.__version__) < (5, 14, 1):
         raise ProcessingFailedError(
             "Native Qwen3-ASR requires transformers>=5.14.1 "
             f"(installed {transformers.__version__})."

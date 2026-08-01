@@ -8,6 +8,7 @@ from typing import Any
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 from aimd.core.precision import SUPPORTED_PRECISIONS, normalize_precision
+from aimd.core.version import parse_version_tuple
 
 DEFAULT_OCR_MODEL = "unlimited-ocr"
 MLX_VLM_DEFAULT_MODEL_ID = "mlx-community/Unlimited-OCR-4bit"
@@ -21,25 +22,6 @@ _MLX_OCR_FAMILY_REPOS = {
 }
 
 
-def _build_alias_table() -> dict[str, str]:
-    """Build the backwards-compatible alias table (kebab + legacy underscore)."""
-    table: dict[str, str] = {}
-    for family, repo in _MLX_OCR_FAMILY_REPOS.items():
-        legacy_family = family.replace("-", "_")
-        table[family] = f"mlx-community/{repo}-4bit"
-        table[legacy_family] = f"mlx-community/{repo}-4bit"
-        for precision in SUPPORTED_PRECISIONS:
-            table[f"{family}-{precision}"] = f"mlx-community/{repo}-{precision}"
-            table[f"{legacy_family}_{precision}"] = f"mlx-community/{repo}-{precision}"
-            table[f"mlx-community/{family}-{precision}"] = (
-                f"mlx-community/{repo}-{precision}"
-            )
-    return table
-
-
-# Backwards-compatible alias table retained for callers importing it; resolution
-# itself is implemented in resolve_mlx_vlm_model below.
-MLX_VLM_MODEL_ALIASES = _build_alias_table()
 MLX_VLM_DEFAULT_PROMPT = "Text Recognition:"
 # mlx-vlm added Unlimited-OCR in PR #1427, first released in v0.6.4.
 MLX_VLM_UNLIMITED_OCR_MIN_VERSION = (0, 6, 4)
@@ -145,22 +127,11 @@ def _load_mlx_vlm_modules():
         ) from exc
 
 
-def _parse_version_tuple(version: str) -> tuple[int, ...]:
-    """Parse a dotted version prefix into comparable ints."""
-    parts: list[int] = []
-    for piece in version.split("+")[0].split("."):
-        digits = "".join(ch for ch in piece if ch.isdigit())
-        if not digits:
-            break
-        parts.append(int(digits))
-    return tuple(parts)
-
-
 def _require_mlx_vlm_unlimited_support() -> None:
     """Fail fast when installed mlx-vlm cannot run Unlimited-OCR."""
     mlx_vlm, _prompt_utils = _load_mlx_vlm_modules()
     version = getattr(mlx_vlm, "__version__", "0")
-    if _parse_version_tuple(version) < MLX_VLM_UNLIMITED_OCR_MIN_VERSION:
+    if parse_version_tuple(version) < MLX_VLM_UNLIMITED_OCR_MIN_VERSION:
         min_version = ".".join(str(part) for part in MLX_VLM_UNLIMITED_OCR_MIN_VERSION)
         raise BackendUnavailableError(
             f"Unlimited-OCR on macOS requires mlx-vlm>={min_version} "

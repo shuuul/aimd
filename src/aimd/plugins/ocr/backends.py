@@ -145,7 +145,7 @@ def _render_pdf_pages(
 ) -> tuple[tuple[int, Path], ...]:
     """Render PDF pages to PNG paths with PyMuPDF."""
     try:
-        import fitz
+        import pymupdf
     except ImportError as exc:
         raise BackendUnavailableError(
             "PDF OCR requires pymupdf. Install project dependencies with `uv sync`, "
@@ -160,7 +160,7 @@ def _render_pdf_pages(
     )
     rendered_pages: list[tuple[int, Path]] = []
     try:
-        with fitz.open(input_path) as document:
+        with pymupdf.open(input_path) as document:
             page_count = document.page_count
             if page_count == 0:
                 raise ProcessingFailedError(f"PDF has no pages: {input_path}")
@@ -171,7 +171,7 @@ def _render_pdf_pages(
                     f"Invalid OCR page range {first_page}-{last_page} for {input_path} "
                     f"with {page_count} pages."
                 )
-            matrix = fitz.Matrix(2.0, 2.0)
+            matrix = pymupdf.Matrix(2.0, 2.0)
             for page_index in range(first_page, last_page + 1):
                 page = document.load_page(page_index)
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
