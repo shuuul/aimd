@@ -5,7 +5,8 @@
       "release-type": "python",
       "package-name": "aimd-tool",
       "changelog-path": "CHANGELOG.md",
-      "include-component-in-tag": false
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true
     }
   }
 }
