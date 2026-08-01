@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from aimd.interfaces.output import (
     MODEL_HELP_TEXT,
+    PRECISION_HELP_TEXT,
     get_request_temp_dir,
     persist_result_output_if_requested,
 )
@@ -37,6 +38,10 @@ class ProcessRequest(BaseModel):
     model: str | None = Field(
         default=None,
         description=MODEL_HELP_TEXT,
+    )
+    precision: str | None = Field(
+        default=None,
+        description=PRECISION_HELP_TEXT,
     )
     language: str | None = Field(
         default=None,
@@ -92,6 +97,7 @@ def _build_process_input(
         cookies_from_browser=request.cookies_from_browser,
         temp_dir=temp_dir,
         raw_transcript=request.raw_transcript,
+        precision=request.precision,
     )
 
 

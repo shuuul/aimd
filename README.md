@@ -87,7 +87,7 @@ Platform notes:
 - macOS OCR uses `mlx-vlm` on Python 3.12+ and downloads OCR model weights on first use.
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
 - Explicit `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) transcription model IDs use native Transformers Qwen3-ASR (`transformers>=5.14.1`); on macOS this is an opt-in MPS path, not the default.
-- Linux OCR uses the Transformers backend with CUDA.
+- Linux OCR uses the Transformers backend with CUDA. macOS MLX OCR defaults to the 4-bit Unlimited-OCR checkpoint.
 - Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
 
 ## Quick start
@@ -131,32 +131,17 @@ Passing an explicit transcription model ID such as `Qwen/Qwen3-ASR-0.6B-hf` (or 
 
 ### Supported models
 
-`--model` is interpreted by the platform-selected backend. The table below lists the model aliases and model IDs that `aimd` validates directly. Linux/CUDA OCR also accepts an explicit Hugging Face model ID, but only the listed aliases have model-specific handling.
+`--model` is interpreted by the platform-selected backend. The table below lists the only supported model aliases and IDs. Arbitrary Hugging Face model IDs are rejected so that model/runtime compatibility stays explicit.
 
 | Task | Platform/backend | `--model` value | Upstream model / runtime | Default | Notes |
 |------|------------------|-----------------|--------------------------|---------|-------|
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-4bit` | mlx-audio STT | Yes | Qwen3-ASR 1.7B, 4-bit quantized. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-6bit` | mlx-audio STT | No | Qwen3-ASR 1.7B, 6-bit quantized. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-8bit` | mlx-audio STT | No | Qwen3-ASR 1.7B, 8-bit quantized. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-4bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 4-bit quantized. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-6bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 6-bit quantized. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-8bit` | mlx-audio STT | No | Qwen3-ASR 0.6B, 8-bit quantized. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/whisper-large-v3-turbo-asr-fp16` | mlx-audio STT | No | Whisper large-v3-turbo ASR, fp16. |
-| Transcription | macOS Apple Silicon / MLX | `distil-whisper/distil-large-v3` | mlx-audio STT | No | Distil-Whisper large-v3. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/parakeet-tdt-0.6b-v3` | mlx-audio STT | No | NVIDIA Parakeet TDT 0.6B v3. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/nemotron-3.5-asr-streaming-0.6b` | mlx-audio STT | No | NVIDIA Nemotron 3.5 ASR streaming 0.6B. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-3B-2507-bf16` | mlx-audio STT | No | Voxtral Mini 3B, bf16. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit` | mlx-audio STT | No | Voxtral Mini 4B Realtime, 4-bit. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16` | mlx-audio STT | No | Voxtral Mini 4B Realtime, fp16. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/VibeVoice-ASR-bf16` | mlx-audio STT | No | VibeVoice-ASR, bf16; upstream model may include diarization/timestamps. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen2-Audio-7B-Instruct-4bit` | mlx-audio STT | No | Qwen2-Audio 7B Instruct, 4-bit. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-4bit`<br>`mlx-community/Qwen3-ASR-1.7B-6bit`<br>`mlx-community/Qwen3-ASR-1.7B-8bit`<br>`mlx-community/Qwen3-ASR-1.7B-bf16` | mlx-audio STT | 4bit | Qwen3-ASR 1.7B, all supported MLX precisions. |
+| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-4bit`<br>`mlx-community/Qwen3-ASR-0.6B-6bit`<br>`mlx-community/Qwen3-ASR-0.6B-8bit`<br>`mlx-community/Qwen3-ASR-0.6B-bf16` | mlx-audio STT | No | Qwen3-ASR 0.6B, all supported MLX precisions. |
 | Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-1.7B-hf` | Native Transformers Qwen3-ASR | Yes on CUDA Transformers | Default CUDA Transformers ASR model; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-1.7B` resolves here. |
 | Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-0.6B-hf` | Native Transformers Qwen3-ASR | No | Lower-memory Qwen3-ASR option; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-0.6B` resolves here. |
-| OCR | macOS Apple Silicon / mlx-vlm | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | Yes | Default macOS MLX VLM OCR model. Requires `mlx-vlm>=0.6.4` (PR #1427). Each page/image uses single-image gundam mode (`cropping=True`, `image_size=640`); long PDFs are OCR'd page-by-page for reliable page boundaries. |
-| OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr`, `glm-ocr`, `mlx-community/GLM-OCR-bf16` | `mlx-community/GLM-OCR-bf16` | No | Lighter macOS MLX VLM OCR option. |
-| OCR | macOS Apple Silicon / mlx-vlm | Explicit Hugging Face model ID | Provided model ID | No | Any local `mlx-vlm` compatible OCR/image-text model. |
+| OCR | macOS Apple Silicon / mlx-vlm | `unlimited_ocr` (default)<br>`unlimited_ocr_4bit` / `unlimited_ocr_6bit` / `unlimited_ocr_8bit` / `unlimited_ocr_bf16`<br>`mlx-community/Unlimited-OCR-4bit`<br>`mlx-community/Unlimited-OCR-6bit`<br>`mlx-community/Unlimited-OCR-8bit`<br>`mlx-community/Unlimited-OCR-bf16` | mlx-vlm | Yes | Unlimited-OCR MLX checkpoints. The default alias resolves to `mlx-community/Unlimited-OCR-4bit`; each page uses single-image gundam mode. |
+| OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr` / `glm-ocr` (default)<br>`mlx-community/GLM-OCR-4bit`<br>`mlx-community/GLM-OCR-6bit`<br>`mlx-community/GLM-OCR-8bit`<br>`mlx-community/GLM-OCR-bf16` | mlx-vlm | No | GLM-OCR MLX checkpoints; the default alias resolves to the 4-bit checkpoint. |
 | OCR | Linux/CUDA / Transformers | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | Yes | Default Linux/CUDA OCR model. Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
-| OCR | Linux/CUDA / Transformers | `got_ocr`, `got-ocr`, `got_ocr2`, `got-ocr2`, `stepfun-ai/GOT-OCR-2.0-hf` | `stepfun-ai/GOT-OCR-2.0-hf` | No | Lighter Linux/CUDA VLM OCR option that works with the current PyPI Transformers release. |
 | OCR | Linux/CUDA / Transformers | `glm_ocr`, `glm-ocr`, `zai-org/GLM-OCR` | `zai-org/GLM-OCR` | No | May require a newer Transformers build than the PyPI baseline. |
 
 ### URLs
@@ -204,12 +189,12 @@ The EPUB pipeline preserves spine order, extracts images, converts chapters thro
 aimd page.png
 aimd scan.pdf                                  # OCR if no extractable PDF text is found
 aimd scan.pdf --task ocr                       # Force OCR; default model is unlimited_ocr
-aimd scan.pdf --model got_ocr                  # Linux/CUDA lighter VLM OCR
-aimd scan.pdf --model glm_ocr                  # macOS lighter mlx-vlm option, or Linux/CUDA GLM-OCR
+aimd scan.pdf --model unlimited_ocr_bf16       # macOS MLX full-precision Unlimited-OCR
+aimd scan.pdf --model glm_ocr                  # GLM-OCR on macOS or Linux/CUDA
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. Both platforms default to `unlimited_ocr` (`baidu/Unlimited-OCR`). macOS uses `mlx-vlm` (requires `mlx-vlm>=0.6.4`, first shipped in PR #1427 / v0.6.4): each page/image uses single-image gundam mode (`cropping=True`, `image_size=640`, prompt `document parsing.`), Baidu's sliding-window no-repeat n-gram guard (`ngram_size=35`, `window=128`), and `max_tokens=8192`. Long PDFs are OCR'd page-by-page so page boundaries stay reliable (one-shot multipage generation can drop `<PAGE>` segments). Without the n-gram guard, some pages loop until max tokens and become pathologically slow. Explicit `mlx-vlm` compatible Hugging Face model IDs and `glm_ocr` remain available on macOS. Linux/CUDA uses the Transformers backend with Baidu's custom `infer`/`infer_multi` API for Unlimited-OCR; `got_ocr` and `glm_ocr` remain available as alternatives. PaddleOCR aliases are intentionally not supported. PDF OCR renders pages with PyMuPDF before model inference.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. Linux/CUDA defaults to `baidu/Unlimited-OCR` through the Transformers backend. macOS uses `mlx-vlm>=0.6.4` and defaults to `mlx-community/Unlimited-OCR-4bit`; `unlimited_ocr_4bit`, `unlimited_ocr_6bit`, `unlimited_ocr_8bit`, and `unlimited_ocr_bf16` select the other MLX checkpoints. Unlimited-OCR uses single-image gundam mode (`cropping=True`, `image_size=640`, prompt `document parsing.`), Baidu's sliding-window no-repeat n-gram guard (`ngram_size=35`, `window=128`), and `max_tokens=8192`. GLM-OCR is available through the four `mlx-community/GLM-OCR-*` MLX checkpoints on macOS and `zai-org/GLM-OCR` on Linux/CUDA. Long PDFs are OCR'd page-by-page so page boundaries stay reliable. Unsupported model IDs are rejected.
 
 ### MarkItDown plugins
 

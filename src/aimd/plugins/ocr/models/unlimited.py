@@ -5,7 +5,11 @@ import tempfile
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 
-from .base import get_cached_model_and_processor, get_cuda_dtype
+from .base import (
+    get_cached_model_and_processor,
+    get_cuda_dtype,
+    validate_transformers_precision,
+)
 
 UNLIMITED_OCR_MODEL_ID = "baidu/Unlimited-OCR"
 
@@ -14,6 +18,9 @@ class UnlimitedOCRModel:
     """Adapter for baidu/Unlimited-OCR's custom infer/infer_multi API."""
 
     model_id = UNLIMITED_OCR_MODEL_ID
+
+    def __init__(self, precision: str | None = None) -> None:
+        self.precision = validate_transformers_precision(precision)
 
     def recognize_image(
         self,
@@ -32,7 +39,9 @@ class UnlimitedOCRModel:
         temp_dir: Path | None = None,
     ) -> list[str]:
         model, tokenizer = get_cached_model_and_processor(
-            self.model_id, _load_unlimited_ocr_model
+            self.model_id,
+            lambda name: _load_unlimited_ocr_model(name, precision=self.precision),
+            precision=self.precision,
         )
         with tempfile.TemporaryDirectory(
             prefix="aimd-unlimited-ocr-", dir=temp_dir
@@ -136,7 +145,9 @@ def read_unlimited_ocr_output_files(
     return texts if len(texts) == expected_pages else None
 
 
-def _load_unlimited_ocr_model(model_name: str) -> tuple[object, object]:
+def _load_unlimited_ocr_model(
+    model_name: str, precision: str | None = None
+) -> tuple[object, object]:
     try:
         from transformers import AutoModel, AutoTokenizer
     except ImportError as exc:
@@ -155,7 +166,7 @@ def _load_unlimited_ocr_model(model_name: str) -> tuple[object, object]:
                 model_name,
                 trust_remote_code=True,
                 use_safetensors=True,
-                torch_dtype=get_cuda_dtype(),
+                torch_dtype=get_cuda_dtype(precision),
             )
             .eval()
             .to("cuda")

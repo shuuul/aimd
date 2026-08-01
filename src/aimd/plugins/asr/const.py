@@ -1,5 +1,8 @@
 """ASR constants."""
 
+from aimd.core.errors import ProcessingFailedError
+from aimd.core.precision import normalize_precision
+
 AUDIO_FILE_EXTENSIONS = {
     ".mp3",
     ".wav",
@@ -31,18 +34,11 @@ MLX_AUDIO_MODELS = {
     "mlx-community/Qwen3-ASR-1.7B-4bit": "Qwen3-ASR 1.7B (4-bit quantized, default)",
     "mlx-community/Qwen3-ASR-1.7B-6bit": "Qwen3-ASR 1.7B (6-bit quantized)",
     "mlx-community/Qwen3-ASR-1.7B-8bit": "Qwen3-ASR 1.7B (8-bit quantized)",
+    "mlx-community/Qwen3-ASR-1.7B-bf16": "Qwen3-ASR 1.7B (bf16)",
     "mlx-community/Qwen3-ASR-0.6B-4bit": "Qwen3-ASR 0.6B (4-bit quantized)",
     "mlx-community/Qwen3-ASR-0.6B-6bit": "Qwen3-ASR 0.6B (6-bit quantized)",
     "mlx-community/Qwen3-ASR-0.6B-8bit": "Qwen3-ASR 0.6B (8-bit quantized)",
-    "mlx-community/whisper-large-v3-turbo-asr-fp16": "Whisper large-v3-turbo ASR (fp16)",
-    "distil-whisper/distil-large-v3": "Distil-Whisper large-v3",
-    "mlx-community/parakeet-tdt-0.6b-v3": "NVIDIA Parakeet TDT 0.6B v3",
-    "mlx-community/nemotron-3.5-asr-streaming-0.6b": "NVIDIA Nemotron 3.5 ASR streaming 0.6B",
-    "mlx-community/Voxtral-Mini-3B-2507-bf16": "Voxtral Mini 3B (bf16)",
-    "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit": "Voxtral Mini 4B Realtime (4-bit)",
-    "mlx-community/Voxtral-Mini-4B-Realtime-2602-fp16": "Voxtral Mini 4B Realtime (fp16)",
-    "mlx-community/VibeVoice-ASR-bf16": "VibeVoice-ASR (bf16, diarization/timestamps)",
-    "mlx-community/Qwen2-Audio-7B-Instruct-4bit": "Qwen2-Audio 7B Instruct (4-bit)",
+    "mlx-community/Qwen3-ASR-0.6B-bf16": "Qwen3-ASR 0.6B (bf16)",
 }
 
 # Native Transformers Qwen3-ASR checkpoints (transformers>=5.14.1).
@@ -64,9 +60,65 @@ _LEGACY_TRANSFORMERS_ASR_MODEL_MAP = {
     "Qwen/Qwen3-ASR-0.6B": "Qwen/Qwen3-ASR-0.6B-hf",
 }
 
+# User-facing kebab-case aliases (plus legacy underscore variants) mapped to the
+# Qwen3-ASR model size token used by both MLX and Transformers checkpoints.
+QWEN3_ASR_MODEL_ALIASES = {
+    "qwen3-asr-1.7b": "1.7B",
+    "qwen3-asr-0.6b": "0.6B",
+    # Legacy aliases retained for backwards compatibility.
+    "qwen3_asr_1_7b": "1.7B",
+    "qwen3_asr_0_6b": "0.6B",
+}
+
 
 def resolve_transformers_asr_model(model: str | None) -> str:
     """Resolve a Transformers ASR model ID, mapping legacy names to native -hf."""
     if not model:
         return TRANSFORMERS_ASR_DEFAULT_MODEL
-    return _LEGACY_TRANSFORMERS_ASR_MODEL_MAP.get(model, model)
+    requested = model.strip()
+    if requested in _LEGACY_TRANSFORMERS_ASR_MODEL_MAP:
+        return _LEGACY_TRANSFORMERS_ASR_MODEL_MAP[requested]
+    alias_size = QWEN3_ASR_MODEL_ALIASES.get(requested.lower())
+    if alias_size is not None:
+        return f"Qwen/Qwen3-ASR-{alias_size}-hf"
+    return requested
+
+
+def resolve_mlx_asr_model(model: str | None, precision: str | None = None) -> str:
+    """Resolve an MLX ASR alias plus precision to an mlx-community model ID.
+
+    Accepts the kebab-case aliases ``qwen3-asr-1.7b``/``qwen3-asr-0.6b`` (and
+    legacy underscore variants) combined with a precision, or an explicit
+    ``mlx-community/Qwen3-ASR-{size}-{precision}`` ID. When no precision is
+    given, 4bit is used. A precision that conflicts with an explicit ID suffix
+    raises ProcessingFailedError.
+    """
+    normalized_precision = normalize_precision(precision)
+    requested = (model or "").strip()
+
+    if not requested:
+        size = "1.7B"
+    elif requested in MLX_AUDIO_MODELS:
+        embedded_precision = requested.rsplit("-", 1)[-1]
+        if (
+            normalized_precision is not None
+            and normalized_precision != embedded_precision
+        ):
+            raise ProcessingFailedError(
+                f"Precision {normalized_precision!r} conflicts with explicit MLX ASR "
+                f"model ID {requested!r}. Drop --precision or use the alias form."
+            )
+        return requested
+    else:
+        size = QWEN3_ASR_MODEL_ALIASES.get(requested.lower())
+        if size is None:
+            supported_aliases = "qwen3-asr-1.7b, qwen3-asr-0.6b"
+            supported_models = ", ".join(MLX_AUDIO_MODELS)
+            raise ProcessingFailedError(
+                f"Unsupported MLX ASR model {requested!r}. "
+                f"Supported aliases: {supported_aliases}. "
+                f"Supported model IDs: {supported_models}"
+            )
+
+    final_precision = normalized_precision or "4bit"
+    return f"mlx-community/Qwen3-ASR-{size}-{final_precision}"

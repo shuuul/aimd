@@ -30,6 +30,7 @@ def test_asr_plugin_converts_audio_with_markitdown(
         assert kwargs["model"] == "tiny"
         assert kwargs["language"] == "zh"
         assert kwargs["temp_dir"] == tmp_path
+        assert kwargs["precision"] == "8bit"
         return "transcript text"
 
     monkeypatch.setattr(
@@ -41,6 +42,7 @@ def test_asr_plugin_converts_audio_with_markitdown(
         model="tiny",
         language="zh",
         temp_dir=tmp_path,
+        precision="8bit",
     )
 
     assert result.title == "voice"
@@ -63,6 +65,7 @@ def test_ocr_plugin_converts_when_markitdown_requests_ocr(
         assert kwargs["start"] == 0
         assert kwargs["end"] == 1
         assert kwargs["temp_dir"] == tmp_path
+        assert kwargs["precision"] == "bf16"
         return DocumentConverterResult(title="page", markdown="ocr text")
 
     monkeypatch.setattr(
@@ -77,6 +80,7 @@ def test_ocr_plugin_converts_when_markitdown_requests_ocr(
         start=0,
         end=1,
         temp_dir=tmp_path,
+        precision="bf16",
     )
 
     assert result.title == "page"
@@ -116,6 +120,7 @@ def test_url_plugin_converts_transcript_url_with_markitdown(monkeypatch) -> None
         assert kwargs["language"] == "zh"
         assert kwargs["model"] == "tiny"
         assert kwargs["raw_transcript"] is True
+        assert kwargs["precision"] == "4bit"
         return UrlTextResult(
             title="Video",
             markdown="# Video\n\ntranscript text",
@@ -133,6 +138,7 @@ def test_url_plugin_converts_transcript_url_with_markitdown(monkeypatch) -> None
         model="tiny",
         language="zh",
         raw_transcript=True,
+        precision="4bit",
     )
 
     assert result.title == "Video"

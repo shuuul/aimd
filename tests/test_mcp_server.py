@@ -96,6 +96,38 @@ async def test_mcp_process_input_rejects_invalid_task_type() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_process_input_forwards_precision(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_process_input(request):
+        seen["model"] = request.model
+        seen["precision"] = request.precision
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="t", chunk_list=["x"]),
+        )
+
+    monkeypatch.setattr(
+        "aimd.interfaces.mcp.app.process_core_input", _fake_process_input
+    )
+
+    result = await mcp_app.process_input(
+        "input.mp3",
+        model="qwen3-asr-1.7b",
+        precision="4bit",
+    )
+    assert result["task_type"] == "transcript"
+    assert seen == {"model": "qwen3-asr-1.7b", "precision": "4bit"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_process_input_schema_exposes_precision() -> None:
+    tools = await mcp_app.mcp.list_tools()
+    process_tool = next(tool for tool in tools if tool.name == "process_input")
+    assert "precision" in process_tool.input_schema["properties"]
+
+
+@pytest.mark.asyncio
 async def test_mcp_process_input_schema_exposes_task_enum() -> None:
     tools = await mcp_app.mcp.list_tools()
     process_tool = next(tool for tool in tools if tool.name == "process_input")

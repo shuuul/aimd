@@ -2,10 +2,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from unittest.mock import MagicMock
 
 import pytest
 from transformers import AutoConfig
 
+from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 from aimd.plugins.asr._plugin import _select_backend_for_model
 from aimd.plugins.asr.const import (
     QWEN_ASR_DEFAULT_MODEL,
@@ -15,8 +17,11 @@ from aimd.plugins.asr.const import (
     resolve_transformers_asr_model,
 )
 from aimd.plugins.asr.models.transformers import (
+    TransformersASRModel,
+    _get_model_and_processor,
     _parse_qwen_output,
     _resolve_language,
+    _resolve_torch_dtype,
 )
 
 
@@ -116,3 +121,103 @@ async def test_qwen3_asr_transformers_real_inference_smoke(tmp_path: Path) -> No
         audio_path, language="zh", model="Qwen/Qwen3-ASR-0.6B-hf"
     )
     assert text.strip()
+
+
+def test_resolve_transformers_asr_model_maps_kebab_aliases() -> None:
+    assert resolve_transformers_asr_model("qwen3-asr-1.7b") == "Qwen/Qwen3-ASR-1.7B-hf"
+    assert resolve_transformers_asr_model("qwen3-asr-0.6b") == "Qwen/Qwen3-ASR-0.6B-hf"
+    # Legacy underscore aliases stay compatible.
+    assert resolve_transformers_asr_model("qwen3_asr_1_7b") == "Qwen/Qwen3-ASR-1.7B-hf"
+    assert resolve_transformers_asr_model("qwen3_asr_0_6b") == "Qwen/Qwen3-ASR-0.6B-hf"
+
+
+def test_kebab_alias_uses_platform_backend_selection() -> None:
+    # Kebab aliases are backend-neutral; full HF IDs still force Transformers.
+    assert _select_backend_for_model("Qwen/Qwen3-ASR-1.7B-hf") == "transformers"
+
+
+def test_transformers_asr_model_resolves_alias_and_precision() -> None:
+    model = TransformersASRModel("qwen3-asr-0.6b", precision="bf16")
+    assert model.model_id == "Qwen/Qwen3-ASR-0.6B-hf"
+    assert model.precision == "bf16"
+
+    default = TransformersASRModel(None)
+    assert default.model_id == TRANSFORMERS_ASR_DEFAULT_MODEL
+    assert default.precision is None
+
+
+@pytest.mark.parametrize("precision", ["4bit", "6bit", "8bit"])
+def test_transformers_asr_model_rejects_quantized_precision(precision: str) -> None:
+    with pytest.raises(ProcessingFailedError, match="quantized precision"):
+        TransformersASRModel("qwen3-asr-1.7b", precision=precision)
+
+
+def test_transformers_asr_model_rejects_unknown_precision() -> None:
+    with pytest.raises(ProcessingFailedError, match="Unsupported precision"):
+        TransformersASRModel(None, precision="fp8")
+
+
+def test_resolve_torch_dtype_auto_and_bf16(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+
+    assert _resolve_torch_dtype("cpu", None) is torch.float32
+    assert _resolve_torch_dtype("mps", None) is torch.float16
+
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    assert _resolve_torch_dtype("cuda", None) is torch.bfloat16
+    assert _resolve_torch_dtype("cuda", "bf16") is torch.bfloat16
+
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    assert _resolve_torch_dtype("cuda", None) is torch.float16
+    with pytest.raises(BackendUnavailableError, match="bf16"):
+        _resolve_torch_dtype("cuda", "bf16")
+    with pytest.raises(BackendUnavailableError, match="bf16"):
+        _resolve_torch_dtype("cpu", "bf16")
+    with pytest.raises(ProcessingFailedError, match="does not support precision"):
+        _resolve_torch_dtype("cuda", "4bit")
+
+
+def test_get_model_and_processor_cache_key_includes_precision(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    import transformers
+
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    monkeypatch.setattr(
+        "aimd.plugins.asr.models.transformers._select_device", lambda: "cuda"
+    )
+    monkeypatch.setattr(
+        "aimd.plugins.asr.models.transformers._require_native_qwen3_asr",
+        lambda: None,
+    )
+
+    load_calls: list[tuple[str, object]] = []
+
+    fake_model = MagicMock()
+    fake_model.to.return_value = fake_model
+
+    def _from_pretrained(model_name, dtype=None):  # noqa: ANN001
+        load_calls.append((model_name, dtype))
+        return fake_model
+
+    monkeypatch.setattr(
+        transformers.AutoModelForMultimodalLM, "from_pretrained", _from_pretrained
+    )
+    monkeypatch.setattr(
+        transformers.AutoProcessor,
+        "from_pretrained",
+        lambda model_name: "processor",  # noqa: ARG005
+    )
+    monkeypatch.setattr("aimd.plugins.asr.models.transformers._cached_model", None)
+    monkeypatch.setattr("aimd.plugins.asr.models.transformers._cached_processor", None)
+    monkeypatch.setattr("aimd.plugins.asr.models.transformers._cached_model_name", None)
+    monkeypatch.setattr("aimd.plugins.asr.models.transformers._cached_device", None)
+    monkeypatch.setattr("aimd.plugins.asr.models.transformers._cached_precision", None)
+
+    _get_model_and_processor("Qwen/Qwen3-ASR-1.7B-hf")
+    _get_model_and_processor("Qwen/Qwen3-ASR-1.7B-hf")
+    assert len(load_calls) == 1
+
+    # A different precision must not reuse the cached dtype.
+    _get_model_and_processor("Qwen/Qwen3-ASR-1.7B-hf", precision="bf16")
+    assert len(load_calls) == 2
+    assert all(dtype is torch.bfloat16 for _, dtype in load_calls)

@@ -109,6 +109,7 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
         task_type: str | None,
         start: int | None,
         end: int | None,
+        precision: str | None,
     ):
         assert Path(input_path) == epub
         assert language is None
@@ -117,6 +118,7 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
         assert task_type == "convert"
         assert start is None
         assert end is None
+        assert precision is None
         return TextContext(title="doc", chunk_list=["c"]), output_dir
 
     result = await process_input(
@@ -144,6 +146,7 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
         task_type: str | None,
         start: int | None,
         end: int | None,
+        precision: str | None,
     ):
         assert Path(input_path) == image
         assert language == "zh"
@@ -152,6 +155,7 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
         assert task_type == "ocr"
         assert start == 0
         assert end == 1
+        assert precision == "bf16"
         return TextContext(title="page", chunk_list=["text"]), None
 
     result = await process_input(
@@ -163,6 +167,7 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
             start=0,
             end=1,
             temp_dir=temp_dir,
+            precision="bf16",
         ),
         process_url=_unexpected_process_url,
         process_file=_process_file,
@@ -187,6 +192,28 @@ async def test_use_case_transcript_flow() -> None:
     assert result.task_type == "transcript"
     assert result.text_context.chunk_list == ["t"]
     assert result.platform == "youtube"
+
+
+@pytest.mark.asyncio
+async def test_use_case_url_passes_precision_to_url_processor() -> None:
+    seen: dict[str, object] = {}
+
+    async def _process_url(*args):  # noqa: ANN002
+        seen["precision"] = args[8]
+        return TextContext(title="a", chunk_list=["t"]), "youtube"
+
+    result = await process_input(
+        ProcessInput(
+            input_source="https://example.com/video",
+            model="qwen3-asr-1.7b",
+            precision="8bit",
+        ),
+        process_url=_process_url,
+        process_file=_unexpected_process_file,
+        is_supported_file_fn=lambda _: True,
+    )
+    assert result.task_type == "transcript"
+    assert seen["precision"] == "8bit"
 
 
 @pytest.mark.asyncio

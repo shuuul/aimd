@@ -10,7 +10,7 @@ from logly import logger
 from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
 
 from ..audio_utils import convert_to_wav_if_needed
-from ..const import MLX_AUDIO_DEFAULT_MODEL
+from ..const import resolve_mlx_asr_model
 from ..platform_utils import is_apple_silicon
 
 LANGUAGE_CODE_TO_NAME = {
@@ -30,8 +30,10 @@ LANGUAGE_CODE_TO_NAME = {
 class MLXAudioASRModel:
     """mlx-audio STT model adapter."""
 
-    def __init__(self, model_id: str | None = None) -> None:
-        self.model_id = model_id or MLX_AUDIO_DEFAULT_MODEL
+    def __init__(
+        self, model_id: str | None = None, precision: str | None = None
+    ) -> None:
+        self.model_id = resolve_mlx_asr_model(model_id, precision)
 
     async def transcribe(
         self,

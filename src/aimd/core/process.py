@@ -148,12 +148,22 @@ UrlProcessor = Callable[
         str | None,
         Path | None,
         bool,
+        str | None,
     ],
     Awaitable[tuple[TextContext, str]],
 ]
 
 LocalFileProcessor = Callable[
-    [str, str | None, str | None, Path | None, str | None, int | None, int | None],
+    [
+        str,
+        str | None,
+        str | None,
+        Path | None,
+        str | None,
+        int | None,
+        int | None,
+        str | None,
+    ],
     Awaitable[tuple[TextContext, Path | None]],
 ]
 
@@ -434,6 +444,7 @@ async def convert_url_with_markitdown(
     cookies_from_browser: str | None = None,
     temp_dir: Path | None = None,
     raw_transcript: bool = False,
+    precision: str | None = None,
 ) -> tuple[TextContext, str]:
     """Convert a URL through MarkItDown and AIMD's bundled URL plugin."""
     md = MarkItDown(enable_builtins=False, enable_plugins=True)
@@ -449,6 +460,7 @@ async def convert_url_with_markitdown(
         cookies_from_browser=cookies_from_browser,
         temp_dir=temp_dir,
         raw_transcript=raw_transcript,
+        precision=precision,
     )
 
     return (
@@ -470,6 +482,7 @@ async def convert_file_with_markitdown(
     task_type: str | None = None,
     start: int | None = None,
     end: int | None = None,
+    precision: str | None = None,
     *,
     max_chunk_size: int = 40000,
 ) -> tuple[TextContext, Path | None]:
@@ -501,6 +514,7 @@ async def convert_file_with_markitdown(
         task_type=task_type,
         start=start,
         end=end,
+        precision=precision,
     )
     markdown = result.markdown
     return (
@@ -553,6 +567,7 @@ async def _process_url(
         request.cookies_from_browser,
         request.temp_dir,
         request.raw_transcript,
+        request.precision,
     )
     return ProcessResult(
         task_type="transcript",
@@ -576,6 +591,7 @@ async def _process_local_file(
         task_type,
         request.start,
         request.end,
+        request.precision,
     )
     return ProcessResult(
         task_type=task_type,

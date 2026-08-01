@@ -60,9 +60,10 @@ class MLXVLMOCRBackend:
         start: int | None = None,
         end: int | None = None,
         temp_dir: Path | None = None,
+        precision: str | None = None,
     ) -> OCRResult:
         if input_path.suffix.lower() in IMAGE_FILE_EXTENSIONS:
-            text = self._recognize_image(input_path, model=model)
+            text = self._recognize_image(input_path, model=model, precision=precision)
             pages = (OCRPage(page_index=None, text=text.strip()),)
         else:
             pages = self._recognize_pdf_or_document(
@@ -71,6 +72,7 @@ class MLXVLMOCRBackend:
                 start=start,
                 end=end,
                 temp_dir=temp_dir,
+                precision=precision,
             )
 
         return OCRResult(
@@ -78,8 +80,14 @@ class MLXVLMOCRBackend:
             pages=pages,
         )
 
-    def _recognize_image(self, input_path: Path, *, model: str | None) -> str:
-        return MLXVLMOCRModel(model).recognize_image(input_path)
+    def _recognize_image(
+        self,
+        input_path: Path,
+        *,
+        model: str | None,
+        precision: str | None = None,
+    ) -> str:
+        return MLXVLMOCRModel(model, precision=precision).recognize_image(input_path)
 
     def _recognize_pdf_or_document(
         self,
@@ -89,6 +97,7 @@ class MLXVLMOCRBackend:
         start: int | None,
         end: int | None,
         temp_dir: Path | None,
+        precision: str | None = None,
     ) -> tuple[OCRPage, ...]:
         if input_path.suffix.lower() != ".pdf":
             raise ProcessingFailedError(
@@ -102,6 +111,7 @@ class MLXVLMOCRBackend:
             return self._recognize_rendered_pages(
                 rendered_pages,
                 model=model,
+                precision=precision,
             )
         finally:
             _cleanup_rendered_pages(rendered_pages)
@@ -111,8 +121,9 @@ class MLXVLMOCRBackend:
         rendered_pages: tuple[tuple[int, Path], ...],
         *,
         model: str | None,
+        precision: str | None = None,
     ) -> tuple[OCRPage, ...]:
-        model_adapter = MLXVLMOCRModel(model)
+        model_adapter = MLXVLMOCRModel(model, precision=precision)
         page_texts = model_adapter.recognize_images(_page_paths(rendered_pages))
         return tuple(
             OCRPage(
@@ -199,8 +210,9 @@ class TransformersOCRBackend:
         start: int | None = None,
         end: int | None = None,
         temp_dir: Path | None = None,
+        precision: str | None = None,
     ) -> OCRResult:
-        model_adapter = create_transformers_ocr_model(model)
+        model_adapter = create_transformers_ocr_model(model, precision=precision)
         if input_path.suffix.lower() in IMAGE_FILE_EXTENSIONS:
             text = model_adapter.recognize_image(
                 input_path,

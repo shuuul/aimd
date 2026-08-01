@@ -16,11 +16,15 @@ from aimd.plugins.ocr.models import (
     create_transformers_ocr_model,
     resolve_transformers_ocr_model,
 )
-from aimd.plugins.ocr.models.generic import GenericTransformersOCRModel
-from aimd.plugins.ocr.models.got import GOTOCRModel
+from aimd.plugins.ocr.models.glm import GLMOCRModel
+from aimd.plugins.ocr.models.base import (
+    get_cuda_dtype,
+    validate_transformers_precision,
+)
 from aimd.plugins.ocr.models.mlx import (
     MLXVLMOCRModel,
     SlidingWindowNoRepeatNgramProcessor,
+    _is_unlimited_ocr_model,
     resolve_mlx_vlm_model,
 )
 from aimd.plugins.ocr.models.unlimited import (
@@ -64,17 +68,52 @@ def test_select_ocr_backend_rejects_unsupported_platform(monkeypatch) -> None:
 
 
 def test_resolve_mlx_vlm_model_maps_aimd_names() -> None:
-    assert resolve_mlx_vlm_model(None) == "baidu/Unlimited-OCR"
-    assert resolve_mlx_vlm_model("unlimited_ocr") == "baidu/Unlimited-OCR"
-    assert resolve_mlx_vlm_model("unlimited-ocr") == "baidu/Unlimited-OCR"
-    assert resolve_mlx_vlm_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
-    assert resolve_mlx_vlm_model("glm_ocr") == "mlx-community/GLM-OCR-bf16"
-    assert resolve_mlx_vlm_model("org/custom-model") == "org/custom-model"
+    assert resolve_mlx_vlm_model(None) == "mlx-community/Unlimited-OCR-4bit"
+    assert resolve_mlx_vlm_model("unlimited_ocr") == "mlx-community/Unlimited-OCR-4bit"
+    assert resolve_mlx_vlm_model("unlimited-ocr") == "mlx-community/Unlimited-OCR-4bit"
+    assert (
+        resolve_mlx_vlm_model("unlimited_ocr_bf16")
+        == "mlx-community/Unlimited-OCR-bf16"
+    )
+    assert resolve_mlx_vlm_model("glm_ocr") == "mlx-community/GLM-OCR-4bit"
+    assert resolve_mlx_vlm_model("glm-ocr") == "mlx-community/GLM-OCR-4bit"
 
 
-def test_resolve_mlx_vlm_model_rejects_paddleocr_aliases() -> None:
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("mlx-community/Unlimited-OCR-4bit", "mlx-community/Unlimited-OCR-4bit"),
+        ("mlx-community/Unlimited-OCR-6bit", "mlx-community/Unlimited-OCR-6bit"),
+        ("mlx-community/Unlimited-OCR-8bit", "mlx-community/Unlimited-OCR-8bit"),
+        ("mlx-community/Unlimited-OCR-bf16", "mlx-community/Unlimited-OCR-bf16"),
+        ("mlx-community/GLM-OCR-4bit", "mlx-community/GLM-OCR-4bit"),
+        ("mlx-community/GLM-OCR-6bit", "mlx-community/GLM-OCR-6bit"),
+        ("mlx-community/GLM-OCR-8bit", "mlx-community/GLM-OCR-8bit"),
+        ("mlx-community/GLM-OCR-bf16", "mlx-community/GLM-OCR-bf16"),
+    ],
+)
+def test_resolve_mlx_vlm_model_accepts_explicit_hf_ids(
+    model: str, expected: str
+) -> None:
+    assert resolve_mlx_vlm_model(model) == expected
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["paddleocr_v6", "got_ocr", "got-ocr", "org/custom-model", "baidu/Unlimited-OCR"],
+)
+def test_resolve_mlx_vlm_model_rejects_unsupported_models(model: str) -> None:
     with pytest.raises(ProcessingFailedError):
-        resolve_mlx_vlm_model("paddleocr_v6")
+        resolve_mlx_vlm_model(model)
+
+
+def test_mlx_vlm_unlimited_ocr_model_detection_splits_adapters() -> None:
+    for quantization in ("4bit", "6bit", "8bit", "bf16"):
+        model_id = f"mlx-community/Unlimited-OCR-{quantization}"
+        assert _is_unlimited_ocr_model(model_id)
+        assert not _is_unlimited_ocr_model(f"mlx-community/GLM-OCR-{quantization}")
+    # The Transformers checkpoint stays recognized for backwards compatibility.
+    assert _is_unlimited_ocr_model("baidu/Unlimited-OCR")
 
 
 def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
@@ -83,13 +122,24 @@ def test_resolve_transformers_ocr_model_maps_vlm_models() -> None:
     assert (
         resolve_transformers_ocr_model("baidu/Unlimited-OCR") == "baidu/Unlimited-OCR"
     )
-    assert resolve_transformers_ocr_model("got_ocr") == "stepfun-ai/GOT-OCR-2.0-hf"
     assert resolve_transformers_ocr_model("glm_ocr") == "zai-org/GLM-OCR"
-    assert resolve_transformers_ocr_model("org/custom-model") == "org/custom-model"
+    assert resolve_transformers_ocr_model("glm-ocr") == "zai-org/GLM-OCR"
+    assert resolve_transformers_ocr_model("zai-org/GLM-OCR") == "zai-org/GLM-OCR"
 
 
-@pytest.mark.parametrize("model", ["paddleocr_v6", "paddleocr_vl"])
-def test_resolve_transformers_ocr_model_rejects_paddleocr_aliases(
+@pytest.mark.parametrize(
+    "model",
+    [
+        "paddleocr_v6",
+        "paddleocr_vl",
+        "got_ocr",
+        "got-ocr",
+        "got_ocr2",
+        "stepfun-ai/GOT-OCR-2.0-hf",
+        "org/custom-model",
+    ],
+)
+def test_resolve_transformers_ocr_model_rejects_unsupported_models(
     model: str,
 ) -> None:
     with pytest.raises(ProcessingFailedError):
@@ -97,11 +147,12 @@ def test_resolve_transformers_ocr_model_rejects_paddleocr_aliases(
 
 
 def test_create_transformers_ocr_model_selects_model_adapter() -> None:
-    assert isinstance(create_transformers_ocr_model("got_ocr"), GOTOCRModel)
+    assert isinstance(create_transformers_ocr_model(None), UnlimitedOCRModel)
     assert isinstance(create_transformers_ocr_model("unlimited_ocr"), UnlimitedOCRModel)
-    generic = create_transformers_ocr_model("zai-org/GLM-OCR")
-    assert isinstance(generic, GenericTransformersOCRModel)
-    assert generic.model_id == "zai-org/GLM-OCR"
+    glm = create_transformers_ocr_model("glm_ocr")
+    assert isinstance(glm, GLMOCRModel)
+    assert glm.model_id == "zai-org/GLM-OCR"
+    assert isinstance(create_transformers_ocr_model("zai-org/GLM-OCR"), GLMOCRModel)
 
 
 def test_mlx_vlm_image_uses_python_package(monkeypatch, tmp_path: Path):
@@ -150,11 +201,48 @@ def test_mlx_vlm_image_uses_python_package(monkeypatch, tmp_path: Path):
         title="scan",
         pages=(OCRPage(page_index=None, text="recognized"),),
     )
-    assert captured["model_id"] == "mlx-community/GLM-OCR-bf16"
+    assert captured["model_id"] == "mlx-community/GLM-OCR-4bit"
     assert captured["prompt"] == "Text Recognition:"
     assert captured["num_images"] == 1
     assert captured["image"] == [image.as_posix()]
     assert captured["max_tokens"] == 4096
+
+
+def test_mlx_vlm_backend_forwards_precision_to_model(
+    monkeypatch, tmp_path: Path
+) -> None:
+    image = tmp_path / "scan.png"
+    image.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _FakeModel:
+        config = "config"
+
+    def _load(model_id):  # noqa: ANN001
+        captured["model_id"] = model_id
+        return _FakeModel(), "processor"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm",
+        types.SimpleNamespace(
+            load=_load,
+            generate=lambda *args, **kwargs: types.SimpleNamespace(text="recognized"),  # noqa: ARG005
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_vlm.prompt_utils",
+        types.SimpleNamespace(apply_chat_template=lambda *args, **kwargs: "prompt"),
+    )
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_processor", None)
+    monkeypatch.setattr("aimd.plugins.ocr.models.mlx._cached_mlx_vlm_model_id", None)
+
+    result = MLXVLMOCRBackend().recognize(image, model="glm-ocr", precision="6bit")
+
+    assert result.pages[0].text == "recognized"
+    assert captured["model_id"] == "mlx-community/GLM-OCR-6bit"
 
 
 def test_mlx_vlm_unlimited_ocr_image_uses_gundam_settings(
@@ -214,7 +302,7 @@ def test_mlx_vlm_unlimited_ocr_image_uses_gundam_settings(
         title="scan",
         pages=(OCRPage(page_index=None, text="recognized unlimited"),),
     )
-    assert captured["model_id"] == "baidu/Unlimited-OCR"
+    assert captured["model_id"] == "mlx-community/Unlimited-OCR-4bit"
     assert captured["prompt"] == "document parsing."
     assert captured["num_images"] == 1
     assert captured["image"] == [image.as_posix()]
@@ -305,7 +393,7 @@ def test_mlx_vlm_unlimited_ocr_pdf_runs_page_by_page(
         OCRPage(page_index=0, text="page 1 body"),
         OCRPage(page_index=1, text="page 2 body"),
     )
-    assert captured["model_id"] == "baidu/Unlimited-OCR"
+    assert captured["model_id"] == "mlx-community/Unlimited-OCR-4bit"
     assert captured["prompts"] == ["document parsing.", "document parsing."]
     assert captured["num_images"] == [1, 1]
     assert captured["images"] == [path.as_posix() for path in page_paths]
@@ -408,7 +496,7 @@ def test_mlx_vlm_pdf_uses_python_package(monkeypatch, tmp_path: Path):
         page_paths[0].as_posix(),
         page_paths[1].as_posix(),
     ]
-    assert captured["model_id"] == "mlx-community/GLM-OCR-bf16"
+    assert captured["model_id"] == "mlx-community/GLM-OCR-4bit"
 
 
 def test_transformers_backend_ocr_image_uses_resolved_model(
@@ -428,8 +516,9 @@ def test_transformers_backend_ocr_image_uses_resolved_model(
         def recognize_images(self, image_paths, *, language, temp_dir):  # noqa: ANN001
             raise AssertionError("not used")
 
-    def _create_model(model):  # noqa: ANN001
+    def _create_model(model, precision=None):  # noqa: ANN001
         captured["model"] = model
+        captured["precision"] = precision
         return _FakeModel()
 
     monkeypatch.setattr(
@@ -438,8 +527,9 @@ def test_transformers_backend_ocr_image_uses_resolved_model(
 
     result = TransformersOCRBackend().recognize(
         image,
-        model="got_ocr",
+        model="glm_ocr",
         language="zh",
+        precision="bf16",
     )
 
     assert result == OCRResult(
@@ -447,7 +537,8 @@ def test_transformers_backend_ocr_image_uses_resolved_model(
         pages=(OCRPage(page_index=None, text="recognized text"),),
     )
     assert captured == {
-        "model": "got_ocr",
+        "model": "glm_ocr",
+        "precision": "bf16",
         "input_path": image,
         "language": "zh",
         "temp_dir": None,
@@ -469,7 +560,7 @@ def test_transformers_engine_unlimited_ocr_image_uses_model_infer(
 
     monkeypatch.setattr(
         "aimd.plugins.ocr.models.unlimited.get_cached_model_and_processor",
-        lambda model_name, loader: (_FakeModel(), "tokenizer"),  # noqa: ARG005
+        lambda model_name, loader, precision=None: (_FakeModel(), "tokenizer"),  # noqa: ARG005
     )
 
     text = UnlimitedOCRModel().recognize_image(
@@ -505,7 +596,7 @@ def test_transformers_engine_unlimited_ocr_pdf_uses_infer_multi(
 
     monkeypatch.setattr(
         "aimd.plugins.ocr.models.unlimited.get_cached_model_and_processor",
-        lambda model_name, loader: (_FakeModel(), "tokenizer"),  # noqa: ARG005
+        lambda model_name, loader, precision=None: (_FakeModel(), "tokenizer"),  # noqa: ARG005
     )
 
     result = UnlimitedOCRModel().recognize_images(
@@ -562,6 +653,7 @@ async def test_process_ocr_preserves_page_oriented_compatibility_result(
             assert kwargs["language"] == "zh"
             assert kwargs["start"] is None
             assert kwargs["end"] is None
+            assert kwargs["precision"] == "bf16"
             return OCRResult(
                 title="page",
                 pages=(OCRPage(page_index=None, text="recognized text"),),
@@ -575,6 +667,7 @@ async def test_process_ocr_preserves_page_oriented_compatibility_result(
         image,
         model="glm_ocr",
         language="zh",
+        precision="bf16",
     )
 
     assert result.title == "page"
@@ -681,6 +774,7 @@ async def test_process_input_ocr_text_context_owned_by_core(
         task_type=None,
         start=None,
         end=None,
+        precision=None,
     ):  # noqa: ANN001
         from aimd.core.process import convert_file_with_markitdown
 
@@ -692,6 +786,7 @@ async def test_process_input_ocr_text_context_owned_by_core(
             task_type=task_type,
             start=start,
             end=end,
+            precision=precision,
             max_chunk_size=400,
         )
 
@@ -737,3 +832,124 @@ async def test_process_input_ocr_short_markdown_has_no_split_metadata(
     assert result.text_context.title == "page"
     assert result.text_context.chunk_list == ["short ocr text"]
     assert result.text_context.split_header_level is None
+
+
+@pytest.mark.parametrize("precision", ["4bit", "6bit", "8bit", "bf16"])
+def test_resolve_mlx_vlm_model_alias_with_precision(precision: str) -> None:
+    assert (
+        resolve_mlx_vlm_model("unlimited-ocr", precision)
+        == f"mlx-community/Unlimited-OCR-{precision}"
+    )
+    assert (
+        resolve_mlx_vlm_model("glm-ocr", precision)
+        == f"mlx-community/GLM-OCR-{precision}"
+    )
+
+
+def test_resolve_mlx_vlm_model_alias_defaults_to_4bit() -> None:
+    assert resolve_mlx_vlm_model("unlimited-ocr") == "mlx-community/Unlimited-OCR-4bit"
+    assert resolve_mlx_vlm_model("glm-ocr") == "mlx-community/GLM-OCR-4bit"
+    assert resolve_mlx_vlm_model(None) == "mlx-community/Unlimited-OCR-4bit"
+
+
+def test_resolve_mlx_vlm_model_legacy_alias_with_precision() -> None:
+    assert (
+        resolve_mlx_vlm_model("unlimited_ocr", "8bit")
+        == "mlx-community/Unlimited-OCR-8bit"
+    )
+    assert resolve_mlx_vlm_model("glm_ocr", "bf16") == "mlx-community/GLM-OCR-bf16"
+    assert (
+        resolve_mlx_vlm_model("unlimited_ocr_6bit")
+        == "mlx-community/Unlimited-OCR-6bit"
+    )
+
+
+def test_resolve_mlx_vlm_model_normalizes_dash_precision() -> None:
+    assert resolve_mlx_vlm_model("glm-ocr", "4-bit") == "mlx-community/GLM-OCR-4bit"
+    assert (
+        resolve_mlx_vlm_model("unlimited-ocr", "BF16")
+        == "mlx-community/Unlimited-OCR-bf16"
+    )
+
+
+def test_resolve_mlx_vlm_model_full_id_with_matching_precision() -> None:
+    assert (
+        resolve_mlx_vlm_model("mlx-community/GLM-OCR-8bit", "8bit")
+        == "mlx-community/GLM-OCR-8bit"
+    )
+    assert (
+        resolve_mlx_vlm_model("mlx-community/Unlimited-OCR-bf16")
+        == "mlx-community/Unlimited-OCR-bf16"
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "precision"),
+    [
+        ("mlx-community/GLM-OCR-8bit", "4bit"),
+        ("mlx-community/Unlimited-OCR-bf16", "8bit"),
+        ("unlimited-ocr-4bit", "6bit"),
+        ("unlimited_ocr_bf16", "4bit"),
+    ],
+)
+def test_resolve_mlx_vlm_model_rejects_conflicting_precision(
+    model: str, precision: str
+) -> None:
+    with pytest.raises(ProcessingFailedError, match="conflicts"):
+        resolve_mlx_vlm_model(model, precision)
+
+
+def test_resolve_mlx_vlm_model_rejects_unknown_precision() -> None:
+    with pytest.raises(ProcessingFailedError, match="Unsupported precision"):
+        resolve_mlx_vlm_model("glm-ocr", "fp8")
+
+
+def test_mlx_vlm_model_adapter_accepts_precision() -> None:
+    assert (
+        MLXVLMOCRModel("glm-ocr", precision="6bit").model_id
+        == "mlx-community/GLM-OCR-6bit"
+    )
+    assert (
+        MLXVLMOCRModel(None, precision="8bit").model_id
+        == "mlx-community/Unlimited-OCR-8bit"
+    )
+
+
+def test_create_transformers_ocr_model_passes_precision() -> None:
+    unlimited = create_transformers_ocr_model("unlimited-ocr", precision="bf16")
+    assert isinstance(unlimited, UnlimitedOCRModel)
+    assert unlimited.precision == "bf16"
+
+    glm = create_transformers_ocr_model("glm_ocr", precision="bf16")
+    assert isinstance(glm, GLMOCRModel)
+    assert glm.precision == "bf16"
+
+    default = create_transformers_ocr_model(None)
+    assert default.precision is None
+
+
+@pytest.mark.parametrize("precision", ["4bit", "6bit", "8bit"])
+def test_transformers_ocr_rejects_quantized_precision(precision: str) -> None:
+    with pytest.raises(ProcessingFailedError, match="quantized precision"):
+        create_transformers_ocr_model("unlimited-ocr", precision=precision)
+    with pytest.raises(ProcessingFailedError, match="quantized precision"):
+        validate_transformers_precision(precision)
+
+
+def test_validate_transformers_precision_normalizes_dash_variant() -> None:
+    assert validate_transformers_precision(None) is None
+    assert validate_transformers_precision("BF16") == "bf16"
+
+
+def test_get_cuda_dtype_honors_explicit_bf16(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    assert get_cuda_dtype("bf16") is torch.bfloat16
+    assert get_cuda_dtype(None) is torch.bfloat16
+
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    assert get_cuda_dtype(None) is torch.float16
+    with pytest.raises(BackendUnavailableError, match="bf16"):
+        get_cuda_dtype("bf16")
+    with pytest.raises(ProcessingFailedError, match="does not support precision"):
+        get_cuda_dtype("4bit")

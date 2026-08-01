@@ -17,14 +17,12 @@ This document records practical performance expectations for `aimd` processing p
 
 | Task | Backend | Model family | Expected performance profile |
 |------|--------|--------------|------------------------------|
-| Transcription | `mlx` | Quantized Qwen3-ASR | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
-| Transcription | `mlx` | Whisper, Distil-Whisper, Parakeet, Nemotron, Voxtral, VibeVoice, Qwen2-Audio | Performance is delegated to `mlx-audio`; model size and upstream generation behavior dominate. |
+| Transcription | `mlx` | Qwen3-ASR 1.7B/0.6B (`4bit`, `6bit`, `8bit`, `bf16`) | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
 | Transcription | `transformers` | Qwen3-ASR | Default on CUDA-capable non-Darwin platforms and explicit opt-in on macOS/MPS when a `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) model ID is provided. Uses native Transformers Qwen3-ASR (`transformers>=5.14.1`); no vendored model code, `qwen-asr`, vLLM, or SGLang runtime. The 0.6B-hf model is the lower-memory option; 1.7B-hf is the default quality-oriented CUDA option. |
-| OCR | `mlx-vlm` | Unlimited-OCR (`baidu/Unlimited-OCR`) | Default macOS OCR path via mlx-vlm native Unlimited-OCR support (`mlx-vlm>=0.6.4`, PR #1427). Each page uses single-image gundam mode with Baidu's sliding-window no-repeat n-gram guard (`ngram=35`, `window=128`) and `max_tokens=8192`. PDFs are OCR'd page-by-page. Without the n-gram guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
-| OCR | `mlx-vlm` | GLM-OCR or explicit mlx-vlm compatible VLMs | Optional lighter macOS VLM OCR path. Heavier than classic detector/recognizer OCR but usually lighter than Unlimited-OCR. |
+| OCR | `mlx-vlm` | Unlimited-OCR (`4bit`, `6bit`, `8bit`, `bf16`) | Default macOS OCR path via `mlx-community/Unlimited-OCR-4bit` and `mlx-vlm>=0.6.4`. Each page uses single-image gundam mode with Baidu's sliding-window no-repeat n-gram guard (`ngram=35`, `window=128`) and `max_tokens=8192`. PDFs are OCR'd page-by-page. Without the n-gram guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
+| OCR | `mlx-vlm` | GLM-OCR (`4bit`, `6bit`, `8bit`, `bf16`) | Optional macOS VLM OCR path using the four `mlx-community/GLM-OCR-*` checkpoints. |
 | OCR | `transformers` | Unlimited-OCR | Default Linux/CUDA OCR path using Baidu's custom `infer`/`infer_multi` API and trusted remote code. Results are read from the model's saved output files. |
-| OCR | `transformers` | GOT-OCR | Optional lighter Linux/CUDA OCR path; uses a generic Transformers image-text generation flow. |
-| OCR | `transformers` | GLM-OCR or explicit Hugging Face image-text models | Linux/CUDA VLM OCR path; availability depends on upstream model-code requirements and compatible Transformers/runtime versions. |
+| OCR | `transformers` | GLM-OCR | Linux/CUDA OCR path using the dedicated `zai-org/GLM-OCR` adapter. |
 
 ## Apple Silicon ASR comparison
 

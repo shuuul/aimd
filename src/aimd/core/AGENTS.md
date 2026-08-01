@@ -61,6 +61,6 @@ The stripping is performed by `strip_subtitle_formatting()` in
 ## TRANSCRIPTION MODELS
 
 - Backend selection is platform-driven and not user-configurable.
-- The MLX backend is implemented in `aimd.plugins.asr.models.mlx` and uses `mlx_audio.stt.load()` on Apple Silicon. The default remains `mlx-community/Qwen3-ASR-1.7B-4bit`; `const.MLX_AUDIO_MODELS` also tracks newer mlx-audio 0.4.4 STT IDs. Do not add forced-aligner models to this list unless the calling code also supplies reference text.
+- The MLX backend is implemented in `aimd.plugins.asr.models.mlx` and uses `mlx_audio.stt.load()` on Apple Silicon. It supports only `mlx-community/Qwen3-ASR-{1.7B,0.6B}-{4bit,6bit,8bit,bf16}`; the default remains `mlx-community/Qwen3-ASR-1.7B-4bit`. Do not add other model families or forced-aligner models to this list.
 - The Transformers ASR backend is implemented in `aimd.plugins.asr.models.transformers` and uses native Transformers Qwen3-ASR (`transformers>=5.14.1`) on CUDA-capable non-Darwin platforms with `Qwen/Qwen3-ASR-1.7B-hf` default and `Qwen/Qwen3-ASR-0.6B-hf` as the lower-memory option. Legacy `Qwen/Qwen3-ASR-*` IDs resolve to the matching `-hf` checkpoints.
-- mlx Qwen3-ASR defaults omitted language to `Chinese`; other mlx-audio STT models stay on their own default/auto language behavior.
+- MLX Qwen3-ASR defaults omitted language to `Chinese`.

@@ -7,20 +7,42 @@ from pathlib import Path
 from typing import Any
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
+from aimd.core.precision import SUPPORTED_PRECISIONS, normalize_precision
 
-DEFAULT_OCR_MODEL = "unlimited_ocr"
-MLX_VLM_MODEL_ALIASES = {
-    "glm_ocr": "mlx-community/GLM-OCR-bf16",
-    "glm-ocr": "mlx-community/GLM-OCR-bf16",
-    "mlx-community/glm-ocr-bf16": "mlx-community/GLM-OCR-bf16",
-    "unlimited_ocr": "baidu/Unlimited-OCR",
-    "unlimited-ocr": "baidu/Unlimited-OCR",
-    "baidu/unlimited-ocr": "baidu/Unlimited-OCR",
+DEFAULT_OCR_MODEL = "unlimited-ocr"
+MLX_VLM_DEFAULT_MODEL_ID = "mlx-community/Unlimited-OCR-4bit"
+GLM_OCR_DEFAULT_MODEL_ID = "mlx-community/GLM-OCR-4bit"
+
+# OCR model families supported on the MLX backend, mapped to their
+# mlx-community repository name.
+_MLX_OCR_FAMILY_REPOS = {
+    "unlimited-ocr": "Unlimited-OCR",
+    "glm-ocr": "GLM-OCR",
 }
+
+
+def _build_alias_table() -> dict[str, str]:
+    """Build the backwards-compatible alias table (kebab + legacy underscore)."""
+    table: dict[str, str] = {}
+    for family, repo in _MLX_OCR_FAMILY_REPOS.items():
+        legacy_family = family.replace("-", "_")
+        table[family] = f"mlx-community/{repo}-4bit"
+        table[legacy_family] = f"mlx-community/{repo}-4bit"
+        for precision in SUPPORTED_PRECISIONS:
+            table[f"{family}-{precision}"] = f"mlx-community/{repo}-{precision}"
+            table[f"{legacy_family}_{precision}"] = f"mlx-community/{repo}-{precision}"
+            table[f"mlx-community/{family}-{precision}"] = (
+                f"mlx-community/{repo}-{precision}"
+            )
+    return table
+
+
+# Backwards-compatible alias table retained for callers importing it; resolution
+# itself is implemented in resolve_mlx_vlm_model below.
+MLX_VLM_MODEL_ALIASES = _build_alias_table()
 MLX_VLM_DEFAULT_PROMPT = "Text Recognition:"
 # mlx-vlm added Unlimited-OCR in PR #1427, first released in v0.6.4.
 MLX_VLM_UNLIMITED_OCR_MIN_VERSION = (0, 6, 4)
-UNLIMITED_OCR_MODEL_ID = "baidu/Unlimited-OCR"
 UNLIMITED_OCR_SINGLE_PROMPT = "document parsing."
 # Practical per-page cap. Upstream docs show 32768, but without an n-gram guard
 # Unlimited-OCR can loop ("R. R. R. ...") until max_tokens and burn minutes/page.
@@ -34,33 +56,63 @@ _cached_mlx_vlm_processor = None
 _cached_mlx_vlm_model_id: str | None = None
 
 
-def resolve_mlx_vlm_model(model: str | None) -> str:
-    """Resolve aimd OCR model aliases to mlx-vlm model IDs."""
-    requested = model or DEFAULT_OCR_MODEL
-    normalized = requested.strip().lower().replace(" ", "_")
-    if normalized in MLX_VLM_MODEL_ALIASES:
-        return MLX_VLM_MODEL_ALIASES[normalized]
-    if "/" in requested:
-        return requested.strip()
-    raise ProcessingFailedError(
-        "Unsupported MLX VLM OCR model. Supported models: glm_ocr, "
-        "unlimited_ocr, or an explicit mlx-vlm compatible Hugging Face model ID."
-    )
+def resolve_mlx_vlm_model(model: str | None, precision: str | None = None) -> str:
+    """Resolve an aimd OCR model alias plus precision to an mlx-vlm model ID.
+
+    Accepts the kebab-case aliases ``unlimited-ocr``/``glm-ocr`` (and legacy
+    underscore variants, optionally with an embedded precision suffix) or an
+    explicit ``mlx-community/{Unlimited-OCR,GLM-OCR}-{precision}`` ID. When no
+    precision is given, 4bit is used. A precision that conflicts with an
+    explicit ID suffix raises ProcessingFailedError.
+    """
+    normalized_precision = normalize_precision(precision)
+    requested = (model or DEFAULT_OCR_MODEL).strip().lower()
+    requested = requested.replace(" ", "_").replace("_", "-")
+
+    candidate = requested.removeprefix("mlx-community/")
+    embedded_precision: str | None = None
+    for known_precision in SUPPORTED_PRECISIONS:
+        if candidate.endswith(f"-{known_precision}"):
+            embedded_precision = known_precision
+            candidate = candidate[: -len(known_precision) - 1]
+            break
+
+    repo = _MLX_OCR_FAMILY_REPOS.get(candidate)
+    if repo is None:
+        raise ProcessingFailedError(
+            f"Unsupported MLX VLM OCR model {model!r}. Supported models: "
+            "unlimited-ocr (default), glm-ocr, or an explicit "
+            "mlx-community/Unlimited-OCR-{4bit,6bit,8bit,bf16} or "
+            "mlx-community/GLM-OCR-{4bit,6bit,8bit,bf16} Hugging Face model ID."
+        )
+
+    if (
+        normalized_precision is not None
+        and embedded_precision is not None
+        and normalized_precision != embedded_precision
+    ):
+        raise ProcessingFailedError(
+            f"Precision {normalized_precision!r} conflicts with explicit MLX OCR "
+            f"model {model!r}. Drop the precision argument or use the alias form."
+        )
+
+    final_precision = normalized_precision or embedded_precision or "4bit"
+    return f"mlx-community/{repo}-{final_precision}"
 
 
 def _is_unlimited_ocr_model(model_id: str) -> bool:
-    """Return True when the resolved model is Baidu Unlimited-OCR."""
-    return model_id.strip().lower() in {
-        UNLIMITED_OCR_MODEL_ID.lower(),
-        "baidu/unlimited-ocr",
-    } or model_id.strip().lower().endswith("/unlimited-ocr")
+    """Return True when the resolved model is an Unlimited-OCR checkpoint."""
+    normalized = model_id.strip().lower()
+    return normalized.endswith("/unlimited-ocr") or "/unlimited-ocr-" in normalized
 
 
 class MLXVLMOCRModel:
     """Run OCR through mlx-vlm on image paths."""
 
-    def __init__(self, model_id: str | None = None) -> None:
-        self.model_id = resolve_mlx_vlm_model(model_id)
+    def __init__(
+        self, model_id: str | None = None, precision: str | None = None
+    ) -> None:
+        self.model_id = resolve_mlx_vlm_model(model_id, precision)
 
     def recognize_image(self, image_path: Path) -> str:
         model, processor = _load_mlx_vlm_model(self.model_id)

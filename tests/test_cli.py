@@ -62,6 +62,41 @@ def test_cli_exposes_task_option() -> None:
     assert "--task" in task_option.opts
 
 
+def test_cli_exposes_precision_option() -> None:
+    command = get_command(app)
+    precision_option = next(
+        param for param in command.params if param.name == "precision"
+    )
+    assert "--precision" in precision_option.opts
+    help_text = precision_option.help or ""
+    for allowed in ("4bit", "6bit", "8bit", "bf16"):
+        assert allowed in help_text
+
+
+def test_cli_precision_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_process_input(request):
+        seen["model"] = request.model
+        seen["precision"] = request.precision
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="Demo", chunk_list=["hello"]),
+        )
+
+    monkeypatch.setattr(cli_app, "process_input", _fake_process_input)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["input.mp3", "--model", "qwen3-asr-1.7b", "--precision", "4bit"],
+    )
+
+    assert result.exit_code == 0
+    assert seen["model"] == "qwen3-asr-1.7b"
+    assert seen["precision"] == "4bit"
+
+
 def test_cli_task_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, object] = {}
 

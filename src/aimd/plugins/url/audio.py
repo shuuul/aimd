@@ -64,6 +64,7 @@ async def extract_content_from_audio(
     cookies_file: str | None = None,
     cookies_from_browser: str | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it."""
     if save_original_path is not None:
@@ -84,6 +85,7 @@ async def extract_content_from_audio(
             cookies_file=cookies_file,
             cookies_from_browser=cookies_from_browser,
             temp_dir=temp_dir,
+            precision=precision,
         )
 
     with tempfile.TemporaryDirectory(dir=temp_dir) as tmp:
@@ -97,6 +99,7 @@ async def extract_content_from_audio(
             cookies_file=cookies_file,
             cookies_from_browser=cookies_from_browser,
             temp_dir=temp_dir,
+            precision=precision,
         )
 
 
@@ -111,6 +114,7 @@ async def _download_and_transcribe_audio(
     cookies_file: str | None,
     cookies_from_browser: str | None,
     temp_dir: Path | None,
+    precision: str | None = None,
 ) -> str | None:
     """Download URL audio and transcribe it for fallback extraction."""
     try:
@@ -130,6 +134,7 @@ async def _download_and_transcribe_audio(
             language=language,
             model=model,
             temp_dir=temp_dir,
+            precision=precision,
         )
         if transcribed_text and len(transcribed_text) > 10:
             return transcribed_text

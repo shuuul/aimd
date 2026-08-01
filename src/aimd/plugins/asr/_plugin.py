@@ -81,6 +81,7 @@ async def transcribe_file(
     language: str | None = None,
     model: str | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> str:
     """Transcribe an audio or video file with the platform ASR backend."""
     file_path = Path(file_path)
@@ -106,9 +107,9 @@ async def transcribe_file(
 
     asr_model: ASRModel
     if backend == "mlx":
-        asr_model = MLXAudioASRModel(model)
+        asr_model = MLXAudioASRModel(model, precision=precision)
     else:
-        asr_model = TransformersASRModel(model)
+        asr_model = TransformersASRModel(model, precision=precision)
 
     from .audio_utils import get_audio_duration, segment_audio
 
@@ -174,6 +175,7 @@ def _transcribe_file_sync(
     language: str | None = None,
     model: str | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> str:
     """Synchronous MarkItDown boundary for ASR transcription."""
     return asyncio.run(
@@ -182,6 +184,7 @@ def _transcribe_file_sync(
             language=language,
             model=model,
             temp_dir=temp_dir,
+            precision=precision,
         )
     )
 
@@ -214,6 +217,7 @@ class AimdASRConverter(DocumentConverter):
             language=kwargs.get("language"),
             model=kwargs.get("model"),
             temp_dir=kwargs.get("temp_dir"),
+            precision=kwargs.get("precision"),
         )
 
         return DocumentConverterResult(

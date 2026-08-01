@@ -6,7 +6,12 @@ from pathlib import Path
 
 from logly import logger
 
-from aimd.core.errors import ProcessingFailedError, UnsupportedInputError
+from aimd.core.errors import (
+    BackendUnavailableError,
+    ProcessingFailedError,
+    UnsupportedInputError,
+)
+from aimd.core.precision import normalize_transformers_precision
 
 from ..audio_utils import convert_to_wav_if_needed
 from ..const import (
@@ -51,7 +56,12 @@ LANGUAGE_CODE_TO_NAME = {
 class TransformersASRModel:
     """Qwen3-ASR Transformers model adapter (native HF backend)."""
 
-    def __init__(self, model_id: str | None = None) -> None:
+    def __init__(
+        self, model_id: str | None = None, precision: str | None = None
+    ) -> None:
+        # Fail fast on quantized precisions; bf16 device support is validated
+        # at load time when torch device capabilities are known.
+        self.precision = normalize_transformers_precision(precision)
         self.model_id = resolve_transformers_asr_model(
             model_id or TRANSFORMERS_ASR_DEFAULT_MODEL
         )
@@ -90,7 +100,9 @@ class TransformersASRModel:
             audio_path = wav_path or file_path
 
             def _transcribe() -> str:
-                return _transcribe_qwen(audio_path, self.model_id, language)
+                return _transcribe_qwen(
+                    audio_path, self.model_id, language, self.precision
+                )
 
             transcribed_text = await asyncio.to_thread(_transcribe)
 
@@ -114,6 +126,7 @@ _cached_model = None
 _cached_processor = None
 _cached_model_name: str | None = None
 _cached_device: str | None = None
+_cached_precision: str | None = None
 _model_cache_lock = threading.Lock()
 _generation_lock = threading.Lock()
 
@@ -174,17 +187,42 @@ def _require_native_qwen3_asr() -> None:
         ) from exc
 
 
-def _get_model_and_processor(model_name: str):
-    """Load or return cached native Qwen3-ASR Transformers model and processor."""
-    global _cached_model, _cached_processor, _cached_model_name, _cached_device  # noqa: PLW0603
-
+def _resolve_torch_dtype(device: str, precision: str | None):
+    """Pick the torch dtype for a device, honoring an explicit precision."""
     import torch
+
+    if precision == "bf16":
+        if (
+            device == "cuda"
+            and getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+        ):
+            return torch.bfloat16
+        raise BackendUnavailableError(
+            "precision=bf16 requires a CUDA device with bf16 support. "
+            "Omit --precision to use automatic dtype selection."
+        )
+    if precision is not None:
+        raise ProcessingFailedError(
+            f"Transformers ASR backend does not support precision {precision!r}. "
+            "Use bf16 or omit precision for automatic dtype selection."
+        )
+    if device == "cuda" and getattr(torch.cuda, "is_bf16_supported", lambda: False)():
+        return torch.bfloat16
+    if device in {"cuda", "mps"}:
+        return torch.float16
+    return torch.float32
+
+
+def _get_model_and_processor(model_name: str, precision: str | None = None):
+    """Load or return cached native Qwen3-ASR Transformers model and processor."""
+    global _cached_model, _cached_processor, _cached_model_name, _cached_device, _cached_precision  # noqa: PLW0603
 
     device = _select_device()
     if (
         _cached_model is not None
         and _cached_model_name == model_name
         and _cached_device == device
+        and _cached_precision == precision
     ):
         return _cached_model, _cached_processor
 
@@ -193,20 +231,14 @@ def _get_model_and_processor(model_name: str):
             _cached_model is not None
             and _cached_model_name == model_name
             and _cached_device == device
+            and _cached_precision == precision
         ):
             return _cached_model, _cached_processor
 
         _require_native_qwen3_asr()
         from transformers import AutoModelForMultimodalLM, AutoProcessor
 
-        dtype = (
-            torch.bfloat16
-            if device == "cuda"
-            and getattr(torch.cuda, "is_bf16_supported", lambda: False)()
-            else torch.float16
-            if device in {"cuda", "mps"}
-            else torch.float32
-        )
+        dtype = _resolve_torch_dtype(device, precision)
         _cached_processor = AutoProcessor.from_pretrained(model_name)
         _cached_model = AutoModelForMultimodalLM.from_pretrained(
             model_name,
@@ -216,6 +248,7 @@ def _get_model_and_processor(model_name: str):
         _ensure_pad_token(_cached_model)
         _cached_model_name = model_name
         _cached_device = device
+        _cached_precision = precision
         return _cached_model, _cached_processor
 
 
@@ -267,12 +300,17 @@ def _parse_qwen_output(output: str) -> str:
     return text
 
 
-def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) -> str:
+def _transcribe_qwen(
+    audio_path: Path,
+    model_name: str,
+    language: str | None,
+    precision: str | None = None,
+) -> str:
     """Run native Hugging Face Qwen3-ASR transcription."""
     import torch
 
     resolved_language = _resolve_language(language)
-    asr_model, processor = _get_model_and_processor(model_name)
+    asr_model, processor = _get_model_and_processor(model_name, precision)
 
     if not hasattr(processor, "apply_transcription_request"):
         raise ProcessingFailedError(

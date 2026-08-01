@@ -92,6 +92,35 @@ def test_process_empty_transcript_output_is_processing_failure(
     assert not output_file.exists()
 
 
+def test_process_forwards_model_and_precision(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_process_input(request):
+        seen["model"] = request.model
+        seen["precision"] = request.precision
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="t", chunk_list=["x"]),
+        )
+
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.process_core_input",
+        _fake_process_input,
+    )
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/process",
+        json={
+            "input_source": "input.mp3",
+            "model": "qwen3-asr-1.7b",
+            "precision": "4bit",
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen == {"model": "qwen3-asr-1.7b", "precision": "4bit"}
+
+
 def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
     client = _make_client(
         monkeypatch, process_exc=BackendUnavailableError("unavailable")

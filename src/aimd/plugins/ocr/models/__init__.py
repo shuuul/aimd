@@ -1,10 +1,9 @@
-"""Transformers OCR model registry (collapsed from models/ subpackage)."""
+"""Transformers OCR model registry."""
 
 from aimd.core.errors import ProcessingFailedError
 
 from .base import TransformersOCRModel, clear_model_cache
-from .generic import GenericTransformersOCRModel
-from .got import GOT_OCR_MODEL_ID, GOTOCRModel
+from .glm import GLM_OCR_MODEL_ID, GLMOCRModel
 from .unlimited import (
     UNLIMITED_OCR_MODEL_ID,
     UnlimitedOCRModel,
@@ -12,19 +11,15 @@ from .unlimited import (
     read_unlimited_ocr_output_files,
 )
 
-DEFAULT_TRANSFORMERS_OCR_MODEL = "unlimited_ocr"
+DEFAULT_TRANSFORMERS_OCR_MODEL = "unlimited-ocr"
 TRANSFORMERS_OCR_MODEL_ALIASES = {
-    "got_ocr": GOT_OCR_MODEL_ID,
-    "got-ocr": GOT_OCR_MODEL_ID,
-    "got_ocr2": GOT_OCR_MODEL_ID,
-    "got-ocr2": GOT_OCR_MODEL_ID,
-    "stepfun-ai/got-ocr-2.0-hf": GOT_OCR_MODEL_ID,
-    "unlimited_ocr": UNLIMITED_OCR_MODEL_ID,
     "unlimited-ocr": UNLIMITED_OCR_MODEL_ID,
     "baidu/unlimited-ocr": UNLIMITED_OCR_MODEL_ID,
-    "glm_ocr": "zai-org/GLM-OCR",
-    "glm-ocr": "zai-org/GLM-OCR",
-    "zai-org/glm-ocr": "zai-org/GLM-OCR",
+    "glm-ocr": GLM_OCR_MODEL_ID,
+    "zai-org/glm-ocr": GLM_OCR_MODEL_ID,
+    # Legacy underscore aliases retained for backwards compatibility.
+    "unlimited_ocr": UNLIMITED_OCR_MODEL_ID,
+    "glm_ocr": GLM_OCR_MODEL_ID,
 }
 
 
@@ -34,34 +29,30 @@ def resolve_transformers_ocr_model(model: str | None) -> str:
     normalized = requested.strip().lower().replace(" ", "_")
     if normalized in TRANSFORMERS_OCR_MODEL_ALIASES:
         return TRANSFORMERS_OCR_MODEL_ALIASES[normalized]
-    if "/" in requested:
-        return requested.strip()
     raise ProcessingFailedError(
-        "Unsupported Transformers OCR model. Supported models: got_ocr, "
-        "unlimited_ocr, glm_ocr, or an explicit Hugging Face model ID. "
-        "PaddleOCR aliases are not supported."
+        "Unsupported Transformers OCR model. Supported models: unlimited-ocr, "
+        "glm-ocr, or the explicit Hugging Face IDs baidu/Unlimited-OCR and "
+        "zai-org/GLM-OCR."
     )
 
 
 def create_transformers_ocr_model(
     model: str | None,
+    precision: str | None = None,
 ) -> TransformersOCRModel:
     """Create a model-specific Transformers OCR adapter."""
     model_id = resolve_transformers_ocr_model(model)
-    if model_id == GOT_OCR_MODEL_ID:
-        return GOTOCRModel()
     if model_id == UNLIMITED_OCR_MODEL_ID:
-        return UnlimitedOCRModel()
-    return GenericTransformersOCRModel(model_id)
+        return UnlimitedOCRModel(precision=precision)
+    return GLMOCRModel(precision=precision)
 
 
 __all__ = [
     "DEFAULT_TRANSFORMERS_OCR_MODEL",
-    "GOT_OCR_MODEL_ID",
+    "GLM_OCR_MODEL_ID",
     "TRANSFORMERS_OCR_MODEL_ALIASES",
     "UNLIMITED_OCR_MODEL_ID",
-    "GenericTransformersOCRModel",
-    "GOTOCRModel",
+    "GLMOCRModel",
     "UnlimitedOCRModel",
     "TransformersOCRModel",
     "clear_model_cache",

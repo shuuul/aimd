@@ -9,7 +9,11 @@ import typer
 from dotenv import load_dotenv
 from logly import logger
 
-from aimd.interfaces.output import MODEL_HELP_TEXT, persist_output
+from aimd.interfaces.output import (
+    MODEL_HELP_TEXT,
+    PRECISION_HELP_TEXT,
+    persist_output,
+)
 from aimd.core.errors import AimdError
 from aimd.core.models import ProcessInput, TaskType
 from aimd.core.process import process_input
@@ -90,6 +94,11 @@ def process(
         "--model",
         "-m",
         help=MODEL_HELP_TEXT,
+    ),
+    precision: Optional[str] = typer.Option(
+        None,
+        "--precision",
+        help=PRECISION_HELP_TEXT,
     ),
     language: Optional[str] = typer.Option(
         None,
@@ -179,6 +188,7 @@ def process(
                     cookies_from_browser=cookies_from_browser,
                     temp_dir=resolved_temp_dir,
                     raw_transcript=raw_transcript,
+                    precision=precision,
                 )
             )
             logger.info(f"Task: {result.task_type}")

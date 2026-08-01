@@ -1,4 +1,4 @@
-"""Generic chat-template Transformers OCR model adapter."""
+"""GLM-OCR Transformers model adapter."""
 
 from pathlib import Path
 
@@ -8,7 +8,10 @@ from .base import (
     get_cached_model_and_processor,
     get_cuda_dtype,
     inputs_to_model_device,
+    validate_transformers_precision,
 )
+
+GLM_OCR_MODEL_ID = "zai-org/GLM-OCR"
 
 
 def _build_messages(image_path: Path, language: str | None) -> list[dict[str, object]]:
@@ -26,11 +29,13 @@ def _build_messages(image_path: Path, language: str | None) -> list[dict[str, ob
     ]
 
 
-class GenericTransformersOCRModel:
-    """OCR adapter for image-text models with processor chat templates."""
+class GLMOCRModel:
+    """OCR adapter for zai-org/GLM-OCR's processor chat template."""
 
-    def __init__(self, model_id: str) -> None:
-        self.model_id = model_id
+    model_id = GLM_OCR_MODEL_ID
+
+    def __init__(self, precision: str | None = None) -> None:
+        self.precision = validate_transformers_precision(precision)
 
     def recognize_image(
         self,
@@ -40,7 +45,9 @@ class GenericTransformersOCRModel:
         temp_dir: Path | None = None,  # noqa: ARG002 - no temp files needed
     ) -> str:
         model, processor = get_cached_model_and_processor(
-            self.model_id, _load_generic_model
+            self.model_id,
+            lambda name: _load_glm_ocr_model(name, precision=self.precision),
+            precision=self.precision,
         )
         try:
             inputs = processor.apply_chat_template(
@@ -52,7 +59,7 @@ class GenericTransformersOCRModel:
             )
         except Exception as exc:  # noqa: BLE001 - processor errors are model-specific
             raise ProcessingFailedError(
-                f"Unable to prepare image for Transformers OCR: {exc}"
+                f"Unable to prepare image for GLM-OCR: {exc}"
             ) from exc
 
         inputs.pop("token_type_ids", None)
@@ -72,7 +79,7 @@ class GenericTransformersOCRModel:
         )
         text = decoded.strip()
         if not text:
-            raise ProcessingFailedError("Transformers OCR produced empty content")
+            raise ProcessingFailedError("GLM-OCR produced empty content")
         return text
 
     def recognize_images(
@@ -92,7 +99,9 @@ class GenericTransformersOCRModel:
         ]
 
 
-def _load_generic_model(model_name: str) -> tuple[object, object]:
+def _load_glm_ocr_model(
+    model_name: str, precision: str | None = None
+) -> tuple[object, object]:
     try:
         from transformers import AutoModelForImageTextToText, AutoProcessor
     except ImportError as exc:
@@ -109,13 +118,11 @@ def _load_generic_model(model_name: str) -> tuple[object, object]:
         model = AutoModelForImageTextToText.from_pretrained(
             model_name,
             trust_remote_code=True,
-            dtype=get_cuda_dtype(),
+            dtype=get_cuda_dtype(precision),
         ).to("cuda")
     except Exception as exc:  # noqa: BLE001 - upstream model errors vary widely
-        extra = ""
-        if model_name == "zai-org/GLM-OCR":
-            extra = " GLM-OCR currently requires installing Transformers from GitHub."
         raise BackendUnavailableError(
-            f"Unable to load Transformers OCR model {model_name!r}: {exc}{extra}"
+            f"Unable to load Transformers OCR model {model_name!r}: {exc} "
+            "GLM-OCR currently requires installing Transformers from GitHub."
         ) from exc
     return model, processor

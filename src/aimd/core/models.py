@@ -46,6 +46,7 @@ class ProcessInput:
     cookies_from_browser: str | None = None
     temp_dir: Path | None = None
     raw_transcript: bool = False
+    precision: str | None = None
 
 
 @dataclass(slots=True)

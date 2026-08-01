@@ -681,3 +681,83 @@ def test_get_preferred_languages_prefers_original_for_orig_alias() -> None:
     preferred = get_preferred_languages("orig", ["zh-Hans", "en-orig", "en"])
 
     assert preferred[:3] == ["en-orig", "en", "zh-Hans"]
+
+
+@pytest.mark.asyncio
+async def test_get_text_from_url_forwards_precision_to_audio_fallback(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _mock_extract_video_info(
+        *,
+        url: str,
+        platform: str,
+        cookies_file: str | None,
+        cookies_from_browser: str | None,
+    ):
+        return {"title": "Example", "webpage_url": url}
+
+    async def _mock_extract_subtitles(info_dict, platform: str, language: str | None):
+        return None
+
+    async def _mock_extract_content_from_audio(**kwargs):
+        captured.update(kwargs)
+        return "audio transcript body"
+
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.extract_video_info",
+        _mock_extract_video_info,
+    )
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.extract_subtitles",
+        _mock_extract_subtitles,
+    )
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.extract_content_from_audio",
+        _mock_extract_content_from_audio,
+    )
+
+    result = await get_text_from_url(
+        "https://example.com/video",
+        model="qwen3-asr-1.7b",
+        precision="8bit",
+    )
+
+    assert "audio transcript body" in result.markdown
+    assert captured["model"] == "qwen3-asr-1.7b"
+    assert captured["precision"] == "8bit"
+
+
+@pytest.mark.asyncio
+async def test_extract_content_from_audio_forwards_precision_to_transcribe(
+    monkeypatch, tmp_path: Path
+) -> None:
+    audio_file = tmp_path / "audio_id1.m4a"
+    audio_file.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    async def _mock_download_audio(**kwargs):  # noqa: ARG001
+        return audio_file
+
+    async def _mock_transcribe_file(file_path, **kwargs):
+        captured["file_path"] = file_path
+        captured.update(kwargs)
+        return "transcribed audio text"
+
+    monkeypatch.setattr("aimd.plugins.url.audio.download_audio", _mock_download_audio)
+    monkeypatch.setattr("aimd.plugins.url.audio.transcribe_file", _mock_transcribe_file)
+
+    result = await extract_content_from_audio(
+        info_dict={"title": "Example", "id": "id1"},
+        url="https://www.youtube.com/watch?v=test",
+        language=None,
+        model="qwen3-asr-0.6b",
+        temp_dir=tmp_path,
+        precision="6bit",
+    )
+
+    assert result == "transcribed audio text"
+    assert captured["file_path"] == audio_file
+    assert captured["model"] == "qwen3-asr-0.6b"
+    assert captured["precision"] == "6bit"

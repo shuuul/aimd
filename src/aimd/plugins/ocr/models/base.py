@@ -4,7 +4,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from aimd.core.errors import BackendUnavailableError
+from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
+from aimd.core.precision import normalize_transformers_precision
 
 
 class TransformersOCRModel(Protocol):
@@ -34,23 +35,31 @@ class TransformersOCRModel(Protocol):
 _cached_model = None
 _cached_processor = None
 _cached_model_name: str | None = None
+_cached_precision: str | None = None
 
 
 def clear_model_cache() -> None:
     """Clear the in-process Transformers OCR model cache."""
-    global _cached_model, _cached_processor, _cached_model_name  # noqa: PLW0603
+    global _cached_model, _cached_processor, _cached_model_name, _cached_precision  # noqa: PLW0603
     _cached_model = None
     _cached_processor = None
     _cached_model_name = None
+    _cached_precision = None
 
 
 def get_cached_model_and_processor(
     model_name: str,
     loader: Callable[[str], tuple[object, object]],
+    *,
+    precision: str | None = None,
 ) -> tuple[object, object]:
     """Load or return a cached OCR-capable Transformers model and processor."""
-    global _cached_model, _cached_processor, _cached_model_name  # noqa: PLW0603
-    if _cached_model is not None and _cached_model_name == model_name:
+    global _cached_model, _cached_processor, _cached_model_name, _cached_precision  # noqa: PLW0603
+    if (
+        _cached_model is not None
+        and _cached_model_name == model_name
+        and _cached_precision == precision
+    ):
         return _cached_model, _cached_processor
 
     _ensure_cuda_runtime()
@@ -61,11 +70,17 @@ def get_cached_model_and_processor(
         raise
 
     _cached_model_name = model_name
+    _cached_precision = precision
     return _cached_model, _cached_processor
 
 
-def get_cuda_dtype():
-    """Return the preferred CUDA dtype for OCR inference."""
+def validate_transformers_precision(precision: str | None) -> str | None:
+    """Normalize an OCR Transformers precision, rejecting quantized values early."""
+    return normalize_transformers_precision(precision)
+
+
+def get_cuda_dtype(precision: str | None = None):
+    """Return the CUDA dtype for OCR inference, honoring an explicit precision."""
     try:
         import torch
     except ImportError as exc:
@@ -74,10 +89,19 @@ def get_cuda_dtype():
             "dependencies with `uv sync`, then retry."
         ) from exc
 
-    return (
-        torch.bfloat16
-        if getattr(torch.cuda, "is_bf16_supported", lambda: False)()
-        else torch.float16
+    bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+    if precision is None:
+        return torch.bfloat16 if bf16_supported else torch.float16
+    if precision == "bf16":
+        if not bf16_supported:
+            raise BackendUnavailableError(
+                "precision=bf16 requires a CUDA device with bf16 support. "
+                "Omit precision to use automatic dtype selection."
+            )
+        return torch.bfloat16
+    raise ProcessingFailedError(
+        f"Transformers OCR backend does not support precision {precision!r}. "
+        "Use bf16 or omit precision for automatic dtype selection."
     )
 
 

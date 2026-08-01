@@ -47,6 +47,7 @@ async def get_text_from_url(
     cookies_from_browser: str | None = None,
     temp_dir: Path | None = None,
     raw_transcript: bool = False,
+    precision: str | None = None,
 ) -> UrlTextResult:
     """Extract text content from transcript-capable URLs using yt-dlp."""
     if not url.startswith(("http://", "https://")):
@@ -85,6 +86,7 @@ async def get_text_from_url(
         cookies_file=cookies_file,
         cookies_from_browser=cookies_from_browser,
         temp_dir=temp_dir,
+        precision=precision,
     )
 
     if audio_content and audio_content.strip():
@@ -134,6 +136,7 @@ class AimdUrlTranscriptConverter(DocumentConverter):
                 cookies_from_browser=kwargs.get("cookies_from_browser"),
                 temp_dir=kwargs.get("temp_dir"),
                 raw_transcript=kwargs.get("raw_transcript", False),
+                precision=kwargs.get("precision"),
             )
         )
 

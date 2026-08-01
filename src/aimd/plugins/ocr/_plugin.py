@@ -50,6 +50,7 @@ async def _recognize_ocr_result(
     start: int | None = None,
     end: int | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> OCRResult:
     """Validate an OCR request and return the backend result."""
     path = Path(input_path)
@@ -75,6 +76,7 @@ async def _recognize_ocr_result(
         start=start,
         end=end,
         temp_dir=temp_dir,
+        precision=precision,
     )
     if not any(page.text.strip() for page in result.pages):
         raise ProcessingFailedError("OCR returned empty content")
@@ -88,6 +90,7 @@ def _recognize_ocr_sync(
     start: int | None = None,
     end: int | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> DocumentConverterResult:
     """Synchronous MarkItDown boundary: title + markdown only."""
     result = asyncio.run(
@@ -98,6 +101,7 @@ def _recognize_ocr_sync(
             start=start,
             end=end,
             temp_dir=temp_dir,
+            precision=precision,
         )
     )
     title, markdown = _ocr_result_to_markdown(result)
@@ -111,6 +115,7 @@ async def process_ocr(
     start: int | None = None,
     end: int | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> TextContext:
     """Compatibility API returning the original page-oriented TextContext."""
     result = await _recognize_ocr_result(
@@ -120,6 +125,7 @@ async def process_ocr(
         start=start,
         end=end,
         temp_dir=temp_dir,
+        precision=precision,
     )
     return TextContext(
         title=result.title,
@@ -135,6 +141,7 @@ def process_ocr_sync(
     start: int | None = None,
     end: int | None = None,
     temp_dir: Path | None = None,
+    precision: str | None = None,
 ) -> TextContext:
     """Synchronous compatibility wrapper around process_ocr."""
     return asyncio.run(
@@ -145,6 +152,7 @@ def process_ocr_sync(
             start=start,
             end=end,
             temp_dir=temp_dir,
+            precision=precision,
         )
     )
 
@@ -181,4 +189,5 @@ class AimdOCRConverter(DocumentConverter):
             start=kwargs.get("start"),
             end=kwargs.get("end"),
             temp_dir=kwargs.get("temp_dir"),
+            precision=kwargs.get("precision"),
         )

@@ -82,6 +82,7 @@ flowchart TD
 | Task | Location | Notes |
 |------|----------|-------|
 | Input routing | `src/aimd/core/process.py` | Maps source_kind + task_type into an `InputRoute`. |
+| Model precision | `src/aimd/core/precision.py` | Normalizes `4bit`, `6bit`, `8bit`, and `bf16`; rejects unsupported Transformers quantization. |
 | Core processing | `src/aimd/core/process.py` | Sends URL and local-file work through MarkItDown and wraps Markdown into `TextContext`. |
 | Local file conversion | `src/aimd/core/process.py` | Runs MarkItDown off-loop via `_run_markitdown`, normalizes aggregate failures, wraps Markdown into `TextContext`. |
 | URL conversion | `src/aimd/plugins/url/` | MarkItDown plugin for yt-dlp transcript URLs and opt-in readable HTML extraction. Logic lives directly under `src/aimd/plugins/url/` (flattened, no transcript/ subpackage). |
@@ -108,9 +109,47 @@ flowchart TD
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.
 - **Stable output contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
 - **URL cookie behavior**: keep automatic browser-cookie probing when no explicit cookie option is supplied; it is intentional user convenience for restricted media. Explicit cookie arguments should fail fast when invalid, and URL transcript/audio fallback failures should not be hidden behind metadata-only success results.
+- **Model naming**: use kebab-case user-facing aliases, including `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, `unlimited-ocr`, and `glm-ocr`. Legacy underscore aliases remain compatibility inputs but must not be the canonical names in new docs or help text.
+- **Precision separation**: expose model family/size through `model` and quantization/dtype through the separate `precision` option. Supported values are `4bit`, `6bit`, `8bit`, and `bf16`; dash/space/case variants may be normalized at the shared precision boundary.
+- **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI, HTTP API, MCP, core MarkItDown kwargs, URL audio fallback, local ASR, and OCR. Keep the new field optional and append it to public function signatures for compatibility.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
 - **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on CUDA-capable non-Darwin platforms.
 - **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.
+
+## MODEL AND PRECISION DESIGN
+
+The user-facing model selection contract separates model family/size from
+precision:
+
+```bash
+aimd audio.wav --model qwen3-asr-1.7b --precision 4bit
+aimd scan.pdf --model unlimited-ocr --precision 8bit
+aimd scan.pdf --model glm-ocr --precision bf16
+```
+
+Supported model families are intentionally narrow:
+
+- **MLX ASR**: `qwen3-asr-1.7b` and `qwen3-asr-0.6b`, each with
+  `4bit`, `6bit`, `8bit`, and `bf16`. Omitted precision defaults to `4bit`
+  and resolves to the matching `mlx-community/Qwen3-ASR-*` checkpoint.
+- **MLX OCR**: `unlimited-ocr` and `glm-ocr`, each with the same four
+  precisions. Omitted precision defaults to the 4-bit
+  `mlx-community/Unlimited-OCR-4bit` or `mlx-community/GLM-OCR-4bit`
+  checkpoint. Unlimited-OCR keeps its dedicated gundam-mode and repetition
+  guard; GLM-OCR uses the standard VLM generation path.
+- **Transformers ASR**: the two Qwen3-ASR `-hf` checkpoints. Omitted
+  precision keeps automatic dtype selection. Explicit `bf16` is allowed only
+  when CUDA is available and reports bf16 support; `4bit`, `6bit`, and `8bit`
+  are rejected because these model adapters do not implement quantized loading.
+- **Transformers OCR**: `baidu/Unlimited-OCR` and `zai-org/GLM-OCR`. The
+  same automatic dtype behavior applies when precision is omitted, and only
+  supported CUDA `bf16` is accepted explicitly.
+
+Full Hugging Face IDs and legacy aliases remain compatibility inputs, but new
+CLI/API/MCP documentation must use the kebab-case aliases and the separate
+`precision` field. A 4-bit Qwen3-ASR transcription that triggers the existing
+repetition-loop detector may retry the same segment with its corresponding
+8-bit MLX checkpoint; other precisions do not auto-switch.
 
 ## ANTI-PATTERNS
 
@@ -145,7 +184,7 @@ uv build
 aimd audio.mp3
 aimd "https://youtube.com/..."
 aimd document.epub
-aimd audio.mp3 --model mlx-community/parakeet-tdt-0.6b-v3
+aimd audio.mp3 --model qwen3-asr-1.7b --precision 4bit
 aimd "https://youtube.com/..." --cookies-from-browser chrome --raw-transcript
 aimd audio.mp3 --temp-dir ./tmp --log-level DEBUG
 
@@ -154,7 +193,7 @@ aimd-api
 curl http://127.0.0.1:8000/healthz
 curl -X POST http://127.0.0.1:8000/v1/process \
   -H 'content-type: application/json' \
-  -d '{"input_source":"audio.mp3"}'
+  -d '{"input_source":"audio.mp3","model":"qwen3-asr-1.7b","precision":"4bit"}'
 
 # MCP
 aimd-mcp

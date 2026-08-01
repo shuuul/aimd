@@ -66,17 +66,30 @@ def persist_result_output_if_requested(
 
 
 MODEL_HELP_TEXT = (
-    "Model for transcription, or OCR model. Default OCR on both "
-    "platforms is unlimited_ocr (baidu/Unlimited-OCR). "
-    "macOS OCR: unlimited_ocr (default, mlx-vlm>=0.6.4), glm_ocr, "
-    "or an mlx-vlm compatible Hugging Face model ID. "
-    "Linux/CUDA OCR: unlimited_ocr (default), got_ocr, glm_ocr, "
-    "or a Hugging Face model ID. "
-    "mlx defaults to mlx-community/Qwen3-ASR-1.7B-4bit "
-    "and also supports other documented mlx-audio STT model IDs. "
-    "CUDA Transformers ASR supports Qwen/Qwen3-ASR-1.7B-hf "
-    "(default) or Qwen/Qwen3-ASR-0.6B-hf "
-    "(legacy Qwen/Qwen3-ASR-* IDs still resolve to -hf)."
+    "Model for transcription or OCR. Default OCR is unlimited-ocr "
+    "(mlx-community/Unlimited-OCR-4bit on macOS, baidu/Unlimited-OCR on "
+    "Linux/CUDA). "
+    "macOS OCR: unlimited-ocr (default, mlx-vlm>=0.6.4) or glm-ocr, or explicit "
+    "mlx-community/Unlimited-OCR-{4bit,6bit,8bit,bf16} / "
+    "mlx-community/GLM-OCR-{4bit,6bit,8bit,bf16} model IDs. "
+    "Linux/CUDA OCR: unlimited-ocr (default) or glm-ocr "
+    "(baidu/Unlimited-OCR, zai-org/GLM-OCR). "
+    "mlx ASR: qwen3-asr-1.7b (default) or qwen3-asr-0.6b combined with "
+    "--precision, or explicit mlx-community/Qwen3-ASR-* model IDs. "
+    "CUDA Transformers ASR: qwen3-asr-1.7b (default) or qwen3-asr-0.6b, "
+    "resolving to Qwen/Qwen3-ASR-*-hf "
+    "(legacy underscore aliases and Qwen/Qwen3-ASR-* IDs still work)."
+)
+
+PRECISION_HELP_TEXT = (
+    "Model precision/quantization: 4bit, 6bit, 8bit, or bf16 "
+    "(dash variants like 4-bit are accepted). "
+    "macOS MLX backends select the matching mlx-community checkpoint "
+    "(default 4bit when omitted). "
+    "CUDA Transformers backends only accept bf16, and require CUDA bf16 "
+    "support; quantized values are rejected. When omitted, Transformers keeps "
+    "automatic dtype selection (bf16 on supported CUDA, fp16 on CUDA/MPS, "
+    "fp32 on CPU)."
 )
 
 
