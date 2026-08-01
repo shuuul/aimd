@@ -8,6 +8,9 @@ authors = [
 ]
 requires-python = ">=3.10, <3.13"
 dependencies = [
+    # addict/easydict/einops/matplotlib/torchvision are imported by
+    # baidu/Unlimited-OCR's trust_remote_code model code at runtime; they are
+    # not imported by aimd source directly. Do not remove them.
     "addict>=2.4.0",
     "easydict>=1.13",
     "einops>=0.8.2",
@@ -20,6 +23,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "pymupdf>=1.28.0",
     "python-dotenv>=1.2.2",
+    # secretstorage backs yt-dlp Chrome cookie decryption on Linux.
     "secretstorage>=3.5.0; sys_platform == 'linux'",
     "torch>=2.13.0",
     "torchvision>=0.28.0",
@@ -75,16 +79,6 @@ explicit = true
 
 [tool.uv.build-backend]
 module-name = "aimd"
-source-exclude = [
-    "/src/aimd/api",
-    "/src/aimd/book",
-    "/src/aimd/core/adapters",
-    "/src/aimd/core/application",
-    "/src/aimd/core/infrastructure",
-    "/src/aimd/mcp",
-    "/src/aimd/media",
-    "/src/aimd/ocr",
-]
 
 [tool.ruff]
 target-version = "py310"
