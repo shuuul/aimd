@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.17.0](https://github.com/shuuul/aimd/compare/v0.16.0...v0.17.0) (2026-08-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models:** Remove GOT-OCR, generic OCR model loading, and arbitrary unsupported model IDs.
+
+### Features
+
+* **models:** add precision-aware model selection ([5f26d17](https://github.com/shuuul/aimd/commit/5f26d179f8b5ffad36172c7871c541076f9603c2))
+
+
+### Bug Fixes
+
+* **ocr:** drop unnecessary trust_remote_code for GLM-OCR ([128e1c4](https://github.com/shuuul/aimd/commit/128e1c4ccf8b849bb5e61de7df6aeb641aef3b43))
+
 ## [0.16.0](https://github.com/shuuul/aimd/compare/v0.15.0...v0.16.0) (2026-07-31)
 
 
