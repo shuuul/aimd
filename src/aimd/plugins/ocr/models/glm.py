@@ -111,18 +111,14 @@ def _load_glm_ocr_model(
         ) from exc
 
     try:
-        processor = AutoProcessor.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-        )
+        processor = AutoProcessor.from_pretrained(model_name)
         model = AutoModelForImageTextToText.from_pretrained(
             model_name,
-            trust_remote_code=True,
             dtype=get_cuda_dtype(precision),
         ).to("cuda")
     except Exception as exc:  # noqa: BLE001 - upstream model errors vary widely
         raise BackendUnavailableError(
             f"Unable to load Transformers OCR model {model_name!r}: {exc} "
-            "GLM-OCR currently requires installing Transformers from GitHub."
+            "GLM-OCR requires transformers>=5.14.1 with native glm_ocr support."
         ) from exc
     return model, processor
