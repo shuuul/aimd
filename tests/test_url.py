@@ -21,7 +21,12 @@ from aimd.plugins.url.cookies import (
 )
 from aimd.plugins.url.metadata import extract_video_info
 from aimd.plugins.url._plugin import get_text_from_url
-from aimd.plugins.url.subtitles import extract_subtitles, get_preferred_languages
+from aimd.plugins.url.subtitles import (
+    detect_content_language,
+    extract_subtitles,
+    get_preferred_languages,
+    resolve_subtitle_language,
+)
 from aimd.plugins.url.ydl import create_info_ydl
 
 
@@ -681,6 +686,183 @@ def test_get_preferred_languages_prefers_original_for_orig_alias() -> None:
     preferred = get_preferred_languages("orig", ["zh-Hans", "en-orig", "en"])
 
     assert preferred[:3] == ["en-orig", "en", "zh-Hans"]
+
+
+@pytest.mark.parametrize(
+    ("texts", "expected"),
+    [
+        (("如何用 AIMD 把 YouTube 视频转成 Markdown",), "zh"),
+        (("How to convert YouTube videos to Markdown with AIMD",), "en"),
+        (
+            ("【深度访谈】OpenAI CEO 谈 AGI 的未来", "English transcript available"),
+            "zh",
+        ),
+        (("Deep Dive with OpenAI CEO on the Future of AGI",), "en"),
+        (("B站 UP主 推荐：Python 异步编程实战教程",), "zh"),
+        (("ChatGPT 使用指南：从入门到精通",), "zh"),
+        (("使用 ChatGPT 写代码",), "zh"),
+        (("WWDC 2024 Keynote Highlights",), "en"),
+        (("", None), None),
+        ((None, None), None),
+        (("!!",), None),
+    ],
+)
+def test_detect_content_language(
+    texts: tuple[str | None, ...], expected: str | None
+) -> None:
+    assert detect_content_language(*texts) == expected
+
+
+def test_resolve_subtitle_language_prefers_explicit_over_metadata() -> None:
+    assert (
+        resolve_subtitle_language(
+            "en",
+            title="中文标题带有足够汉字",
+            description="这是中文描述",
+        )
+        == "en"
+    )
+    assert (
+        resolve_subtitle_language(
+            None,
+            title="中文标题带有足够汉字",
+            description="English description only as filler text",
+        )
+        == "zh"
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_subtitles_prefers_chinese_when_title_is_chinese(
+    monkeypatch,
+) -> None:
+    class _FakeResponse:
+        def read(self):
+            return b"chinese subtitle"
+
+    class _FakeYDL:
+        def __init__(self, *, cookie_source):  # noqa: ANN001, ARG002
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ARG002
+            return False
+
+        def urlopen(self, url):  # noqa: ANN001
+            assert url == "https://example.com/zh"
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.subtitles.create_subtitle_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(cookie_source=cookie_source),  # noqa: ARG005
+    )
+
+    content = await extract_subtitles(
+        {
+            "title": "【深度访谈】OpenAI CEO 谈 AGI 的未来",
+            "description": "本期节目讨论人工智能。",
+            "subtitles": {
+                "en": [{"ext": "srt", "url": "https://example.com/en"}],
+                "zh-Hans": [{"ext": "srt", "url": "https://example.com/zh"}],
+            },
+        },
+        "youtube",
+        None,
+    )
+
+    assert content == "chinese subtitle"
+
+
+@pytest.mark.asyncio
+async def test_extract_subtitles_prefers_english_when_title_is_english(
+    monkeypatch,
+) -> None:
+    class _FakeResponse:
+        def read(self):
+            return b"english subtitle"
+
+    class _FakeYDL:
+        def __init__(self, *, cookie_source):  # noqa: ANN001, ARG002
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ARG002
+            return False
+
+        def urlopen(self, url):  # noqa: ANN001
+            assert url == "https://example.com/en"
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.subtitles.create_subtitle_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(cookie_source=cookie_source),  # noqa: ARG005
+    )
+
+    content = await extract_subtitles(
+        {
+            "title": "Deep Dive with OpenAI CEO on the Future of AGI",
+            "description": "A conversation about artificial intelligence.",
+            "subtitles": {
+                "zh-Hans": [{"ext": "srt", "url": "https://example.com/zh"}],
+                "en": [{"ext": "srt", "url": "https://example.com/en"}],
+            },
+        },
+        "youtube",
+        None,
+    )
+
+    assert content == "english subtitle"
+
+
+@pytest.mark.asyncio
+async def test_get_text_from_url_passes_inferred_language_to_audio(
+    monkeypatch,
+) -> None:
+    seen: dict[str, str | None] = {}
+
+    async def _mock_extract_video_info(
+        *,
+        url: str,
+        platform: str,
+        cookies_file: str | None,
+        cookies_from_browser: str | None,
+    ):
+        return {
+            "title": "中文播客：聊聊创业与产品",
+            "description": "今天和嘉宾讨论创业经验。",
+            "webpage_url": url,
+        }
+
+    async def _mock_extract_subtitles(info_dict, platform: str, language: str | None):
+        seen["subtitle_language"] = language
+        return None
+
+    async def _mock_extract_content_from_audio(**kwargs):  # noqa: ANN003
+        seen["audio_language"] = kwargs["language"]
+        return "transcribed chinese audio"
+
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.extract_video_info",
+        _mock_extract_video_info,
+    )
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.extract_subtitles",
+        _mock_extract_subtitles,
+    )
+    monkeypatch.setattr(
+        "aimd.plugins.url._plugin.extract_content_from_audio",
+        _mock_extract_content_from_audio,
+    )
+
+    result = await get_text_from_url("https://example.com/episode")
+
+    assert seen["subtitle_language"] == "zh"
+    assert seen["audio_language"] == "zh"
+    assert "transcribed chinese audio" in result.markdown
 
 
 @pytest.mark.asyncio

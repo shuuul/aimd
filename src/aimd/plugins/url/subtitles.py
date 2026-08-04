@@ -1,8 +1,9 @@
 """Subtitle extraction helpers."""
 
 import asyncio
+import re
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Literal
 
 from logly import logger
 
@@ -29,6 +30,12 @@ CHINESE_SUBTITLE_LANGUAGES = [
 
 FORBIDDEN_SUBTITLE_LANGUAGES = ["danmaku"]
 
+ContentLanguage = Literal["zh", "en"]
+
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+_CONTENT_LANGUAGE_SAMPLE_CHARS = 4000
+
 
 def _is_original_language(lang: str) -> bool:
     """Return True when a subtitle language code represents the original language."""
@@ -36,6 +43,56 @@ def _is_original_language(lang: str) -> bool:
     return (
         normalized == "orig" or normalized.endswith("-orig") or "original" in normalized
     )
+
+
+def detect_content_language(*texts: str | None) -> ContentLanguage | None:
+    """Infer zh/en from title/description via CJK vs Latin script signals.
+
+    Chinese titles often include Latin brand tokens, so any meaningful CJK
+    presence prefers Chinese. Returns None when the signal is inconclusive.
+
+    Args:
+        *texts: Metadata fragments such as title and description.
+
+    Returns:
+        ``"zh"``, ``"en"``, or None when language cannot be inferred.
+    """
+    combined = " ".join(text.strip() for text in texts if text and text.strip())
+    if not combined:
+        return None
+
+    sample = combined[:_CONTENT_LANGUAGE_SAMPLE_CHARS]
+    cjk_count = len(_CJK_RE.findall(sample))
+    latin_count = len(_LATIN_RE.findall(sample))
+
+    if cjk_count >= 2:
+        return "zh"
+    if cjk_count == 1 and latin_count < 20:
+        return "zh"
+    if latin_count >= 3:
+        return "en"
+    return None
+
+
+def resolve_subtitle_language(
+    language: str | None,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+) -> str | None:
+    """Resolve an explicit language preference or infer one from metadata.
+
+    Args:
+        language: Explicit user/API language preference, if any.
+        title: Video title used when language is unspecified.
+        description: Video description used when language is unspecified.
+
+    Returns:
+        Explicit language, inferred ``zh``/``en``, or None.
+    """
+    if language:
+        return language
+    return detect_content_language(title, description)
 
 
 def _dedupe_preserve_order(languages: Iterable[str]) -> list[str]:
@@ -150,8 +207,22 @@ async def extract_subtitles(
         logger.info("No subtitles available")
         return None
 
+    title = info_dict.get("title")
+    description = info_dict.get("description")
+    resolved_language = resolve_subtitle_language(
+        language,
+        title=title if isinstance(title, str) else None,
+        description=description if isinstance(description, str) else None,
+    )
+    if language is None and resolved_language is not None:
+        logger.info(
+            f"Inferred content language from title/description: {resolved_language}"
+        )
+
     available_languages = list(subtitles) + list(auto_subtitles)
-    preferred_languages = get_preferred_languages(language, available_languages)
+    preferred_languages = get_preferred_languages(
+        resolved_language, available_languages
+    )
     selected_lang = None
     selected_sub = None
     is_manual = False
