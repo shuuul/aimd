@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/shuuul/aimd/compare/v0.17.0...v0.18.0) (2026-08-04)
+
+
+### Features
+
+* **url:** infer subtitle language from title and description ([25e75f1](https://github.com/shuuul/aimd/commit/25e75f18d5a0c59783fc495bc480d4278f2f82a9))
+
 ## [0.17.0](https://github.com/shuuul/aimd/compare/v0.16.0...v0.17.0) (2026-08-01)
 
 
