@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/shuuul/aimd/compare/v0.18.0...v0.18.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **url:** prefer original subtitle tracks over translations ([4276c79](https://github.com/shuuul/aimd/commit/4276c79bd08e1dcf8d12f340414a95219120b3a7))
+
 ## [0.18.0](https://github.com/shuuul/aimd/compare/v0.17.0...v0.18.0) (2026-08-04)
 
 
