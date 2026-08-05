@@ -25,6 +25,7 @@ from aimd.plugins.url.subtitles import (
     detect_content_language,
     extract_subtitles,
     get_preferred_languages,
+    normalize_metadata_language,
     resolve_subtitle_language,
 )
 from aimd.plugins.url.ydl import create_info_ydl
@@ -688,6 +689,37 @@ def test_get_preferred_languages_prefers_original_for_orig_alias() -> None:
     assert preferred[:3] == ["en-orig", "en", "zh-Hans"]
 
 
+def test_get_preferred_languages_for_english_puts_en_orig_before_chinese() -> None:
+    """YouTube lists zh-Hans before en for English ASR videos such as fgzr3PhzIMk."""
+    available = [
+        "ab",
+        "zh-Hans",
+        "zh-Hant",
+        "en-orig",
+        "en",
+        "fr",
+    ]
+    preferred = get_preferred_languages("en", available)
+
+    assert preferred[:2] == ["en-orig", "en"]
+    assert preferred.index("en-orig") < preferred.index("zh-Hans")
+    assert preferred.index("en") < preferred.index("zh-Hans")
+
+
+def test_resolve_subtitle_language_prefers_metadata_language() -> None:
+    assert normalize_metadata_language("en-US") == "en"
+    assert normalize_metadata_language("zh-CN") == "zh"
+    assert (
+        resolve_subtitle_language(
+            None,
+            title="未使用的中文标题足够汉字",
+            description="未使用的中文描述足够汉字",
+            metadata_language="en",
+        )
+        == "en"
+    )
+
+
 @pytest.mark.parametrize(
     ("texts", "expected"),
     [
@@ -733,12 +765,15 @@ def test_resolve_subtitle_language_prefers_explicit_over_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_extract_subtitles_prefers_chinese_when_title_is_chinese(
+async def test_extract_subtitles_default_prefers_orig_over_inferred_chinese_title(
     monkeypatch,
 ) -> None:
+    """Default priority keeps *-orig even when title script looks Chinese."""
+    seen_urls: list[str] = []
+
     class _FakeResponse:
         def read(self):
-            return b"chinese subtitle"
+            return b"original english caption"
 
     class _FakeYDL:
         def __init__(self, *, cookie_source):  # noqa: ANN001, ARG002
@@ -751,7 +786,7 @@ async def test_extract_subtitles_prefers_chinese_when_title_is_chinese(
             return False
 
         def urlopen(self, url):  # noqa: ANN001
-            assert url == "https://example.com/zh"
+            seen_urls.append(url)
             return _FakeResponse()
 
     monkeypatch.setattr(
@@ -763,16 +798,96 @@ async def test_extract_subtitles_prefers_chinese_when_title_is_chinese(
         {
             "title": "【深度访谈】OpenAI CEO 谈 AGI 的未来",
             "description": "本期节目讨论人工智能。",
-            "subtitles": {
-                "en": [{"ext": "srt", "url": "https://example.com/en"}],
-                "zh-Hans": [{"ext": "srt", "url": "https://example.com/zh"}],
+            "language": "en",
+            "subtitles": {},
+            "automatic_captions": {
+                "zh-Hans": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=example"
+                            "&kind=asr&lang=en&tlang=zh-Hans&fmt=srt"
+                        ),
+                    }
+                ],
+                "en-orig": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=example"
+                            "&kind=asr&lang=en&fmt=srt"
+                        ),
+                    }
+                ],
             },
         },
         "youtube",
         None,
     )
 
-    assert content == "chinese subtitle"
+    assert content == "original english caption"
+    assert seen_urls == [
+        "https://www.youtube.com/api/timedtext?v=example&kind=asr&lang=en&fmt=srt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_extract_subtitles_explicit_zh_prefers_chinese_over_en_orig(
+    monkeypatch,
+) -> None:
+    class _FakeResponse:
+        def read(self):
+            return b"chinese translation"
+
+    class _FakeYDL:
+        def __init__(self, *, cookie_source):  # noqa: ANN001, ARG002
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ARG002
+            return False
+
+        def urlopen(self, url):  # noqa: ANN001
+            assert "tlang=zh-Hans" in url
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.subtitles.create_subtitle_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(cookie_source=cookie_source),  # noqa: ARG005
+    )
+
+    content = await extract_subtitles(
+        {
+            "title": "Why AI Moats Still Matter (And How They've Changed)",
+            "language": "en",
+            "automatic_captions": {
+                "zh-Hans": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&tlang=zh-Hans&fmt=srt"
+                        ),
+                    }
+                ],
+                "en-orig": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&fmt=srt"
+                        ),
+                    }
+                ],
+            },
+        },
+        "youtube",
+        "zh",
+    )
+
+    assert content == "chinese translation"
 
 
 @pytest.mark.asyncio
@@ -819,6 +934,181 @@ async def test_extract_subtitles_prefers_english_when_title_is_english(
 
 
 @pytest.mark.asyncio
+async def test_extract_subtitles_skips_chinese_translations_for_english_youtube_video(
+    monkeypatch,
+) -> None:
+    """Regression for https://www.youtube.com/watch?v=fgzr3PhzIMk.
+
+    YouTube exposes zh-Hans/zh-Hant auto translations before en-orig/en. AIMD must
+    still download English source captions for an English-language video.
+    """
+    seen_urls: list[str] = []
+
+    class _FakeResponse:
+        def read(self):
+            return b"english source caption"
+
+    class _FakeYDL:
+        def __init__(self, *, cookie_source):  # noqa: ANN001, ARG002
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ARG002
+            return False
+
+        def urlopen(self, url):  # noqa: ANN001
+            seen_urls.append(url)
+            assert "tlang=" not in url
+            assert "lang=en" in url
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.subtitles.create_subtitle_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(cookie_source=cookie_source),  # noqa: ARG005
+    )
+
+    content = await extract_subtitles(
+        {
+            "id": "fgzr3PhzIMk",
+            "title": "Why AI Moats Still Matter (And How They've Changed)",
+            "description": (
+                "a16z General Partners David Haber, Alex Rampell, and Erik "
+                "Torenberg discuss why 19 out of 20 AI startups building the "
+                "same thing will die."
+            ),
+            "language": "en",
+            "subtitles": {},
+            "automatic_captions": {
+                "zh-Hans": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&tlang=zh-Hans&fmt=srt"
+                        ),
+                    }
+                ],
+                "zh-Hant": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&tlang=zh-Hant&fmt=srt"
+                        ),
+                    }
+                ],
+                "en-orig": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&fmt=srt"
+                        ),
+                    }
+                ],
+                "en": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&fmt=srt&src=en"
+                        ),
+                    }
+                ],
+            },
+        },
+        "youtube",
+        None,
+    )
+
+    assert content == "english source caption"
+    assert seen_urls == [
+        "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk&kind=asr&lang=en&fmt=srt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_extract_subtitles_retries_next_language_when_download_fails(
+    monkeypatch,
+) -> None:
+    attempts: list[str] = []
+
+    class _FakeResponse:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+    class _FakeYDL:
+        def __init__(self, *, cookie_source):  # noqa: ANN001, ARG002
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ARG002
+            return False
+
+        def urlopen(self, url):  # noqa: ANN001
+            attempts.append(url)
+            if "lang=en&fmt=srt" in url and "tlang=" not in url and "src=en" not in url:
+                raise TimeoutError("simulated en-orig timeout")
+            return _FakeResponse(b"english fallback caption")
+
+    monkeypatch.setattr(
+        "aimd.plugins.url.subtitles.create_subtitle_ydl",
+        lambda *, platform, cookie_source: _FakeYDL(cookie_source=cookie_source),  # noqa: ARG005
+    )
+
+    content = await extract_subtitles(
+        {
+            "title": "Why AI Moats Still Matter (And How They've Changed)",
+            "language": "en",
+            "automatic_captions": {
+                "zh-Hans": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&tlang=zh-Hans&fmt=srt"
+                        ),
+                    }
+                ],
+                "en-orig": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&fmt=srt"
+                        ),
+                    }
+                ],
+                "en": [
+                    {
+                        "ext": "srt",
+                        "url": (
+                            "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk"
+                            "&kind=asr&lang=en&fmt=srt&src=en"
+                        ),
+                    }
+                ],
+            },
+        },
+        "youtube",
+        None,
+    )
+
+    assert content == "english fallback caption"
+    assert attempts == [
+        "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk&kind=asr&lang=en&fmt=srt",
+        "https://www.youtube.com/api/timedtext?v=fgzr3PhzIMk&kind=asr&lang=en&fmt=srt&src=en",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_text_from_url_passes_inferred_language_to_audio(
     monkeypatch,
 ) -> None:
@@ -860,9 +1150,20 @@ async def test_get_text_from_url_passes_inferred_language_to_audio(
 
     result = await get_text_from_url("https://example.com/episode")
 
-    assert seen["subtitle_language"] == "zh"
+    assert seen["subtitle_language"] is None
     assert seen["audio_language"] == "zh"
     assert "transcribed chinese audio" in result.markdown
+
+
+def test_get_preferred_languages_default_prioritizes_orig_tracks() -> None:
+    preferred = get_preferred_languages(
+        None, ["zh-Hans", "zh-Hant", "en-orig", "en", "fr-orig"]
+    )
+
+    assert preferred[0] == "en-orig"
+    assert preferred[1] == "fr-orig"
+    assert preferred.index("en-orig") < preferred.index("zh-Hans")
+    assert preferred.index("en") < preferred.index("zh-Hans")
 
 
 @pytest.mark.asyncio

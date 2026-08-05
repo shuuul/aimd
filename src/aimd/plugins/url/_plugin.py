@@ -22,7 +22,7 @@ from .audio import detect_platform, extract_content_from_audio
 from .markdown import format_content, strip_subtitle_formatting
 from .metadata import extract_video_info
 from .defuddle import extract_html_with_defuddle
-from .subtitles import detect_content_language, extract_subtitles
+from .subtitles import extract_subtitles, resolve_subtitle_language
 
 HTML_EXTENSIONS = {".html", ".htm"}
 
@@ -68,19 +68,24 @@ async def get_text_from_url(
     )
     title = str(info_dict.get("title", "Unknown Title"))
     description = info_dict.get("description")
+    metadata_language = info_dict.get("language")
     effective_language = language
     if effective_language is None:
-        effective_language = detect_content_language(
-            title,
-            description if isinstance(description, str) else None,
+        effective_language = resolve_subtitle_language(
+            None,
+            title=title,
+            description=description if isinstance(description, str) else None,
+            metadata_language=(
+                metadata_language if isinstance(metadata_language, str) else None
+            ),
         )
         if effective_language is not None:
             logger.info(
-                "Inferred content language from title/description: "
+                "Inferred content language from metadata/title/description: "
                 f"{effective_language}"
             )
 
-    subtitle_content = await extract_subtitles(info_dict, platform, effective_language)
+    subtitle_content = await extract_subtitles(info_dict, platform, language)
     if subtitle_content and subtitle_content.strip():
         logger.info("Successfully extracted subtitles")
         if not raw_transcript:
