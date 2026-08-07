@@ -28,7 +28,7 @@ from aimd.plugins.url.subtitles import (
     normalize_metadata_language,
     resolve_subtitle_language,
 )
-from aimd.plugins.url.ydl import create_info_ydl
+from aimd.plugins.url.ydl import _base_ydl_opts, create_info_ydl
 
 
 @pytest.mark.asyncio
@@ -209,8 +209,19 @@ def test_create_info_ydl_does_not_print_subtitle_listing(monkeypatch) -> None:
     assert seen_opts[-1]["writesubtitles"] is True
     assert seen_opts[-1]["skip_download"] is True
     assert seen_opts[-1]["ignoreconfig"] is True
+    assert seen_opts[-1]["js_runtimes"] == {"deno": {}, "node": {}}
     assert "logger" in seen_opts[-1]
     assert "listsubtitles" not in seen_opts[-1]
+
+
+def test_base_ydl_opts_enables_youtube_js_runtimes(monkeypatch) -> None:
+    monkeypatch.setattr("aimd.plugins.url.ydl.impersonation_available", lambda: False)
+
+    youtube_opts = _base_ydl_opts("youtube")
+    bilibili_opts = _base_ydl_opts("bilibili")
+
+    assert youtube_opts["js_runtimes"] == {"deno": {}, "node": {}}
+    assert "js_runtimes" not in bilibili_opts
 
 
 @pytest.mark.asyncio

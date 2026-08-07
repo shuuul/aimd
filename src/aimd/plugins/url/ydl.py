@@ -5,6 +5,13 @@ from typing import Any
 
 import yt_dlp
 
+# YouTube n-challenge solving needs an external JS runtime. yt-dlp defaults to
+# deno only; enable node as well so macOS/Homebrew Node setups work without Deno.
+_YOUTUBE_JS_RUNTIMES: dict[str, dict[str, str]] = {
+    "deno": {},
+    "node": {},
+}
+
 
 class _QuietYtDlpLogger:
     """Suppress yt-dlp's direct stderr logging; AIMD maps and logs errors itself."""
@@ -52,7 +59,14 @@ def apply_cookie_source(
 
 
 def _base_ydl_opts(platform: str) -> dict[str, Any]:
-    """Return common yt-dlp options for URL operations."""
+    """Return common yt-dlp options for URL operations.
+
+    Args:
+        platform: Detected URL platform name (for example ``youtube``).
+
+    Returns:
+        yt-dlp option dict shared by metadata, subtitle, and audio clients.
+    """
     ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
@@ -60,8 +74,10 @@ def _base_ydl_opts(platform: str) -> dict[str, Any]:
         "logger": _QuietYtDlpLogger(),
     }
 
-    if platform == "youtube" and impersonation_available():
-        ydl_opts["impersonate"] = "chrome"
+    if platform == "youtube":
+        ydl_opts["js_runtimes"] = dict(_YOUTUBE_JS_RUNTIMES)
+        if impersonation_available():
+            ydl_opts["impersonate"] = "chrome"
 
     return ydl_opts
 
