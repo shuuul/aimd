@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/shuuul/aimd/compare/v0.18.1...v0.18.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **url:** enable node JS runtime for YouTube challenges ([e1f4d80](https://github.com/shuuul/aimd/commit/e1f4d80282be372c49b503ebfb0d0cf562aafe69))
+
 ## [0.18.1](https://github.com/shuuul/aimd/compare/v0.18.0...v0.18.1) (2026-08-05)
 
 
