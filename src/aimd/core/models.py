@@ -55,5 +55,7 @@ class ProcessResult:
 
     task_type: TaskType
     text_context: TextContext
+    markdown: str = ""
+    asset_base_uri: str | None = None
     output_dir: Path | None = None
     platform: str | None = None

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 from markitdown import FileConversionException
@@ -119,7 +120,7 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
         assert start is None
         assert end is None
         assert precision is None
-        return TextContext(title="doc", chunk_list=["c"]), output_dir
+        return TextContext(title="doc", chunk_list=["c"]), "raw doc", output_dir
 
     result = await process_input(
         ProcessInput(input_source=epub.as_posix(), temp_dir=temp_dir),
@@ -129,6 +130,8 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
     )
 
     assert result.task_type == "convert"
+    assert result.markdown == "raw doc"
+    assert result.asset_base_uri == f"{output_dir.resolve().as_uri()}/"
     assert result.output_dir == output_dir
 
 
@@ -156,7 +159,7 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
         assert start == 0
         assert end == 1
         assert precision == "bf16"
-        return TextContext(title="page", chunk_list=["text"]), None
+        return TextContext(title="page", chunk_list=["text"]), "raw ocr", None
 
     result = await process_input(
         ProcessInput(
@@ -175,13 +178,15 @@ async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None
     )
 
     assert result.task_type == "ocr"
+    assert result.markdown == "raw ocr"
+    assert result.asset_base_uri == f"{tmp_path.resolve().as_uri()}/"
     assert result.text_context.chunk_list == ["text"]
 
 
 @pytest.mark.asyncio
 async def test_use_case_transcript_flow() -> None:
     async def _process_url(*args):  # noqa: ANN002
-        return TextContext(title="a", chunk_list=["t"]), "youtube"
+        return TextContext(title="a", chunk_list=["t"]), "raw transcript", "youtube"
 
     result = await process_input(
         ProcessInput(input_source="https://example.com/video"),
@@ -190,6 +195,8 @@ async def test_use_case_transcript_flow() -> None:
         is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "transcript"
+    assert result.markdown == "raw transcript"
+    assert result.asset_base_uri == "https://example.com/video"
     assert result.text_context.chunk_list == ["t"]
     assert result.platform == "youtube"
 
@@ -200,7 +207,7 @@ async def test_use_case_url_passes_precision_to_url_processor() -> None:
 
     async def _process_url(*args):  # noqa: ANN002
         seen["precision"] = args[8]
-        return TextContext(title="a", chunk_list=["t"]), "youtube"
+        return TextContext(title="a", chunk_list=["t"]), "raw", "youtube"
 
     result = await process_input(
         ProcessInput(
@@ -222,7 +229,7 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
     audio.write_text("x", encoding="utf-8")
 
     async def _process_file(*args):  # noqa: ANN002
-        return TextContext(title="a", chunk_list=["t"]), None
+        return TextContext(title="a", chunk_list=["t"]), "raw audio", None
 
     result = await process_input(
         ProcessInput(input_source=str(audio)),
@@ -231,6 +238,8 @@ async def test_use_case_local_audio_flow(tmp_path: Path) -> None:
         is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "transcript"
+    assert result.markdown == "raw audio"
+    assert result.asset_base_uri is None
     assert result.platform is None
 
 
@@ -240,7 +249,7 @@ async def test_use_case_file_convert_flow(tmp_path: Path) -> None:
     doc.write_text("x", encoding="utf-8")
 
     async def _process_file(*args):  # noqa: ANN002
-        return TextContext(title="d", chunk_list=["c"]), None
+        return TextContext(title="d", chunk_list=["c"]), "raw document", None
 
     result = await process_input(
         ProcessInput(input_source=str(doc)),
@@ -249,7 +258,36 @@ async def test_use_case_file_convert_flow(tmp_path: Path) -> None:
         is_supported_file_fn=lambda _: True,
     )
     assert result.task_type == "convert"
+    assert result.markdown == "raw document"
+    assert result.asset_base_uri == f"{tmp_path.resolve().as_uri()}/"
     assert result.output_dir is None
+
+
+@pytest.mark.asyncio
+async def test_file_converter_preserves_markitdown_markdown_exactly(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("source", encoding="utf-8")
+    raw_markdown = "\n# Title\n\n" + ("long paragraph " * 4000) + "\n"
+
+    class _FakeMarkItDown:
+        def __init__(self, **kwargs):  # noqa: ANN003, ARG002
+            pass
+
+        def convert(self, *args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            return SimpleNamespace(markdown=raw_markdown, title="Title")
+
+    monkeypatch.setattr(process_mod, "MarkItDown", _FakeMarkItDown)
+
+    text_context, markdown, output_dir = await convert_file_with_markitdown(
+        source,
+        task_type="convert",
+    )
+
+    assert markdown == raw_markdown
+    assert text_context.chunk_list != [raw_markdown]
+    assert output_dir is None
 
 
 @pytest.mark.asyncio

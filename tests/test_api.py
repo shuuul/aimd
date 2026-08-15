@@ -51,6 +51,8 @@ def test_process_transcript_success_with_output_file(
             chunk_list=["hello transcript"],
             split_header_level=None,
         ),
+        markdown="# Raw title\n\nhello transcript",
+        asset_base_uri="https://example.com/watch",
     )
     client = _make_client(monkeypatch, process_result=result)
 
@@ -67,6 +69,8 @@ def test_process_transcript_success_with_output_file(
     body = response.json()
     assert body["task_type"] == "transcript"
     assert body["title"] == "mock-title"
+    assert body["markdown"] == "# Raw title\n\nhello transcript"
+    assert body["asset_base_uri"] == "https://example.com/watch"
     assert body["chunk_list"] == ["hello transcript"]
     assert Path(body["output_file"]).exists()
     assert output_file.read_text(encoding="utf-8") == "hello transcript"

@@ -28,6 +28,8 @@ def _process_result_payload(
     return {
         "task_type": result.task_type,
         "title": result.text_context.title,
+        "markdown": result.markdown,
+        "asset_base_uri": result.asset_base_uri,
         "chunk_list": result.text_context.chunk_list,
         "split_header_level": result.text_context.split_header_level,
         "platform": result.platform,
