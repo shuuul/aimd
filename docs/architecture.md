@@ -34,7 +34,8 @@ Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url
 2. The interface builds `ProcessInput` with shared mapping helpers and calls `aimd.core.process.process_input()`.
 3. Core routes request by `InputRoute(source_kind, task_type)`.
 4. URL and local-file tasks go through MarkItDown plus bundled plugins (`aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, `aimd.plugins.ocr`).
-5. The interface maps `ProcessResult` to interface-specific response/output and persists `output_file` if requested.
+5. Core returns lossless Markdown and its asset base alongside the shaped `TextContext`.
+6. The interface maps `ProcessResult` to interface-specific response/output and persists `output_file` if requested.
 
 ```diagram
 ╭──────────────╮     ╭──────────────────────╮     ╭──────────────────────╮
@@ -50,9 +51,18 @@ Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url
        ▼                                                     ▼
 ╭────────────────────╮                           ╭──────────────────────╮
 │ aimd.interfaces.output +      │◀──────────────────────────│ ProcessResult        │
-│ interface mapping  │                           │ TextContext shape    │
+│ interface mapping  │                           │ Markdown + asset base│
+│                    │                           │ + TextContext shape  │
 ╰────────────────────╯                           ╰──────────────────────╯
 ```
+
+`ProcessResult.markdown` is the exact MarkItDown output before context splitting.
+`TextContext.chunk_list` remains the context-window representation and is not a lossless
+viewer artifact. `asset_base_uri` is the original URL for URL processing, the generated
+asset directory for document conversions that emit one, the input parent directory for
+other local convert/OCR work, and `None` for local transcriptions without related assets.
+Local directory URIs always end in `/` so standards-based URL joining preserves directory
+semantics.
 
 ## Backend And Model Boundaries
 

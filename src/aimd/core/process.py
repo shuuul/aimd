@@ -150,7 +150,7 @@ UrlProcessor = Callable[
         bool,
         str | None,
     ],
-    Awaitable[tuple[TextContext, str]],
+    Awaitable[tuple[TextContext, str, str]],
 ]
 
 LocalFileProcessor = Callable[
@@ -164,8 +164,14 @@ LocalFileProcessor = Callable[
         int | None,
         str | None,
     ],
-    Awaitable[tuple[TextContext, Path | None]],
+    Awaitable[tuple[TextContext, str, Path | None]],
 ]
+
+
+def _directory_uri(directory: Path) -> str:
+    """Return an absolute file URI whose trailing slash preserves directory semantics."""
+    uri = directory.resolve().as_uri()
+    return uri if uri.endswith("/") else f"{uri}/"
 
 
 def is_supported_file(file_path: str | Path) -> bool:
@@ -445,7 +451,7 @@ async def convert_url_with_markitdown(
     temp_dir: Path | None = None,
     raw_transcript: bool = False,
     precision: str | None = None,
-) -> tuple[TextContext, str]:
+) -> tuple[TextContext, str, str]:
     """Convert a URL through MarkItDown and AIMD's bundled URL plugin."""
     md = MarkItDown(enable_builtins=False, enable_plugins=True)
     result = await _run_markitdown(
@@ -470,6 +476,7 @@ async def convert_url_with_markitdown(
             title=result.title,
             max_chunk_size=40000,
         ),
+        result.markdown,
         detect_platform(url),
     )
 
@@ -485,7 +492,7 @@ async def convert_file_with_markitdown(
     precision: str | None = None,
     *,
     max_chunk_size: int = 40000,
-) -> tuple[TextContext, Path | None]:
+) -> tuple[TextContext, str, Path | None]:
     """Convert a local file through MarkItDown and installed aimd plugins."""
     input_path = Path(file_path)
     if not input_path.exists():
@@ -524,6 +531,7 @@ async def convert_file_with_markitdown(
             title=result.title,
             max_chunk_size=max_chunk_size,
         ),
+        markdown,
         output_dir,
     )
 
@@ -558,7 +566,7 @@ async def _process_url(
     request: ProcessInput,
     process_url: UrlProcessor,
 ) -> ProcessResult:
-    text_context, platform = await process_url(
+    text_context, markdown, platform = await process_url(
         request.input_source,
         request.language,
         request.model,
@@ -572,6 +580,8 @@ async def _process_url(
     return ProcessResult(
         task_type="transcript",
         text_context=text_context,
+        markdown=markdown,
+        asset_base_uri=request.input_source,
         platform=platform,
     )
 
@@ -583,7 +593,7 @@ async def _process_local_file(
 ) -> ProcessResult:
     input_path = Path(request.input_source)
 
-    text_context, output_dir = await process_file(
+    text_context, markdown, output_dir = await process_file(
         input_path.as_posix(),
         request.language,
         request.model,
@@ -593,8 +603,13 @@ async def _process_local_file(
         request.end,
         request.precision,
     )
+    asset_base_uri = None
+    if task_type != "transcript":
+        asset_base_uri = _directory_uri(output_dir or input_path.parent)
     return ProcessResult(
         task_type=task_type,
         text_context=text_context,
+        markdown=markdown,
+        asset_base_uri=asset_base_uri,
         output_dir=output_dir,
     )

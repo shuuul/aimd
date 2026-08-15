@@ -22,6 +22,8 @@ async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None
                 chunk_list=["hello"],
                 split_header_level=None,
             ),
+            markdown="# Raw\n\nhello",
+            asset_base_uri="https://example.com/watch",
         )
 
     monkeypatch.setattr(
@@ -31,6 +33,8 @@ async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None
     output_file = tmp_path / "out.md"
     result = await mcp_app.process_input("input.mp3", output_file=str(output_file))
     assert result["task_type"] == "transcript"
+    assert result["markdown"] == "# Raw\n\nhello"
+    assert result["asset_base_uri"] == "https://example.com/watch"
     assert result["output_file"] is not None
     assert output_file.read_text(encoding="utf-8") == "hello"
 

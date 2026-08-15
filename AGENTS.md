@@ -107,7 +107,9 @@ flowchart TD
 - **Output ownership**: `output_file` belongs to CLI/API/MCP interfaces, not `ProcessInput` or `ProcessResult`; use `aimd.interfaces.output` for shared persistence.
 - **Fail-fast preflight**: validate platform-selected backends and requested models before expensive work.
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.
-- **Stable output contract**: processing returns `TextContext(title, chunk_list, split_header_level)`.
+- **Stable output contract**: `ProcessResult` preserves lossless `markdown` and an optional
+  `asset_base_uri` alongside `TextContext(title, chunk_list, split_header_level)`.
+  Viewers consume `markdown`; context-window consumers continue to use `chunk_list`.
 - **URL cookie behavior**: keep automatic browser-cookie probing when no explicit cookie option is supplied; it is intentional user convenience for restricted media. Explicit cookie arguments should fail fast when invalid, and URL transcript/audio fallback failures should not be hidden behind metadata-only success results.
 - **Model naming**: use kebab-case user-facing aliases, including `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, `unlimited-ocr`, and `glm-ocr`. Legacy underscore aliases remain compatibility inputs but must not be the canonical names in new docs or help text.
 - **Precision separation**: expose model family/size through `model` and quantization/dtype through the separate `precision` option. Supported values are `4bit`, `6bit`, `8bit`, and `bf16`; dash/space/case variants may be normalized at the shared precision boundary.

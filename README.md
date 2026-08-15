@@ -247,6 +247,11 @@ curl -X POST http://127.0.0.1:8000/v1/process \
   }'
 ```
 
+The process response includes both lossless `markdown` for display/persistence and
+`chunk_list` for context-window consumers. `asset_base_uri` is the URL or local `file:`
+directory (with a trailing slash) against which relative Markdown resources resolve; it
+is `null` for local transcriptions without associated resources.
+
 OpenAPI docs are available at `/docs` and `/redoc`.
 
 ## MCP server
@@ -315,10 +320,12 @@ The package uses MarkItDown as the URL/local-file conversion contract and keeps 
 - Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
 - Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 - `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. It intentionally keeps automatic browser-cookie probing for convenience, while explicit cookie arguments and transcript/audio fallback failures should surface clear errors. `aimd.plugins.asr` owns transcription backend selection, model validation, and the local audio/video MarkItDown plugin.
-- `aimd.core.process` wraps MarkItDown markdown results into `TextContext` chunks.
+- `aimd.core.process` preserves each lossless MarkItDown result on `ProcessResult` and
+  separately shapes it into `TextContext` chunks.
 - CLI/API/MCP modules translate interface requests into core processing. Output file persistence is interface-owned and shared through `aimd.interfaces.output`; it is not part of `ProcessInput`.
 
-All processing returns a shared `TextContext` shape: title, chunks, and split metadata.
+All processing returns a shared `ProcessResult`: lossless Markdown and its optional asset
+base URI alongside `TextContext` title, chunks, and split metadata.
 
 ## License
 
