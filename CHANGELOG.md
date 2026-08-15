@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/shuuul/aimd/compare/v0.18.2...v0.18.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **api:** expose lossless markdown artifacts ([e85fe05](https://github.com/shuuul/aimd/commit/e85fe05a4f7955a25da0a7a675ffe230b87aac39))
+
 ## [0.18.2](https://github.com/shuuul/aimd/compare/v0.18.1...v0.18.2) (2026-08-07)
 
 
