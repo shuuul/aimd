@@ -32,20 +32,25 @@ FileSupportChecker = Callable[[str | Path], bool]
 _VALID_TASK_TYPES: set[TaskType] = {"transcript", "convert", "ocr"}
 
 
-def _pdf_has_extractable_text(file_path: Path) -> bool:
-    """Best-effort check for text-layer PDFs before falling back to OCR."""
+def _pdf_requires_ocr(file_path: Path) -> bool:
+    """Best-effort pdf-inspector probe: route unscannable PDFs to OCR.
+
+    PDFs with no extractable text (scanned/image-based) or with broken font
+    encodings (`has_encoding_issues`, where pdf-inspector cannot decode the
+    text layer) are routed to OCR. Probe failures keep the convert route so
+    the MarkItDown plugin boundary can surface a domain error.
+    """
     try:
-        import pymupdf
+        import pdf_inspector
     except ImportError:
-        return True
+        return False
     try:
-        with pymupdf.open(file_path) as document:
-            for page in document:
-                if page.get_text("text").strip():
-                    return True
+        result = pdf_inspector.process_pdf(str(file_path))
     except Exception:
+        return False
+    if result.has_encoding_issues:
         return True
-    return False
+    return not (result.markdown or "").strip()
 
 
 def get_input_route(
@@ -71,9 +76,7 @@ def get_input_route(
                 return InputRoute(source_kind="unknown", task_type=None)
             if suffix in IMAGE_FILE_EXTENSIONS:
                 return InputRoute(source_kind="image_file", task_type="ocr")
-            if suffix in OCR_DOCUMENT_EXTENSIONS and not _pdf_has_extractable_text(
-                file_path
-            ):
+            if suffix in OCR_DOCUMENT_EXTENSIONS and _pdf_requires_ocr(file_path):
                 return InputRoute(source_kind="document_file", task_type="ocr")
             if suffix in AUDIO_FILE_EXTENSIONS:
                 if requested_task_type and requested_task_type != "transcript":

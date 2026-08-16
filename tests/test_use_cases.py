@@ -64,7 +64,7 @@ def test_input_route_classifies_images_and_explicit_pdf_ocr(
     pdf = tmp_path / "scan.pdf"
     image.write_text("x", encoding="utf-8")
     pdf.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(process_mod, "_pdf_has_extractable_text", lambda _: True)
+    monkeypatch.setattr(process_mod, "_pdf_requires_ocr", lambda _: False)
 
     image_route = get_input_route(image.as_posix(), is_supported_file=lambda _: False)
     pdf_convert_route = get_input_route(
@@ -85,7 +85,7 @@ def test_input_route_classifies_images_and_explicit_pdf_ocr(
 def test_input_route_classifies_scanned_pdf_as_ocr(monkeypatch, tmp_path: Path) -> None:
     pdf = tmp_path / "scan.pdf"
     pdf.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(process_mod, "_pdf_has_extractable_text", lambda _: False)
+    monkeypatch.setattr(process_mod, "_pdf_requires_ocr", lambda _: True)
 
     route = get_input_route(pdf.as_posix(), is_supported_file=lambda _: True)
 
@@ -524,3 +524,55 @@ async def test_run_markitdown_wraps_plain_unknown_exception() -> None:
         await process_mod._run_markitdown(_convert)
 
     assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+class _FakePdfProbeResult:
+    def __init__(self, markdown: str | None, has_encoding_issues: bool = False) -> None:
+        self.markdown = markdown
+        self.has_encoding_issues = has_encoding_issues
+
+
+def test_pdf_probe_keeps_clean_text_layer_on_convert(
+    monkeypatch, tmp_path: Path
+) -> None:
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(
+        "pdf_inspector.process_pdf",
+        lambda path: _FakePdfProbeResult("# Title\n\nBody"),
+    )
+
+    assert process_mod._pdf_requires_ocr(pdf) is False
+
+
+def test_pdf_probe_routes_encoding_issues_to_ocr(monkeypatch, tmp_path: Path) -> None:
+    pdf = tmp_path / "broken-encoding.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(
+        "pdf_inspector.process_pdf",
+        lambda path: _FakePdfProbeResult("", has_encoding_issues=True),
+    )
+
+    assert process_mod._pdf_requires_ocr(pdf) is True
+
+
+def test_pdf_probe_routes_empty_extraction_to_ocr(monkeypatch, tmp_path: Path) -> None:
+    pdf = tmp_path / "scanned.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(
+        "pdf_inspector.process_pdf", lambda path: _FakePdfProbeResult(None)
+    )
+
+    assert process_mod._pdf_requires_ocr(pdf) is True
+
+
+def test_pdf_probe_failure_keeps_convert_route(monkeypatch, tmp_path: Path) -> None:
+    pdf = tmp_path / "corrupt.pdf"
+    pdf.write_bytes(b"junk")
+
+    def _raise(path):  # noqa: ANN001, ANN202
+        raise ValueError("boom")
+
+    monkeypatch.setattr("pdf_inspector.process_pdf", _raise)
+
+    assert process_mod._pdf_requires_ocr(pdf) is False

@@ -188,20 +188,20 @@ document_name/
 └── images/
 ```
 
-The EPUB pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup. Other Pandoc-supported formats are converted by Pandoc directly. Pandoc does not support MOBI/AZW3 as input formats, so AIMD no longer advertises them as supported document inputs.
+The EPUB pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup. Other Pandoc-supported formats are converted by Pandoc directly. Text-layer PDFs are converted locally by [pdf-inspector](https://github.com/firecrawl/pdf-inspector) through the same document plugin, producing structured Markdown (headings, lists, tables) without OCR. Pandoc does not support MOBI/AZW3 as input formats, so AIMD no longer advertises them as supported document inputs.
 
 ### OCR for scanned PDFs and images
 
 ```bash
 aimd page.png
-aimd scan.pdf                                  # OCR if no extractable PDF text is found
+aimd scan.pdf                                  # OCR if no extractable PDF text or broken font encoding is found
 aimd scan.pdf --task ocr                       # Force OCR; default model is unlimited_ocr
 aimd scan.pdf --model unlimited_ocr_bf16       # macOS MLX full-precision Unlimited-OCR
 aimd scan.pdf --model glm_ocr                  # GLM-OCR on macOS or Linux/CUDA
 aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDFs with an extractable text layer route to normal document conversion; scanned PDFs route to OCR when the local PDF text-layer check is available. Linux/CUDA defaults to `baidu/Unlimited-OCR` through the Transformers backend. macOS uses `mlx-vlm>=0.6.4` and defaults to `mlx-community/Unlimited-OCR-4bit`; `unlimited_ocr_4bit`, `unlimited_ocr_6bit`, `unlimited_ocr_8bit`, and `unlimited_ocr_bf16` select the other MLX checkpoints. Unlimited-OCR uses single-image gundam mode (`cropping=True`, `image_size=640`, prompt `document parsing.`), Baidu's sliding-window no-repeat n-gram guard (`ngram_size=35`, `window=128`), and `max_tokens=8192`. GLM-OCR is available through the four `mlx-community/GLM-OCR-*` MLX checkpoints on macOS and `zai-org/GLM-OCR` on Linux/CUDA. Long PDFs are OCR'd page-by-page so page boundaries stay reliable. Unsupported model IDs are rejected.
+OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDF routing is probed with pdf-inspector: PDFs with a clean extractable text layer route to normal document conversion, while scanned PDFs and PDFs whose text layer has broken font encodings (pdf-inspector `has_encoding_issues`, undecodable CID fonts) route to OCR automatically. Linux/CUDA defaults to `baidu/Unlimited-OCR` through the Transformers backend. macOS uses `mlx-vlm>=0.6.4` and defaults to `mlx-community/Unlimited-OCR-4bit`; `unlimited_ocr_4bit`, `unlimited_ocr_6bit`, `unlimited_ocr_8bit`, and `unlimited_ocr_bf16` select the other MLX checkpoints. Unlimited-OCR uses single-image gundam mode (`cropping=True`, `image_size=640`, prompt `document parsing.`), Baidu's sliding-window no-repeat n-gram guard (`ngram_size=35`, `window=128`), and `max_tokens=8192`. GLM-OCR is available through the four `mlx-community/GLM-OCR-*` MLX checkpoints on macOS and `zai-org/GLM-OCR` on Linux/CUDA. Long PDFs are OCR'd page-by-page so page boundaries stay reliable. Unsupported model IDs are rejected.
 
 ### MarkItDown plugins
 
@@ -336,7 +336,7 @@ The package uses MarkItDown as the URL/local-file conversion contract and keeps 
 
 - `aimd.core.models` and `aimd.core.process` own canonical request/response models, input routing, and processing; ASR/OCR backends are selected internally from the current platform.
 - `aimd.core.process.process_input()` sends URL and local-file work through `MarkItDown(enable_plugins=True)`.
-- Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
+- Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents and pdf-inspector text-layer PDFs, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
 - Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 - `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. It intentionally keeps automatic browser-cookie probing for convenience, while explicit cookie arguments and transcript/audio fallback failures should surface clear errors. `aimd.plugins.asr` owns transcription backend selection, model validation, and the local audio/video MarkItDown plugin.
 - `aimd.core.process` preserves each lossless MarkItDown result on `ProcessResult` and

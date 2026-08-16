@@ -129,7 +129,7 @@ EPUB and asset-bearing documents may produce a structured output directory with 
 
 ## OCR for scanned PDFs and images
 
-Images route to OCR automatically. PDFs with a text layer are converted as documents; scanned PDFs route to OCR when text-layer detection is available.
+Images route to OCR automatically. PDFs with a clean text layer are converted as documents via pdf-inspector; scanned PDFs and PDFs with broken font encodings route to OCR automatically.
 
 ```bash
 aimd page.png --output page.md
