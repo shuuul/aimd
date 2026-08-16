@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.21.0](https://github.com/shuuul/aimd/compare/v0.20.0...v0.21.0) (2026-08-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* minimum Python version is now 3.11
+
+### Features
+
+* support Python 3.13 ([96d93c6](https://github.com/shuuul/aimd/commit/96d93c64f776acadf9b1aebc96a509e364b39361))
+
+
+### Documentation
+
+* sync PyPI page with README and use absolute links ([bf54ac8](https://github.com/shuuul/aimd/commit/bf54ac84f7aa20ab769fb935c0c41ce6b9e6a51c))
+
+
+### Miscellaneous Chores
+
+* drop Python 3.10 support ([0662083](https://github.com/shuuul/aimd/commit/0662083ea7cb258c930fc862f6b4b9deea0a43d2))
+
 ## [0.20.0](https://github.com/shuuul/aimd/compare/v0.19.0...v0.20.0) (2026-08-16)
 
 
