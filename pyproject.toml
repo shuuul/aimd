@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }
 ]
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.11, <3.14"
 dependencies = [
     # addict/easydict/einops/matplotlib/torchvision are imported by
     # baidu/Unlimited-OCR's trust_remote_code model code at runtime; they are
