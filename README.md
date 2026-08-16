@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/aimd-banner-sm.png" alt="aimd">
+  <img src="https://raw.githubusercontent.com/shuuul/aimd/main/assets/aimd-banner-sm.png" alt="aimd">
 
   <a href="https://www.python.org/">
     <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white" alt="Python 3.10, 3.11, 3.12">
@@ -16,7 +16,7 @@
   <a href="https://github.com/shuuul/aimd/releases">
     <img src="https://img.shields.io/github/v/release/shuuul/aimd" alt="Latest release">
   </a>
-  <a href="LICENSE">
+  <a href="https://github.com/shuuul/aimd/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
   </a>
 </div>
@@ -270,7 +270,7 @@ OpenAPI docs are available at `/docs` and `/redoc`.
 
 The asynchronous desktop contract is `POST /v1/jobs`, `GET /v1/jobs/{id}`, resumable
 `GET /v1/jobs/{id}/events`, and cancellation through `DELETE /v1/jobs/{id}`. See the
-[local desktop sidecar contract](docs/sidecar.md) for authenticated launch, loopback,
+[local desktop sidecar contract](https://github.com/shuuul/aimd/blob/main/docs/sidecar.md) for authenticated launch, loopback,
 allow-root, readiness, cancellation, and shutdown requirements.
 
 ## MCP server
@@ -330,7 +330,7 @@ src/
 
 ## Architecture
 
-`aimd` is a single published distribution, `aimd-tool`. See [docs/architecture.md](docs/architecture.md) for the full architecture notes and [docs/performance.md](docs/performance.md) for performance expectations and measurement guidance.
+`aimd` is a single published distribution, `aimd-tool`. See [docs/architecture.md](https://github.com/shuuul/aimd/blob/main/docs/architecture.md) for the full architecture notes and [docs/performance.md](https://github.com/shuuul/aimd/blob/main/docs/performance.md) for performance expectations and measurement guidance.
 
 The package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
 
@@ -348,4 +348,4 @@ base URI alongside `TextContext` title, chunks, and split metadata.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/shuuul/aimd/blob/main/LICENSE).

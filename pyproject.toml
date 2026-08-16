@@ -2,7 +2,7 @@
 name = "aimd-tool"
 version = "0.20.0"
 description = "Context preparation tool for LLM workflows."
-readme = { text = "Prepare LLM-ready context from URLs, audio/video, and documents.", content-type = "text/markdown" }
+readme = "README.md"
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }
 ]
@@ -32,6 +32,12 @@ dependencies = [
     "typer>=0.27.0",
     "yt-dlp[default]>=2026.7.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/shuuul/aimd"
+Repository = "https://github.com/shuuul/aimd"
+Issues = "https://github.com/shuuul/aimd/issues"
+Changelog = "https://github.com/shuuul/aimd/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 api = [
