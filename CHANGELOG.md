@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/shuuul/aimd/compare/v0.19.0...v0.20.0) (2026-08-16)
+
+
+### Features
+
+* **doc:** convert text-layer PDFs with pdf-inspector ([6d543e0](https://github.com/shuuul/aimd/commit/6d543e08acd47e6be68ee16e72dd02560ede78b6))
+
+
+### Bug Fixes
+
+* **core:** route encoding-broken PDFs to OCR ([fe22817](https://github.com/shuuul/aimd/commit/fe22817a842d759b68f00c2b26c2f53fa32e4c42))
+
 ## [0.19.0](https://github.com/shuuul/aimd/compare/v0.18.3...v0.19.0) (2026-08-16)
 
 
