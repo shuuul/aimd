@@ -29,7 +29,7 @@ Feature modules are bundled in the same `aimd-tool` distribution:
 
 ## DOCUMENT CONVERSION
 
-`aimd.plugins.doc` owns Pandoc-backed document conversion through the MarkItDown plugin entry point. Core sends Pandoc-supported local document extensions through MarkItDown. EPUB gets an image/chapter output directory and uses the custom ZIP/spine pipeline; DOCX/ODT may also receive an asset directory for extracted media.
+`aimd.plugins.doc` owns Pandoc-backed document conversion through the MarkItDown plugin entry point. Core sends Pandoc-supported local document extensions through MarkItDown. EPUB gets an image/chapter output directory and uses the custom ZIP/spine pipeline; DOCX/ODT may also receive an asset directory for extracted media. Text-layer PDFs are handled by the same plugin's `AimdPdfConverter` (pdf-inspector, priority `-1.0`, ahead of MarkItDown's built-in `PdfConverter`); scanned PDFs route to OCR via the `_pdf_has_extractable_text` probe in `process.py`.
 
 ## TEMP DIRECTORY
 

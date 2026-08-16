@@ -1,8 +1,10 @@
+import io
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from markitdown import MarkItDown, StreamInfo
 
 from aimd.core.errors import (
     BackendUnavailableError,
@@ -11,11 +13,13 @@ from aimd.core.errors import (
     ProcessingFailedError,
 )
 from aimd.core.process import _split_markdown_by_headers
+from aimd.plugins.doc._plugin import AimdPdfConverter
 from aimd.plugins.doc.conversion import (
     PANDOC_INPUT_FORMAT_BY_EXTENSION,
     _run_pandoc,
     process_doc_with_assets,
 )
+from aimd.plugins.doc.pdf import process_pdf_text
 
 
 def test_split_markdown_by_headers_fallback_without_headers() -> None:
@@ -237,3 +241,104 @@ def test_run_pandoc_nonzero_exit_raises_processing_failed(
             input_format="rst",
             output_file=output,
         )
+
+
+class _FakePdfResult:
+    def __init__(self, markdown: str | None, title: str | None = None) -> None:
+        self.markdown = markdown
+        self.title = title
+
+
+def test_pdf_converter_accepts_only_local_non_ocr_pdf(tmp_path: Path) -> None:
+    converter = AimdPdfConverter()
+    local_pdf = StreamInfo(extension=".pdf", local_path=str(tmp_path / "document.pdf"))
+
+    assert converter.accepts(io.BytesIO(), local_pdf, task_type="convert")
+    assert converter.accepts(io.BytesIO(), local_pdf)
+    assert not converter.accepts(io.BytesIO(), local_pdf, task_type="ocr")
+    assert not converter.accepts(
+        io.BytesIO(),
+        StreamInfo(extension=".epub", local_path=str(tmp_path / "book.epub")),
+        task_type="convert",
+    )
+    assert not converter.accepts(
+        io.BytesIO(),
+        StreamInfo(extension=".pdf", url="https://example.com/document.pdf"),
+        task_type="convert",
+    )
+
+
+def test_process_pdf_text_returns_title_and_markdown(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "paper.pdf"
+    source.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(
+        "pdf_inspector.process_pdf",
+        lambda path: _FakePdfResult("# Paper\n\nBody", title="Paper"),
+    )
+
+    title, markdown = process_pdf_text(source)
+
+    assert title == "Paper"
+    assert markdown == "# Paper\n\nBody"
+
+
+def test_process_pdf_text_empty_markdown_raises_processing_failed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "scanned.pdf"
+    source.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr("pdf_inspector.process_pdf", lambda path: _FakePdfResult(None))
+
+    with pytest.raises(ProcessingFailedError, match="extracted no text"):
+        process_pdf_text(source)
+
+
+def test_process_pdf_text_failure_raises_processing_failed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "broken.pdf"
+    source.write_bytes(b"junk")
+
+    def _raise(path):  # noqa: ANN001, ANN202
+        raise ValueError("boom")
+
+    monkeypatch.setattr("pdf_inspector.process_pdf", _raise)
+
+    with pytest.raises(ProcessingFailedError, match="failed to process PDF"):
+        process_pdf_text(source)
+
+
+def test_process_pdf_text_missing_input_raises_input_not_found(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(InputNotFoundError, match="Document file not found"):
+        process_pdf_text(tmp_path / "missing.pdf")
+
+
+def test_markitdown_routes_text_layer_pdf_to_pdf_inspector(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import pdf_inspector
+    import pymupdf
+
+    source = tmp_path / "text.pdf"
+    with pymupdf.open() as document:
+        page = document.new_page()
+        page.insert_text((72, 72), "Hello pdf inspector")
+        document.save(source)
+
+    calls: list[str] = []
+    real_process_pdf = pdf_inspector.process_pdf
+
+    def _spy(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        calls.append(path)
+        return real_process_pdf(path, *args, **kwargs)
+
+    monkeypatch.setattr(pdf_inspector, "process_pdf", _spy)
+
+    result = MarkItDown(enable_plugins=True).convert(source, task_type="convert")
+
+    assert calls == [str(source)]
+    assert "Hello pdf inspector" in result.markdown

@@ -14,7 +14,7 @@ The `aimd` package uses MarkItDown as the URL/local-file conversion contract and
 - `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
 - `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Logic lives directly under `aimd.plugins.url/` (flattened).
 - `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, and platform backend selection. Backend implementations live under `aimd.plugins.asr.models` (`mlx`, `transformers`).
-- `aimd.plugins.doc`: MarkItDown plugin for Pandoc-supported documents (cleaner inlined). EPUB uses a custom spine/image extraction pipeline; other supported formats use direct Pandoc conversion.
+- `aimd.plugins.doc`: MarkItDown plugin for document conversion. EPUB uses a custom spine/image extraction pipeline; other Pandoc-supported formats use direct Pandoc conversion; text-layer PDFs use pdf-inspector (`AimdPdfConverter`) ahead of MarkItDown's built-in `PdfConverter`.
 - `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs. Engine implementations live under `aimd.plugins.ocr.models` (`mlx`, `unlimited`, `glm`), with four MLX checkpoints each for Unlimited-OCR and GLM-OCR on macOS/Apple Silicon, and dedicated CUDA Transformers adapters on Linux.
 
 Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.

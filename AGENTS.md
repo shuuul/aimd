@@ -33,7 +33,7 @@ src/aimd/
 └── plugins/        # Bundled MarkItDown plugins and implementations
     ├── url/        # URL transcript/readable HTML extraction
     ├── asr/        # Local audio/video transcription (+ models/ mlx|transformers)
-    ├── doc/        # Pandoc-backed document conversion
+    ├── doc/        # Pandoc documents + pdf-inspector text-layer PDFs
     └── ocr/        # OCR for scanned PDFs/images (+ models/ mlx|got|unlimited|generic)
 ```
 
@@ -56,7 +56,7 @@ flowchart TD
     URLPlugin["aimd.plugins.url MarkItDown plugin\nURL transcript + Defuddle HTML"]
     ASRPlugin["aimd.plugins.asr MarkItDown plugin\nlocal audio/video transcription"]
     ASR["aimd.plugins.asr engines\nmlx/transformers preflight + transcription"]
-    DocPlugin["aimd.plugins.doc MarkItDown plugin\nPandoc docs + EPUB assets"]
+    DocPlugin["aimd.plugins.doc MarkItDown plugin\nPandoc docs + EPUB assets + pdf-inspector text PDFs"]
     OCRPlugin["aimd.plugins.ocr MarkItDown plugin\nimages/scanned PDFs"]
     MarkItDown["MarkItDown\nbuilt-ins + markitdown.plugin entry points"]
 
@@ -94,7 +94,7 @@ flowchart TD
 | Engine preflight | `src/aimd/plugins/asr/capabilities.py` | Audio engine availability and auto-resolution. |
 | ASR processing | `src/aimd/plugins/asr/` | MarkItDown plugin for local audio/video transcription; backends in `asr/models/`. |
 | Markdown shaping | `src/aimd/core/process.py` | Chunking and title extraction for MarkItDown/URL output. |
-| Document conversion | `src/aimd/plugins/doc/` | MarkItDown plugin, Pandoc-supported formats, EPUB cleanup/image extraction. |
+| Document conversion | `src/aimd/plugins/doc/` | MarkItDown plugin, Pandoc-supported formats, EPUB cleanup/image extraction, pdf-inspector text-layer PDF conversion. |
 | OCR conversion | `src/aimd/plugins/ocr/` | MarkItDown plugin; engines in `ocr/models/`, image/scanned PDF processing. |
 
 ## CONVENTIONS
@@ -288,5 +288,5 @@ uv lock
 - `--raw-transcript` preserves original SRT/VTT subtitle formatting; default strips subtitles to plain text.
 - `--temp-dir` and `AIMD_TEMP_DIR` redirect temporary downloads, transcoding, and document extraction.
 - URL and local file conversion use MarkItDown and installed `markitdown.plugin` entry points.
-- Document conversion lives in the `aimd.plugins.doc` MarkItDown plugin. EPUB uses spine ordering, Pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing cleanup, and flat image extraction; other Pandoc-supported formats use direct Pandoc conversion.
+- Document conversion lives in the `aimd.plugins.doc` MarkItDown plugin. EPUB uses spine ordering, Pandoc CLI (`-f html -t markdown_mmd-raw_html --wrap=none`), post-processing cleanup, and flat image extraction; other Pandoc-supported formats use direct Pandoc conversion. Text-layer PDFs use pdf-inspector (`AimdPdfConverter`, priority `-1.0`, ahead of MarkItDown's built-in `PdfConverter`); empty extraction raises a domain error so MarkItDown falls through to the built-in converter, and scanned PDFs still route to OCR via the `_pdf_has_extractable_text` probe in `aimd.core.process`.
 - Pandoc does not support MOBI/AZW3 as input formats, so AIMD does not route them as document inputs.

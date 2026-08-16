@@ -19,6 +19,7 @@ dependencies = [
     "matplotlib>=3.10.9",
     "mlx-audio>=0.4.4; sys_platform == 'darwin'",
     "mlx-vlm>=0.6.8; sys_platform == 'darwin' and python_version >= '3.12'",
+    "pdf-inspector>=1.14.2",
     "pillow>=12.3.0",
     "pydantic>=2.13.4",
     "pymupdf>=1.28.0",
