@@ -185,5 +185,7 @@ def test_sidecar_contract_documentation_covers_runtime_boundary() -> None:
         "Last-Event-ID",
         "completed_after_request",
         "caller-owned `output_dir`",
+        "POST /v1/blobs",
+        "blob_id",
     ):
         assert required in contract

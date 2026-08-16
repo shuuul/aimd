@@ -240,7 +240,8 @@ class JobManager:
 
 
 def _initial_stage(request: ProcessRequest) -> JobStage:
-    if request.input_source.startswith(("http://", "https://")):
+    source = request.input_source or ""
+    if not request.blob_id and source.startswith(("http://", "https://")):
         return "downloading"
     if request.task_type == "transcript":
         return "transcribing"

@@ -49,6 +49,15 @@ directory, or another broad root merely for convenience. This is a same-user tru
 boundary, not protection against a malicious local process racing filesystem changes
 after validation; Electron main remains responsible for user consent and root lifetime.
 
+## Blob upload
+
+Desktop workers upload bytes with `POST /v1/blobs` (multipart field `file`, optional
+form field `blob_id`) and then call `POST /v1/process` or `POST /v1/jobs` with that
+`blob_id`. They never send laptop filesystem paths. `AIMD_ALLOWED_ROOTS` still applies
+to the path API. Sidecar-owned blob files live under `AIMD_BLOB_DIR` or a temporary
+directory and are not subject to user path roots. Artifact `source_uri` for blob jobs
+is `blob:<blob_id>`.
+
 ## Jobs, cancellation, and output lifetime
 
 `POST /v1/jobs` returns status and SSE URLs. `GET /v1/jobs/{id}` returns the current

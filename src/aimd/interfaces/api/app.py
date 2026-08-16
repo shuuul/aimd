@@ -10,7 +10,16 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import StreamingResponse
 from logly import logger
@@ -22,9 +31,15 @@ from aimd.interfaces.output import (
 from aimd.core.models import ProcessInput, ProcessResult
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import AimdError
+from aimd.interfaces.api.blobs import (
+    BlobIdError,
+    BlobNotFoundError,
+    BlobStore,
+)
 from aimd.interfaces.api.jobs import JobCancelledError, JobManager, JobNotFoundError
 from aimd.interfaces.api.paths import PathAccessError, PathPolicy
 from aimd.interfaces.api.schemas import (
+    BlobUploadResponse,
     HealthResponse,
     JobCreated,
     JobEvent,
@@ -36,15 +51,28 @@ from aimd.interfaces.api.schemas import (
 )
 
 
+def _resolved_input_source(
+    request: ProcessRequest, blob_store: BlobStore | None
+) -> str:
+    if request.blob_id:
+        if blob_store is None:
+            raise BlobNotFoundError(request.blob_id)
+        return str(blob_store.resolve(request.blob_id).path)
+    if not request.input_source:
+        raise ValueError("ProcessRequest.input_source is required after resolution")
+    return request.input_source
+
+
 def _build_process_input(
     request: ProcessRequest,
     temp_dir: Path | None,
     cancellation_check: Callable[[], bool] | None = None,
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
+    blob_store: BlobStore | None = None,
 ) -> ProcessInput:
     return ProcessInput(
-        input_source=request.input_source,
+        input_source=_resolved_input_source(request, blob_store),
         task_type=request.task_type,
         model=request.model,
         language=request.language,
@@ -82,7 +110,10 @@ def _process_response(
     )
 
 
-def _source_uri(input_source: str) -> str:
+def _source_uri(request: ProcessRequest) -> str:
+    if request.blob_id:
+        return f"blob:{request.blob_id}"
+    input_source = request.input_source or ""
     parsed = urlparse(input_source)
     if parsed.scheme in {"http", "https"}:
         return input_source
@@ -96,6 +127,7 @@ async def _run_job(
         [JobStage, int | None, int | None, str | None], Awaitable[None]
     ]
     | None = None,
+    blob_store: BlobStore | None = None,
 ) -> ProcessArtifact:
     temp_dir = get_request_temp_dir()
     if cancellation_requested.is_set():
@@ -124,6 +156,7 @@ async def _run_job(
                 temp_dir,
                 cancellation_requested.is_set,
                 enqueue_progress,
+                blob_store=blob_store,
             )
         )
     )
@@ -154,7 +187,7 @@ async def _run_job(
         task_type=result.task_type,
         title=result.text_context.title,
         markdown=result.markdown,
-        source_uri=_source_uri(request.input_source),
+        source_uri=_source_uri(request),
         asset_base_uri=result.asset_base_uri,
         platform=result.platform,
         output_file=persisted.output_file,
@@ -166,9 +199,29 @@ def create_app(
     *,
     allowed_roots: tuple[str | Path, ...] | None = None,
     bearer_token: str | None = None,
+    blob_dir: str | Path | None = None,
 ) -> FastAPI:
     """Build FastAPI app instance."""
-    jobs = JobManager(_run_job)
+    blob_store = (
+        BlobStore(blob_dir) if blob_dir is not None else BlobStore.from_environment()
+    )
+
+    async def run_job(
+        request: ProcessRequest,
+        cancellation_requested: asyncio.Event,
+        report_progress: Callable[
+            [JobStage, int | None, int | None, str | None], Awaitable[None]
+        ]
+        | None = None,
+    ) -> ProcessArtifact:
+        return await _run_job(
+            request,
+            cancellation_requested,
+            report_progress,
+            blob_store=blob_store,
+        )
+
+    jobs = JobManager(run_job)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -182,6 +235,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.job_manager = jobs
+    app.state.blob_store = blob_store
     path_policy = (
         PathPolicy.from_environment()
         if allowed_roots is None
@@ -206,6 +260,18 @@ def create_app(
         except PathAccessError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    def prepare_request(request: ProcessRequest) -> ProcessRequest:
+        request = normalize_request(request)
+        if not request.blob_id:
+            return request
+        try:
+            blob_store.resolve(request.blob_id)
+        except BlobIdError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except BlobNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Blob not found") from exc
+        return request
+
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz() -> HealthResponse:
         return HealthResponse()
@@ -214,13 +280,31 @@ def create_app(
     async def readyz() -> HealthResponse:
         return HealthResponse()
 
+    @app.post("/v1/blobs", response_model=BlobUploadResponse)
+    async def upload_blob(
+        file: UploadFile = File(...),
+        blob_id: str | None = Form(default=None),
+    ) -> BlobUploadResponse:
+        data = await file.read()
+        try:
+            stored = blob_store.put(data, filename=file.filename, blob_id=blob_id)
+        except BlobIdError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return BlobUploadResponse(
+            blob_id=stored.blob_id,
+            bytes=stored.size,
+            filename=file.filename or stored.filename,
+        )
+
     @app.post("/v1/process", response_model=ProcessResponse)
     async def process(request: ProcessRequest) -> ProcessResponse:
-        request = normalize_request(request)
+        request = prepare_request(request)
         try:
             temp_dir = get_request_temp_dir()
 
-            result = await process_core_input(_build_process_input(request, temp_dir))
+            result = await process_core_input(
+                _build_process_input(request, temp_dir, blob_store=blob_store)
+            )
 
             persisted = persist_result_output_if_requested(result, request.output_file)
             if persisted.ignored_output_file:
@@ -245,7 +329,7 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
     )
     async def create_job(request: ProcessRequest) -> JobCreated:
-        request = normalize_request(request)
+        request = prepare_request(request)
         snapshot = await jobs.create(request)
         return JobCreated(
             job_id=snapshot.job_id,

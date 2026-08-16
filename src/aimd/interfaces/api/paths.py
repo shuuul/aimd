@@ -37,15 +37,22 @@ class PathPolicy:
     def normalize_request(self, request: ProcessRequest) -> ProcessRequest:
         """Return a request whose local paths are absolute and allow-root checked."""
         values: dict[str, str] = {}
-        parsed = urlparse(request.input_source)
-        if parsed.scheme in {"http", "https"}:
-            values["input_source"] = request.input_source
-        elif "://" in request.input_source:
-            raise PathAccessError(
-                "Only HTTP(S) URLs or local filesystem paths are allowed"
-            )
+        if request.blob_id:
+            pass
+        elif request.input_source:
+            parsed = urlparse(request.input_source)
+            if parsed.scheme in {"http", "https"}:
+                values["input_source"] = request.input_source
+            elif "://" in request.input_source:
+                raise PathAccessError(
+                    "Only HTTP(S) URLs or local filesystem paths are allowed"
+                )
+            else:
+                values["input_source"] = str(
+                    self.normalize(request.input_source, "input")
+                )
         else:
-            values["input_source"] = str(self.normalize(request.input_source, "input"))
+            raise PathAccessError("Exactly one of input_source or blob_id must be set")
 
         for field_name in ("output_file", "save_original", "cookies"):
             value = getattr(request, field_name)

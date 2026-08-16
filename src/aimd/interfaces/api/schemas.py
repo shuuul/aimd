@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aimd.core.models import TaskType
 from aimd.interfaces.output import (
@@ -32,12 +32,24 @@ class HealthResponse(BaseModel):
     status: str = "ok"
 
 
+class BlobUploadResponse(BaseModel):
+    """Response returned after storing sidecar-owned blob bytes."""
+
+    blob_id: str
+    bytes: int
+    filename: str | None = None
+
+
 class ProcessRequest(BaseModel):
     """AIMD processing request accepted by synchronous and job APIs."""
 
-    input_source: str = Field(
-        ...,
+    input_source: str | None = Field(
+        default=None,
         description="Audio/video file path, video URL, document path, image path, or scanned PDF path.",
+    )
+    blob_id: str | None = Field(
+        default=None,
+        description="Sidecar-owned blob identifier from POST /v1/blobs.",
     )
     task_type: TaskType | None = Field(
         default=None,
@@ -80,6 +92,14 @@ class ProcessRequest(BaseModel):
         default=False,
         description="Preserve original subtitle formatting (SRT/VTT timestamps).",
     )
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "ProcessRequest":
+        has_input = bool(self.input_source)
+        has_blob = bool(self.blob_id)
+        if has_input == has_blob:
+            raise ValueError("Exactly one of input_source or blob_id must be set")
+        return self
 
 
 class ProcessResponse(BaseModel):
