@@ -2,6 +2,7 @@
 
 import asyncio
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -65,6 +66,10 @@ async def extract_content_from_audio(
     cookies_from_browser: str | None = None,
     temp_dir: Path | None = None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
+    context: str | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it."""
     if save_original_path is not None:
@@ -86,6 +91,9 @@ async def extract_content_from_audio(
             cookies_from_browser=cookies_from_browser,
             temp_dir=temp_dir,
             precision=precision,
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
+            context=context,
         )
 
     with tempfile.TemporaryDirectory(dir=temp_dir) as tmp:
@@ -100,6 +108,9 @@ async def extract_content_from_audio(
             cookies_from_browser=cookies_from_browser,
             temp_dir=temp_dir,
             precision=precision,
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
+            context=context,
         )
 
 
@@ -115,6 +126,10 @@ async def _download_and_transcribe_audio(
     cookies_from_browser: str | None,
     temp_dir: Path | None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
+    context: str | None = None,
 ) -> str | None:
     """Download URL audio and transcribe it for fallback extraction."""
     try:
@@ -129,12 +144,17 @@ async def _download_and_transcribe_audio(
         if not audio_file_path or not audio_file_path.exists():
             return None
 
+        if progress_reporter is not None:
+            progress_reporter("transcribing", None, None, "Transcribing source audio")
         transcribed_text = await transcribe_file(
             audio_file_path,
             language=language,
             model=model,
             temp_dir=temp_dir,
             precision=precision,
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
+            context=context,
         )
         if transcribed_text and len(transcribed_text) > 10:
             return transcribed_text

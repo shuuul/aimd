@@ -15,5 +15,6 @@ class ASRModel(Protocol):
         *,
         language: str | None = None,
         temp_dir: Path | None = None,
+        context: str | None = None,
     ) -> str:
         """Transcribe one local audio/video file."""

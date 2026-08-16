@@ -16,6 +16,7 @@ def test_cli_transcript_auto_output(monkeypatch, tmp_path: Path) -> None:
         return ProcessResult(
             task_type="transcript",
             text_context=TextContext(title="Demo Title", chunk_list=["hello"]),
+            markdown="hello",
         )
 
     monkeypatch.setattr(
@@ -40,6 +41,7 @@ def test_cli_transcript_output_persists_all_chunks(monkeypatch, tmp_path: Path) 
                 title="Demo Title",
                 chunk_list=["# Title\n\n## Content", "subtitle body"],
             ),
+            markdown="# Title\n\n## Content\nsubtitle body",
         )
 
     monkeypatch.setattr(
@@ -53,7 +55,7 @@ def test_cli_transcript_output_persists_all_chunks(monkeypatch, tmp_path: Path) 
     assert result.exit_code == 0
     out = Path("Demo_Title_transcript.md")
     assert out.exists()
-    assert out.read_text(encoding="utf-8") == "# Title\n\n## Content\n\nsubtitle body"
+    assert out.read_text(encoding="utf-8") == "# Title\n\n## Content\nsubtitle body"
 
 
 def test_cli_exposes_task_option() -> None:
@@ -82,6 +84,7 @@ def test_cli_precision_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
         return ProcessResult(
             task_type="transcript",
             text_context=TextContext(title="Demo", chunk_list=["hello"]),
+            markdown="hello",
         )
 
     monkeypatch.setattr(cli_app, "process_input", _fake_process_input)
@@ -105,6 +108,7 @@ def test_cli_task_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
         return ProcessResult(
             task_type="ocr",
             text_context=TextContext(title="Page", chunk_list=["ocr text"]),
+            markdown="ocr text",
         )
 
     monkeypatch.setattr(cli_app, "process_input", _fake_process_input)

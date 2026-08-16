@@ -43,6 +43,8 @@ class AimdDocConverter(DocumentConverter):
             Path(stream_info.local_path),
             output_dir=kwargs.get("output_dir"),
             temp_dir=kwargs.get("temp_dir"),
+            cancellation_check=kwargs.get("cancellation_check"),
+            progress_reporter=kwargs.get("progress_reporter"),
         )
 
         return DocumentConverterResult(

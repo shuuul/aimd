@@ -154,6 +154,13 @@ aimd "https://www.xiaoyuzhoufm.com/episode/..."
 
 Subtitles are simplified to plain text by default. Use `--raw-transcript` to preserve SRT/VTT formatting.
 
+When a URL has no subtitles and audio transcription is used, aimd injects the page metadata (title, author, description, tags, chapters) as ASR context so proper nouns and names are recognized more accurately. This is enabled by default; disable it with `--no-context`, or supply your own biasing text with `--context` (works for local audio files too):
+
+```bash
+aimd "https://youtube.com/watch?v=..." --no-context
+aimd interview.mp3 --context "Vocabulary: Qwen, MLX, LoRA."
+```
+
 For authenticated or restricted content:
 
 ```bash
@@ -252,7 +259,19 @@ The process response includes both lossless `markdown` for display/persistence a
 directory (with a trailing slash) against which relative Markdown resources resolve; it
 is `null` for local transcriptions without associated resources.
 
+Document conversions that extract assets return a canonical `output_dir` beside the
+source file. That directory and its Markdown/assets are durable caller-owned output: AIMD
+does not remove them when a request or job ends. An `output_file` request is ignored for
+such conversions because moving only the Markdown would break its relative asset links.
+For results without `output_dir`, requested output files are written byte-for-byte from
+`markdown`; `chunk_list` is never recombined for persistence.
+
 OpenAPI docs are available at `/docs` and `/redoc`.
+
+The asynchronous desktop contract is `POST /v1/jobs`, `GET /v1/jobs/{id}`, resumable
+`GET /v1/jobs/{id}/events`, and cancellation through `DELETE /v1/jobs/{id}`. See the
+[local desktop sidecar contract](docs/sidecar.md) for authenticated launch, loopback,
+allow-root, readiness, cancellation, and shutdown requirements.
 
 ## MCP server
 

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from logly import logger
 
 from aimd.interfaces.output import (
+    CONTEXT_HELP_TEXT,
     MODEL_HELP_TEXT,
     PRECISION_HELP_TEXT,
     persist_output,
@@ -100,6 +101,17 @@ def process(
         "--precision",
         help=PRECISION_HELP_TEXT,
     ),
+    context: Optional[str] = typer.Option(
+        None,
+        "--context",
+        help=CONTEXT_HELP_TEXT,
+    ),
+    no_context: bool = typer.Option(
+        False,
+        "--no-context",
+        help="Disable automatic ASR context built from URL metadata "
+        "(title/description/tags).",
+    ),
     language: Optional[str] = typer.Option(
         None,
         "--language",
@@ -189,6 +201,8 @@ def process(
                     temp_dir=resolved_temp_dir,
                     raw_transcript=raw_transcript,
                     precision=precision,
+                    context=context,
+                    metadata_context=not no_context,
                 )
             )
             logger.info(f"Task: {result.task_type}")
@@ -232,7 +246,7 @@ def process(
             persist_output(
                 final_output_file,
                 result.task_type,
-                result.text_context.chunk_list,
+                result.markdown,
             )
 
             if result.task_type == "transcript":

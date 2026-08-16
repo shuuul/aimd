@@ -9,22 +9,21 @@ from aimd.core.models import ProcessResult, TaskType
 
 def build_output_text(
     task_type: TaskType,
-    chunk_list: list[str],
+    markdown: str,
 ) -> str:
     """Build persisted markdown text for the given task output."""
-    text = "\n\n".join(chunk_list)
-    if task_type == "transcript" and not text:
+    if task_type == "transcript" and not markdown:
         raise ProcessingFailedError("Transcription returned empty content")
-    return text
+    return markdown
 
 
 def persist_output(
     output_file: Path,
     task_type: TaskType,
-    chunk_list: list[str],
+    markdown: str,
 ) -> Path:
-    """Write task output to disk and return resolved path."""
-    text = build_output_text(task_type, chunk_list)
+    """Write exact task Markdown to disk and return the resolved path."""
+    text = build_output_text(task_type, markdown)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(text, encoding="utf-8")
     return output_file.resolve()
@@ -57,11 +56,11 @@ def persist_result_output_if_requested(
             ignored_output_file=True,
         )
 
-    resolved = persist_output(
-        Path(requested_output_file),
-        result.task_type,
-        result.text_context.chunk_list,
-    )
+    markdown = build_output_text(result.task_type, result.markdown)
+    output_path = Path(requested_output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(markdown, encoding="utf-8")
+    resolved = output_path.resolve()
     return PersistedOutput(output_file=str(resolved), output_dir=None)
 
 
@@ -90,6 +89,12 @@ PRECISION_HELP_TEXT = (
     "support; quantized values are rejected. When omitted, Transformers keeps "
     "automatic dtype selection (bf16 on supported CUDA, fp16 on CUDA/MPS, "
     "fp32 on CPU)."
+)
+
+CONTEXT_HELP_TEXT = (
+    "ASR context/biasing text (proper nouns, names, domain vocabulary) that "
+    "helps transcription accuracy. For URL inputs, page metadata (title, "
+    "description, tags) is appended automatically unless --no-context is set."
 )
 
 

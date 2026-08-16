@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -16,6 +17,7 @@ from logly import logger
 
 from aimd.core.errors import (
     InputNotFoundError,
+    ProcessingCancelledError,
     ProcessingFailedError,
     UnsupportedInputError,
 )
@@ -35,11 +37,12 @@ async def _transcribe_segment_with_fallback(
     backend: str,
     language: str | None = None,
     temp_dir: Path | None = None,
+    context: str | None = None,
 ) -> str:
     """Transcribes a single audio path, checking for repetition and falling back to 8-bit."""
     try:
         text = await asr_model.transcribe(
-            segment_path, language=language, temp_dir=temp_dir
+            segment_path, language=language, temp_dir=temp_dir, context=context
         )
     except ProcessingFailedError as e:
         if "empty transcription" in str(e).lower():
@@ -62,7 +65,7 @@ async def _transcribe_segment_with_fallback(
 
             try:
                 text = await fallback_model.transcribe(
-                    segment_path, language=language, temp_dir=temp_dir
+                    segment_path, language=language, temp_dir=temp_dir, context=context
                 )
             except ProcessingFailedError as e:
                 if "empty transcription" in str(e).lower():
@@ -82,6 +85,10 @@ async def transcribe_file(
     model: str | None = None,
     temp_dir: Path | None = None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
+    context: str | None = None,
 ) -> str:
     """Transcribe an audio or video file with the platform ASR backend."""
     file_path = Path(file_path)
@@ -130,6 +137,17 @@ async def transcribe_file(
         try:
             results = []
             for i, segment_path in enumerate(segments):
+                if cancellation_check is not None and cancellation_check():
+                    raise ProcessingCancelledError(
+                        "Transcription cancelled between segments"
+                    )
+                if progress_reporter is not None:
+                    progress_reporter(
+                        "transcribing",
+                        i + 1,
+                        len(segments),
+                        f"Transcribing segment {i + 1} of {len(segments)}",
+                    )
                 logger.info(
                     f"Transcribing segment {i + 1}/{len(segments)}: {segment_path.name}"
                 )
@@ -139,6 +157,7 @@ async def transcribe_file(
                     backend,
                     language=language,
                     temp_dir=temp_dir,
+                    context=context,
                 )
                 if text:
                     results.append(text)
@@ -159,6 +178,7 @@ async def transcribe_file(
             backend,
             language=language,
             temp_dir=temp_dir,
+            context=context,
         )
 
 
@@ -176,6 +196,10 @@ def _transcribe_file_sync(
     model: str | None = None,
     temp_dir: Path | None = None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
+    context: str | None = None,
 ) -> str:
     """Synchronous MarkItDown boundary for ASR transcription."""
     return asyncio.run(
@@ -185,6 +209,9 @@ def _transcribe_file_sync(
             model=model,
             temp_dir=temp_dir,
             precision=precision,
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
+            context=context,
         )
     )
 
@@ -218,6 +245,9 @@ class AimdASRConverter(DocumentConverter):
             model=kwargs.get("model"),
             temp_dir=kwargs.get("temp_dir"),
             precision=kwargs.get("precision"),
+            cancellation_check=kwargs.get("cancellation_check"),
+            progress_reporter=kwargs.get("progress_reporter"),
+            context=kwargs.get("context"),
         )
 
         return DocumentConverterResult(

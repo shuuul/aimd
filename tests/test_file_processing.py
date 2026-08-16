@@ -7,6 +7,7 @@ import pytest
 from aimd.core.errors import (
     BackendUnavailableError,
     InputNotFoundError,
+    ProcessingCancelledError,
     ProcessingFailedError,
 )
 from aimd.core.process import _split_markdown_by_headers
@@ -93,7 +94,46 @@ def test_process_epub_spine_ordering(tmp_path: Path) -> None:
 
     assert written_order == ["b", "a"], "Spine order should be b then a"
     combined = (result.output_dir / "ordered.md").read_text(encoding="utf-8")
+    assert combined == result.markdown
     assert combined.index("b") < combined.index("a")
+
+
+def test_process_epub_reports_progress_and_cancels_between_chapters(
+    tmp_path: Path,
+) -> None:
+    epub_path = tmp_path / "cancel.epub"
+    with zipfile.ZipFile(epub_path, "w") as zf:
+        zf.writestr("OEBPS/one.html", "<html><body>one</body></html>")
+        zf.writestr("OEBPS/two.html", "<html><body>two</body></html>")
+
+    calls = 0
+    progress: list[tuple[str, int | None, int | None, str | None]] = []
+
+    def _run_then_request_cancel(**kwargs):  # noqa: ANN003
+        nonlocal calls
+        calls += 1
+        kwargs["output_file"].write_text("chapter", encoding="utf-8")
+
+    with (
+        patch(
+            "aimd.plugins.doc.conversion._run_pandoc",
+            side_effect=_run_then_request_cancel,
+        ),
+        pytest.raises(
+            ProcessingCancelledError,
+            match="cancelled between chapters",
+        ),
+    ):
+        process_doc_with_assets(
+            epub_path,
+            cancellation_check=lambda: calls == 1,
+            progress_reporter=lambda stage, current, total, message: progress.append(
+                (stage, current, total, message)
+            ),
+        )
+
+    assert calls == 1
+    assert progress == [("converting", 1, 2, "Converting chapter 1 of 2")]
 
 
 def test_pandoc_extension_map_includes_supported_document_families() -> None:

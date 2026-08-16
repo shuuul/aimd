@@ -89,7 +89,7 @@ flowchart TD
 | Request/result models | `src/aimd/core/models.py` | `ProcessInput`, `ProcessResult`, `TaskType`; output files are interface-owned. |
 | Output persistence | `src/aimd/interfaces/output.py` | Shared CLI/API/MCP markdown persistence helpers. |
 | CLI | `src/aimd/interfaces/cli/app.py` | Typer command (`--task` parity with API/MCP), user output, local file persistence. |
-| HTTP API | `src/aimd/interfaces/api/app.py` | `/healthz`, `/v1/process`. |
+| HTTP API | `src/aimd/interfaces/api/app.py` | `/healthz`, `/readyz`, `/v1/process`, and `/v1/jobs` lifecycle/SSE. |
 | MCP server | `src/aimd/interfaces/mcp/app.py` | `healthz`, `process_input` (validates `task_type`). |
 | Engine preflight | `src/aimd/plugins/asr/capabilities.py` | Audio engine availability and auto-resolution. |
 | ASR processing | `src/aimd/plugins/asr/` | MarkItDown plugin for local audio/video transcription; backends in `asr/models/`. |
@@ -105,6 +105,11 @@ flowchart TD
 - **MarkItDown contract**: URL and local-file conversion go through `MarkItDown(enable_plugins=True)` on a worker thread; core restores nested domain errors from MarkItDown aggregates before wrapping unknowns as `ProcessingFailedError`.
 - **Feature error boundaries**: missing backends (`pandoc`/`npx`/ASR) -> `BackendUnavailableError`; missing inputs -> `InputNotFoundError`; conversion failures -> `ProcessingFailedError`.
 - **Output ownership**: `output_file` belongs to CLI/API/MCP interfaces, not `ProcessInput` or `ProcessResult`; use `aimd.interfaces.output` for shared persistence.
+- **Desktop sidecar boundary**: desktop launches are authenticated, loopback-only, and
+  constrained by canonical `AIMD_ALLOWED_ROOTS`; see `docs/sidecar.md`.
+- **Cooperative job cancellation**: pass optional cancellation/progress callbacks through
+  core and plugin kwargs. Check cancellation only at safe processor boundaries; retain
+  completed artifacts from uninterruptible work as `completed_after_request`.
 - **Fail-fast preflight**: validate platform-selected backends and requested models before expensive work.
 - **Typed errors**: raise `AimdError` subclasses where possible for predictable CLI/API/MCP mapping.
 - **Stable output contract**: `ProcessResult` preserves lossless `markdown` and an optional
@@ -114,6 +119,7 @@ flowchart TD
 - **Model naming**: use kebab-case user-facing aliases, including `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, `unlimited-ocr`, and `glm-ocr`. Legacy underscore aliases remain compatibility inputs but must not be the canonical names in new docs or help text.
 - **Precision separation**: expose model family/size through `model` and quantization/dtype through the separate `precision` option. Supported values are `4bit`, `6bit`, `8bit`, and `bf16`; dash/space/case variants may be normalized at the shared precision boundary.
 - **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI, HTTP API, MCP, core MarkItDown kwargs, URL audio fallback, local ASR, and OCR. Keep the new field optional and append it to public function signatures for compatibility.
+- **ASR context biasing**: `ProcessInput.context` (explicit biasing text) and `ProcessInput.metadata_context` (default `True`) are forwarded by CLI (`--context`/`--no-context`), HTTP API, MCP, and core MarkItDown kwargs. The URL plugin builds context from page metadata (title/author/description/tags/chapters, capped at 2000 chars) via `build_metadata_context` in `aimd.plugins.url.metadata` and injects it into the audio fallback. Qwen3-ASR consumes it as a system prompt (`system_prompt` in mlx-audio, a system chat message in Transformers); unsupported models skip it with a warning.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
 - **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on CUDA-capable non-Darwin platforms.
 - **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.

@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import urllib.parse
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from logly import logger
 from aimd.core.errors import (
     BackendUnavailableError,
     InputNotFoundError,
+    ProcessingCancelledError,
     ProcessingFailedError,
     UnsupportedInputError,
 )
@@ -504,6 +506,9 @@ def _process_epub_with_assets(
     file_path: Path,
     output_dir: Path | None = None,
     temp_dir: Path | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
 ) -> DocConversion:
     """Process an EPUB file with image extraction and spine-ordered chapters."""
     if output_dir is None:
@@ -540,7 +545,18 @@ def _process_epub_with_assets(
             raise ProcessingFailedError("No HTML/XHTML chapter files found in EPUB")
 
         chapter_files: list[tuple[str, str]] = []
-        for html_file in spine_files:
+        for index, html_file in enumerate(spine_files, start=1):
+            if cancellation_check is not None and cancellation_check():
+                raise ProcessingCancelledError(
+                    "Document conversion cancelled between chapters"
+                )
+            if progress_reporter is not None:
+                progress_reporter(
+                    "converting",
+                    index,
+                    len(spine_files),
+                    f"Converting chapter {index} of {len(spine_files)}",
+                )
             if not html_file.exists():
                 continue
 
@@ -558,6 +574,8 @@ def _process_epub_with_assets(
                 chapter_files.append((basename, content))
             except BackendUnavailableError:
                 raise
+            except ProcessingCancelledError:
+                raise
             except Exception as e:
                 logger.warning(f"Failed to convert {html_file.name}: {e}")
                 continue
@@ -568,9 +586,10 @@ def _process_epub_with_assets(
         combined_content = "\n\n---\n\n".join(
             content.strip() for _, content in chapter_files
         )
+        markdown = combined_content.strip() + "\n"
 
         full_md_path = output_dir / f"{file_path.stem}.md"
-        full_md_path.write_text(combined_content.strip() + "\n", encoding="utf-8")
+        full_md_path.write_text(markdown, encoding="utf-8")
 
         title = _extract_title_from_markdown(chapter_files[0][1], file_path.stem)
 
@@ -581,7 +600,7 @@ def _process_epub_with_assets(
 
         return DocConversion(
             title=title,
-            markdown=combined_content,
+            markdown=markdown,
             output_dir=output_dir,
         )
 
@@ -590,6 +609,9 @@ def process_doc_with_assets(
     file_path: str | Path,
     output_dir: Path | None = None,
     temp_dir: Path | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
 ) -> DocConversion:
     """Process a Pandoc-supported document into Markdown."""
     file_path = Path(file_path)
@@ -608,6 +630,8 @@ def process_doc_with_assets(
             file_path,
             output_dir=output_dir,
             temp_dir=temp_dir,
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
         )
 
     return _process_pandoc_document(

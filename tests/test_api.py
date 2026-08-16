@@ -1,8 +1,11 @@
+import asyncio
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
-from aimd.interfaces.api.app import create_app
+from aimd.interfaces.api.app import _run_job, create_app
+from aimd.interfaces.api.schemas import ProcessRequest
 from aimd.core.models import ProcessResult, TextContext
 from aimd.core.process import process_input as process_core_input
 from aimd.core.errors import (
@@ -73,7 +76,7 @@ def test_process_transcript_success_with_output_file(
     assert body["asset_base_uri"] == "https://example.com/watch"
     assert body["chunk_list"] == ["hello transcript"]
     assert Path(body["output_file"]).exists()
-    assert output_file.read_text(encoding="utf-8") == "hello transcript"
+    assert output_file.read_text(encoding="utf-8") == result.markdown
 
 
 def test_process_empty_transcript_output_is_processing_failure(
@@ -169,3 +172,134 @@ def test_process_preserves_backend_unavailable_from_processor(
     response = client.post("/v1/process", json={"input_source": str(audio)})
     assert response.status_code == 422
     assert "ASR backend unavailable" in response.json()["detail"]
+
+
+def test_job_contract_is_documented_in_openapi(monkeypatch) -> None:
+    client = _make_client(monkeypatch)
+    schema = client.get("/openapi.json").json()
+    components = schema["components"]["schemas"]
+
+    assert {
+        "JobCreated",
+        "JobEvent",
+        "JobSnapshot",
+        "ProcessArtifact",
+        "ProcessRequest",
+    } <= components.keys()
+    assert components["ProcessArtifact"]["example"]["markdown"].endswith("\n")
+    assert components["JobEvent"]["example"]["current"] == 2
+
+    events = schema["paths"]["/v1/jobs/{job_id}/events"]["get"]
+    assert any(
+        parameter["name"] == "Last-Event-ID"
+        and parameter["in"] == "header"
+        and parameter["required"] is False
+        for parameter in events["parameters"]
+    )
+    event_schema = events["responses"]["200"]["content"]["text/event-stream"]["schema"]
+    assert event_schema == {"$ref": "#/components/schemas/JobEvent"}
+
+
+def test_job_schema_freezes_cancellation_and_progress_contract(monkeypatch) -> None:
+    client = _make_client(monkeypatch)
+    components = client.get("/openapi.json").json()["components"]["schemas"]
+
+    event = components["JobEvent"]["properties"]
+    assert event["state"]["enum"] == [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+    ]
+    assert event["stage"]["anyOf"][0]["enum"] == [
+        "downloading",
+        "extracting",
+        "transcribing",
+        "ocr",
+        "converting",
+        "saving",
+    ]
+    assert event["cancellation_status"]["enum"] == [
+        "none",
+        "requested",
+        "cancelled",
+        "completed_after_request",
+    ]
+    assert event["current"]["anyOf"][0]["minimum"] == 0
+    assert event["total"]["anyOf"][0]["minimum"] == 0
+
+
+@pytest.mark.asyncio
+async def test_job_artifact_preserves_plain_markdown_exactly(
+    monkeypatch, tmp_path: Path
+) -> None:
+    markdown = "\n# Exact title\n\nBody without a final newline"
+    result = ProcessResult(
+        task_type="convert",
+        text_context=TextContext(title="Exact title", chunk_list=["lossy body"]),
+        markdown=markdown,
+        asset_base_uri=f"{tmp_path.resolve().as_uri()}/",
+    )
+
+    async def _fake_process_input(request):  # noqa: ARG001
+        return result
+
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.process_core_input", _fake_process_input
+    )
+    output_file = tmp_path / "saved.md"
+    artifact = await _run_job(
+        ProcessRequest(
+            input_source=str(tmp_path / "source.txt"), output_file=str(output_file)
+        ),
+        asyncio.Event(),
+    )
+
+    assert artifact.markdown == markdown
+    assert output_file.read_text(encoding="utf-8") == markdown
+    assert artifact.source_uri == (tmp_path / "source.txt").resolve().as_uri()
+    assert artifact.asset_base_uri == f"{tmp_path.resolve().as_uri()}/"
+
+
+@pytest.mark.asyncio
+async def test_job_artifact_preserves_asset_output_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    output_dir = tmp_path / "document"
+    output_dir.mkdir()
+    markdown = "# Document\n\n![figure](images/figure.png)\n"
+    (output_dir / "document.md").write_text(markdown, encoding="utf-8")
+    images = output_dir / "images"
+    images.mkdir()
+    (images / "figure.png").write_bytes(b"image")
+    result = ProcessResult(
+        task_type="convert",
+        text_context=TextContext(title="Document", chunk_list=["lossy"]),
+        markdown=markdown,
+        asset_base_uri=f"{output_dir.resolve().as_uri()}/",
+        output_dir=output_dir,
+    )
+
+    async def _fake_process_input(request):  # noqa: ARG001
+        return result
+
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.process_core_input", _fake_process_input
+    )
+    ignored_output = tmp_path / "ignored.md"
+    artifact = await _run_job(
+        ProcessRequest(
+            input_source=str(tmp_path / "source.docx"),
+            output_file=str(ignored_output),
+        ),
+        asyncio.Event(),
+    )
+
+    assert artifact.markdown == markdown
+    assert artifact.output_dir == str(output_dir.resolve())
+    assert artifact.output_file is None
+    assert artifact.asset_base_uri == f"{output_dir.resolve().as_uri()}/"
+    assert not ignored_output.exists()
+    assert (output_dir / "document.md").read_text(encoding="utf-8") == markdown
+    assert (images / "figure.png").read_bytes() == b"image"

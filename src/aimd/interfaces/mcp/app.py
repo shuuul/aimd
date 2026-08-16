@@ -58,6 +58,8 @@ async def process_input(
     cookies_from_browser: str | None = None,
     raw_transcript: bool = False,
     precision: str | None = None,
+    context: str | None = None,
+    metadata_context: bool = True,
 ) -> dict[str, Any]:
     """Process audio/video/url/documents and return markdown context.
 
@@ -66,6 +68,11 @@ async def process_input(
     mlx-community checkpoint (default 4bit when omitted). CUDA Transformers
     backends only accept bf16 (requires CUDA bf16 support) and otherwise keep
     automatic dtype selection when precision is omitted.
+
+    context is free-form ASR biasing text (proper nouns, names, domain
+    vocabulary) that improves transcription accuracy. metadata_context
+    (default True) additionally injects URL page metadata (title,
+    description, tags) as ASR context for URL inputs.
     """
     try:
         temp_dir = get_request_temp_dir()
@@ -84,6 +91,8 @@ async def process_input(
                 temp_dir=temp_dir,
                 raw_transcript=raw_transcript,
                 precision=precision,
+                context=context,
+                metadata_context=metadata_context,
             )
         )
 

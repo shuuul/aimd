@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import inspect
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -451,6 +452,11 @@ async def convert_url_with_markitdown(
     temp_dir: Path | None = None,
     raw_transcript: bool = False,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
+    context: str | None = None,
+    metadata_context: bool = True,
 ) -> tuple[TextContext, str, str]:
     """Convert a URL through MarkItDown and AIMD's bundled URL plugin."""
     md = MarkItDown(enable_builtins=False, enable_plugins=True)
@@ -467,6 +473,10 @@ async def convert_url_with_markitdown(
         temp_dir=temp_dir,
         raw_transcript=raw_transcript,
         precision=precision,
+        cancellation_check=cancellation_check,
+        progress_reporter=progress_reporter,
+        context=context,
+        metadata_context=metadata_context,
     )
 
     return (
@@ -490,6 +500,10 @@ async def convert_file_with_markitdown(
     start: int | None = None,
     end: int | None = None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
+    context: str | None = None,
     *,
     max_chunk_size: int = 40000,
 ) -> tuple[TextContext, str, Path | None]:
@@ -522,6 +536,9 @@ async def convert_file_with_markitdown(
         start=start,
         end=end,
         precision=precision,
+        cancellation_check=cancellation_check,
+        progress_reporter=progress_reporter,
+        context=context,
     )
     markdown = result.markdown
     return (
@@ -566,7 +583,7 @@ async def _process_url(
     request: ProcessInput,
     process_url: UrlProcessor,
 ) -> ProcessResult:
-    text_context, markdown, platform = await process_url(
+    args = (
         request.input_source,
         request.language,
         request.model,
@@ -577,6 +594,8 @@ async def _process_url(
         request.raw_transcript,
         request.precision,
     )
+    kwargs = _optional_processing_kwargs(process_url, request)
+    text_context, markdown, platform = await process_url(*args, **kwargs)
     return ProcessResult(
         task_type="transcript",
         text_context=text_context,
@@ -593,7 +612,7 @@ async def _process_local_file(
 ) -> ProcessResult:
     input_path = Path(request.input_source)
 
-    text_context, markdown, output_dir = await process_file(
+    args = (
         input_path.as_posix(),
         request.language,
         request.model,
@@ -603,6 +622,8 @@ async def _process_local_file(
         request.end,
         request.precision,
     )
+    kwargs = _optional_processing_kwargs(process_file, request)
+    text_context, markdown, output_dir = await process_file(*args, **kwargs)
     asset_base_uri = None
     if task_type != "transcript":
         asset_base_uri = _directory_uri(output_dir or input_path.parent)
@@ -613,3 +634,32 @@ async def _process_local_file(
         asset_base_uri=asset_base_uri,
         output_dir=output_dir,
     )
+
+
+def _optional_processing_kwargs(
+    processor: Callable,
+    request: ProcessInput,
+) -> dict[str, object]:
+    """Forward optional request fields without breaking legacy processor callables."""
+    try:
+        parameters = inspect.signature(processor).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    names = {parameter.name for parameter in parameters}
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    )
+
+    optional_values: dict[str, object] = {
+        "cancellation_check": request.cancellation_check,
+        "progress_reporter": request.progress_reporter,
+        "context": request.context,
+        "metadata_context": request.metadata_context,
+    }
+    kwargs: dict[str, object] = {}
+    for name, value in optional_values.items():
+        if value is None:
+            continue
+        if name in names or accepts_kwargs:
+            kwargs[name] = value
+    return kwargs

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -13,7 +14,11 @@ from markitdown import (
     StreamInfo,
 )
 
-from aimd.core.errors import InputNotFoundError, ProcessingFailedError
+from aimd.core.errors import (
+    InputNotFoundError,
+    ProcessingCancelledError,
+    ProcessingFailedError,
+)
 from aimd.core.models import TextContext
 
 from .backends import OCRPage, OCRResult, create_ocr_backend
@@ -51,6 +56,9 @@ async def _recognize_ocr_result(
     end: int | None = None,
     temp_dir: Path | None = None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
 ) -> OCRResult:
     """Validate an OCR request and return the backend result."""
     path = Path(input_path)
@@ -66,6 +74,8 @@ async def _recognize_ocr_result(
         raise ProcessingFailedError(
             "OCR start page must be less than or equal to end page."
         )
+    if cancellation_check is not None and cancellation_check():
+        raise ProcessingCancelledError("OCR cancelled before model inference")
 
     backend = create_ocr_backend()
     result = await asyncio.to_thread(
@@ -80,6 +90,14 @@ async def _recognize_ocr_result(
     )
     if not any(page.text.strip() for page in result.pages):
         raise ProcessingFailedError("OCR returned empty content")
+    if progress_reporter is not None:
+        for current in range(1, len(result.pages) + 1):
+            progress_reporter(
+                "ocr",
+                current,
+                len(result.pages),
+                f"Processed OCR page {current} of {len(result.pages)}",
+            )
     return result
 
 
@@ -91,6 +109,9 @@ def _recognize_ocr_sync(
     end: int | None = None,
     temp_dir: Path | None = None,
     precision: str | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+    progress_reporter: Callable[[str, int | None, int | None, str | None], None]
+    | None = None,
 ) -> DocumentConverterResult:
     """Synchronous MarkItDown boundary: title + markdown only."""
     result = asyncio.run(
@@ -102,6 +123,8 @@ def _recognize_ocr_sync(
             end=end,
             temp_dir=temp_dir,
             precision=precision,
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
         )
     )
     title, markdown = _ocr_result_to_markdown(result)
@@ -190,4 +213,6 @@ class AimdOCRConverter(DocumentConverter):
             end=kwargs.get("end"),
             temp_dir=kwargs.get("temp_dir"),
             precision=kwargs.get("precision"),
+            cancellation_check=kwargs.get("cancellation_check"),
+            progress_reporter=kwargs.get("progress_reporter"),
         )

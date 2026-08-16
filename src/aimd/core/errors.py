@@ -33,3 +33,9 @@ class ProcessingFailedError(AimdError):
     """Raised when processing fails in a known way."""
 
     status_code = 500
+
+
+class ProcessingCancelledError(AimdError):
+    """Raised when processing stops at a safe cooperative checkpoint."""
+
+    status_code = 409

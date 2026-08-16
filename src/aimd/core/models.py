@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,12 @@ class ProcessInput:
     temp_dir: Path | None = None
     raw_transcript: bool = False
     precision: str | None = None
+    cancellation_check: Callable[[], bool] | None = None
+    progress_reporter: (
+        Callable[[str, int | None, int | None, str | None], None] | None
+    ) = None
+    context: str | None = None
+    metadata_context: bool = True
 
 
 @dataclass(slots=True)

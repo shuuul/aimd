@@ -73,6 +73,7 @@ class TransformersASRModel:
         *,
         language: str | None = None,
         temp_dir: Path | None = None,
+        context: str | None = None,
     ) -> str:
         """Transcribe audio using native Transformers Qwen3-ASR."""
         try:
@@ -102,7 +103,7 @@ class TransformersASRModel:
 
             def _transcribe() -> str:
                 return _transcribe_qwen(
-                    audio_path, self.model_id, language, self.precision
+                    audio_path, self.model_id, language, self.precision, context
                 )
 
             transcribed_text = await asyncio.to_thread(_transcribe)
@@ -290,11 +291,54 @@ def _parse_qwen_output(output: str) -> str:
     return text
 
 
+def _build_transcription_inputs(
+    processor,
+    audio_path: Path,
+    resolved_language: str | None,
+    context: str | None,
+):
+    """Build processor inputs, injecting context as a system message when given.
+
+    Qwen3-ASR biases transcription toward free-form context (vocabulary, names,
+    background information) provided in the system turn. Without context, use
+    the convenience `apply_transcription_request` wrapper.
+    """
+    if not context:
+        return processor.apply_transcription_request(
+            audio=str(audio_path),
+            language=resolved_language,
+        )
+
+    messages: list[dict] = [
+        {"role": "system", "content": [{"type": "text", "text": context}]},
+        {
+            "role": "user",
+            "content": [{"type": "audio", "path": str(audio_path)}],
+        },
+    ]
+    chat_kwargs: dict[str, object] = {"tokenize": True, "return_dict": True}
+    if resolved_language is not None:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": f"language {resolved_language}<asr_text>"}
+                ],
+            }
+        )
+        chat_kwargs["continue_final_message"] = True
+    else:
+        chat_kwargs["add_generation_prompt"] = True
+
+    return processor.apply_chat_template([messages], **chat_kwargs)
+
+
 def _transcribe_qwen(
     audio_path: Path,
     model_name: str,
     language: str | None,
     precision: str | None = None,
+    context: str | None = None,
 ) -> str:
     """Run native Hugging Face Qwen3-ASR transcription."""
     import torch
@@ -308,9 +352,8 @@ def _transcribe_qwen(
             "upgrade to transformers>=5.14.1 for native Qwen3-ASR."
         )
 
-    inputs = processor.apply_transcription_request(
-        audio=str(audio_path),
-        language=resolved_language,
+    inputs = _build_transcription_inputs(
+        processor, audio_path, resolved_language, context
     )
     inputs = _inputs_to_model_device(inputs, asr_model)
     input_ids = inputs["input_ids"]

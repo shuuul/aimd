@@ -136,6 +136,88 @@ async def test_use_case_convert_passes_temp_dir_to_markitdown(
 
 
 @pytest.mark.asyncio
+async def test_use_case_job_controls_are_optional_for_legacy_processors(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy.txt"
+    source.write_text("source", encoding="utf-8")
+
+    def cancellation_check() -> bool:
+        return False
+
+    progress: list[tuple[str, int | None, int | None, str | None]] = []
+
+    async def legacy_process_file(
+        input_path,
+        language,
+        model,
+        temp_dir,
+        task_type,
+        start,
+        end,
+        precision,
+    ):
+        return TextContext(title="legacy", chunk_list=["body"]), "body", None
+
+    result = await process_input(
+        ProcessInput(
+            input_source=str(source),
+            cancellation_check=cancellation_check,
+            progress_reporter=lambda stage, current, total, message: progress.append(
+                (stage, current, total, message)
+            ),
+        ),
+        process_url=_unexpected_process_url,
+        process_file=legacy_process_file,
+        is_supported_file_fn=lambda _: True,
+    )
+
+    assert result.markdown == "body"
+    assert progress == []
+
+
+@pytest.mark.asyncio
+async def test_use_case_forwards_job_controls_to_updated_processors(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "updated.txt"
+    source.write_text("source", encoding="utf-8")
+
+    def cancellation_check() -> bool:
+        return False
+
+    def progress_reporter(stage, current, total, message):
+        return None
+
+    received: dict[str, object] = {}
+
+    async def updated_process_file(
+        *args,
+        cancellation_check=None,
+        progress_reporter=None,
+    ):
+        received["cancellation_check"] = cancellation_check
+        received["progress_reporter"] = progress_reporter
+        return TextContext(title="updated", chunk_list=["body"]), "body", None
+
+    await process_input(
+        ProcessInput(
+            input_source=str(source),
+            cancellation_check=cancellation_check,
+            progress_reporter=progress_reporter,
+        ),
+        process_url=_unexpected_process_url,
+        process_file=updated_process_file,
+        is_supported_file_fn=lambda _: True,
+    )
+
+    assert received == {
+        "cancellation_check": cancellation_check,
+        "progress_reporter": progress_reporter,
+    }
+
+
+@pytest.mark.asyncio
 async def test_use_case_ocr_passes_options_to_markitdown(tmp_path: Path) -> None:
     image = tmp_path / "page.png"
     image.write_text("x", encoding="utf-8")

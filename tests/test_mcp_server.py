@@ -36,7 +36,7 @@ async def test_mcp_process_input_transcript(monkeypatch, tmp_path: Path) -> None
     assert result["markdown"] == "# Raw\n\nhello"
     assert result["asset_base_uri"] == "https://example.com/watch"
     assert result["output_file"] is not None
-    assert output_file.read_text(encoding="utf-8") == "hello"
+    assert output_file.read_text(encoding="utf-8") == result["markdown"]
 
 
 @pytest.mark.asyncio
@@ -76,6 +76,7 @@ async def test_mcp_process_input_accepts_valid_task_type(
                 chunk_list=["ocr"],
                 split_header_level=None,
             ),
+            markdown="ocr",
         )
 
     monkeypatch.setattr(

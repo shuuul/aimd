@@ -41,6 +41,7 @@ class MLXAudioASRModel:
         *,
         language: str | None = None,
         temp_dir: Path | None = None,
+        context: str | None = None,
     ) -> str:
         """Transcribe audio using mlx-audio STT (Apple Silicon only)."""
         if platform.system() != "Darwin":
@@ -72,10 +73,16 @@ class MLXAudioASRModel:
             def _transcribe() -> str:
                 stt_model = load_stt(self.model_id)
                 generate_kwargs = {}
-                if resolved_language is not None:
-                    signature = inspect.signature(stt_model.generate)
-                    if "language" in signature.parameters:
-                        generate_kwargs["language"] = resolved_language
+                signature = inspect.signature(stt_model.generate)
+                if resolved_language is not None and "language" in signature.parameters:
+                    generate_kwargs["language"] = resolved_language
+                if context and "system_prompt" in signature.parameters:
+                    generate_kwargs["system_prompt"] = context
+                elif context:
+                    logger.warning(
+                        f"ASR model {self.model_id} does not support context "
+                        "biasing (system_prompt); ignoring context."
+                    )
                 result = stt_model.generate(str(audio_path), **generate_kwargs)
                 return result.text.strip()
 

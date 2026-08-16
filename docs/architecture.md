@@ -64,6 +64,13 @@ other local convert/OCR work, and `None` for local transcriptions without relate
 Local directory URIs always end in `/` so standards-based URL joining preserves directory
 semantics.
 
+Asset-producing document conversions create `output_dir` beside the local source. The
+directory is durable caller-owned output, not request-scoped temporary storage, and AIMD
+does not clean it up when an interface call completes. Interfaces therefore ignore a
+separate requested `output_file` for these results so relative links remain valid. Other
+requested files are persisted byte-for-byte from `ProcessResult.markdown`; interfaces
+must not reconstruct them from `TextContext.chunk_list`.
+
 ## Backend And Model Boundaries
 
 Model selection is task-specific and flows through `ProcessInput.model` to the selected processor:
@@ -77,6 +84,8 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.plugins.asr.const` and `aimd.plugins.ocr.backends`.
 
 For performance expectations and benchmarking guidance, see [Performance](performance.md).
+For the authenticated loopback process, path, job, and output-lifetime boundary used by
+desktop clients, see [Local desktop sidecar contract](sidecar.md).
 
 ## MarkItDown Worker And Domain-Error Normalization
 

@@ -17,6 +17,64 @@ from .cookies import (
 )
 from .ydl import create_info_ydl
 
+_MAX_DESCRIPTION_CHARS = 800
+_MAX_TAG_COUNT = 20
+_MAX_CHAPTER_COUNT = 30
+_MAX_CONTEXT_CHARS = 2000
+
+
+def build_metadata_context(info_dict: dict[str, Any]) -> str | None:
+    """Build an ASR biasing context from extracted URL metadata.
+
+    The returned free-form text is injected into the ASR model's system prompt
+    so proper nouns, names, and domain terminology mentioned in the page
+    metadata are recognized more accurately. Returns None when no useful
+    metadata is available.
+    """
+    parts: list[str] = []
+
+    title = info_dict.get("title")
+    if isinstance(title, str) and title.strip():
+        parts.append(f"Title: {title.strip()}")
+
+    uploader = info_dict.get("uploader") or info_dict.get("channel")
+    if isinstance(uploader, str) and uploader.strip():
+        parts.append(f"Author: {uploader.strip()}")
+
+    description = info_dict.get("description")
+    if isinstance(description, str) and description.strip():
+        parts.append(f"Description: {description.strip()[:_MAX_DESCRIPTION_CHARS]}")
+
+    tags = [
+        tag.strip()
+        for tag in info_dict.get("tags") or []
+        if isinstance(tag, str) and tag.strip()
+    ]
+    if tags:
+        parts.append(f"Tags: {', '.join(tags[:_MAX_TAG_COUNT])}")
+
+    chapters = [
+        chapter["title"].strip()
+        for chapter in info_dict.get("chapters") or []
+        if isinstance(chapter, dict)
+        and isinstance(chapter.get("title"), str)
+        and chapter["title"].strip()
+    ]
+    if chapters:
+        parts.append(f"Chapters: {'; '.join(chapters[:_MAX_CHAPTER_COUNT])}")
+
+    if not parts:
+        return None
+
+    body = "\n".join(parts)
+    context = (
+        "The following background information describes the audio being "
+        "transcribed. Use it to recognize proper nouns, names, and domain "
+        "terminology accurately.\n"
+        f"{body}"
+    )
+    return context[:_MAX_CONTEXT_CHARS]
+
 
 async def extract_video_info(
     *,
