@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/shuuul/aimd/main/assets/aimd-banner-sm.png" alt="aimd">
 
   <a href="https://www.python.org/">
-    <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white" alt="Python 3.10, 3.11, 3.12">
+    <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white" alt="Python 3.10, 3.11, 3.12, 3.13">
   </a>
   <a href="https://docs.astral.sh/uv/">
     <img src="https://img.shields.io/badge/uv-package-654FF0?logo=uv&logoColor=white" alt="uv package">
