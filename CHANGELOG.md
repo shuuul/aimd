@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/shuuul/aimd/compare/v0.18.3...v0.19.0) (2026-08-16)
+
+
+### Features
+
+* add job-based API, sidecar contract, and ASR context biasing ([abbbf62](https://github.com/shuuul/aimd/commit/abbbf62040d7902aabc42e535d9ccb69c3b25869))
+
 ## [0.18.3](https://github.com/shuuul/aimd/compare/v0.18.2...v0.18.3) (2026-08-15)
 
 
