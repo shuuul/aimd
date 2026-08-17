@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/shuuul/aimd/compare/v0.21.0...v0.22.0) (2026-08-17)
+
+
+### Features
+
+* **api:** accept uploaded blobs as a job source ([2456c43](https://github.com/shuuul/aimd/commit/2456c43da0e26b2b3471036eec6c0324df6306bc))
+
 ## [0.21.0](https://github.com/shuuul/aimd/compare/v0.20.0...v0.21.0) (2026-08-16)
 
 
