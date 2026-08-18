@@ -7,6 +7,7 @@ from .glm import GLM_OCR_MODEL_ID, GLMOCRModel
 from .unlimited import (
     UNLIMITED_OCR_MODEL_ID,
     UnlimitedOCRModel,
+    normalize_unlimited_ocr_markdown,
     normalize_unlimited_ocr_output,
     read_unlimited_ocr_output_files,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "TransformersOCRModel",
     "clear_model_cache",
     "create_transformers_ocr_model",
+    "normalize_unlimited_ocr_markdown",
     "normalize_unlimited_ocr_output",
     "read_unlimited_ocr_output_files",
     "resolve_transformers_ocr_model",

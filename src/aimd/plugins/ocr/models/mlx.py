@@ -10,6 +10,8 @@ from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 from aimd.core.precision import SUPPORTED_PRECISIONS, normalize_precision
 from aimd.core.version import parse_version_tuple
 
+from .unlimited import normalize_unlimited_ocr_markdown
+
 DEFAULT_OCR_MODEL = "unlimited-ocr"
 MLX_VLM_DEFAULT_MODEL_ID = "mlx-community/Unlimited-OCR-4bit"
 GLM_OCR_DEFAULT_MODEL_ID = "mlx-community/GLM-OCR-4bit"
@@ -322,4 +324,7 @@ def _generate_unlimited_ocr_text(
     text = str(getattr(result, "text", result)).strip()
     if not text:
         raise ProcessingFailedError("Unlimited-OCR produced empty content")
-    return text
+    markdown = normalize_unlimited_ocr_markdown(text)
+    if not markdown:
+        raise ProcessingFailedError("Unlimited-OCR produced empty content")
+    return markdown

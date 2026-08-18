@@ -29,6 +29,7 @@ from aimd.plugins.ocr.models.mlx import (
 )
 from aimd.plugins.ocr.models.unlimited import (
     UnlimitedOCRModel,
+    normalize_unlimited_ocr_markdown,
     normalize_unlimited_ocr_output,
     read_unlimited_ocr_output_files,
 )
@@ -271,7 +272,9 @@ def test_mlx_vlm_unlimited_ocr_image_uses_gundam_settings(
         captured["generate_processor"] = processor
         captured["formatted_prompt"] = prompt
         captured.update(kwargs)
-        return types.SimpleNamespace(text="recognized unlimited")
+        return types.SimpleNamespace(
+            text="<|det|>text [1, 2, 3, 4]<|/det|>recognized unlimited"
+        )
 
     monkeypatch.setitem(
         sys.modules,
@@ -556,7 +559,7 @@ def test_transformers_engine_unlimited_ocr_image_uses_model_infer(
         def infer(self, tokenizer, **kwargs):  # noqa: ANN001
             captured["tokenizer"] = tokenizer
             captured.update(kwargs)
-            return "recognized markdown"
+            return "<|det|>text [1, 2, 3, 4]<|/det|>recognized markdown"
 
     monkeypatch.setattr(
         "aimd.plugins.ocr.models.unlimited.get_cached_model_and_processor",
@@ -624,6 +627,20 @@ def test_normalize_unlimited_ocr_output_accepts_common_shapes() -> None:
         {"pages": [{"text": "one"}, {"markdown": "two"}]},
         expected_pages=2,
     ) == ["one", "two"]
+
+
+def test_normalize_unlimited_ocr_markdown_removes_layout_protocol() -> None:
+    raw = (
+        "<|det|>title [443, 67, 554, 87]<|/det|># Document title\n"
+        "<|det|>text [249, 98, 740, 118]<|/det|>First paragraph.\n"
+        "continued line\n"
+        "<|det|>image [10, 20, 30, 40]<|/det|>\n"
+        "<|det|>text [50, 60, 70, 80]<|/det|>- list item"
+    )
+
+    assert normalize_unlimited_ocr_markdown(raw) == (
+        "# Document title\n\nFirst paragraph.\ncontinued line\n\n- list item"
+    )
 
 
 def test_read_unlimited_ocr_output_files_fallback(tmp_path: Path) -> None:

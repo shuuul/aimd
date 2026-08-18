@@ -1,6 +1,7 @@
 """Baidu Unlimited-OCR Transformers model adapter."""
 
 from pathlib import Path
+import re
 import tempfile
 
 from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
@@ -12,6 +13,38 @@ from .base import (
 )
 
 UNLIMITED_OCR_MODEL_ID = "baidu/Unlimited-OCR"
+_DETECTION_LINE = re.compile(
+    r"<\|det\|>([^<\s]+)(?:\s*\[[^\]]*\])?\s*<\|/det\|>(.*)",
+    re.DOTALL,
+)
+
+
+def normalize_unlimited_ocr_markdown(raw: str) -> str:
+    """Remove Unlimited-OCR layout protocol while preserving document content."""
+    if "<|det|>" not in raw:
+        return raw.strip()
+
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in raw.splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        match = _DETECTION_LINE.match(line)
+        if match:
+            category, content = match.group(1).strip(), match.group(2).strip()
+            if category == "image":
+                continue
+            if current is not None:
+                blocks.append(current)
+            current = [content] if content else []
+            continue
+        if current is None:
+            current = []
+        current.append(line)
+    if current is not None:
+        blocks.append(current)
+    return "\n\n".join("\n".join(block) for block in blocks).strip()
 
 
 class UnlimitedOCRModel:
@@ -87,7 +120,10 @@ class UnlimitedOCRModel:
                 )
             if texts is None or any(not text.strip() for text in texts):
                 raise ProcessingFailedError("Unlimited-OCR produced empty content")
-            return [text.strip() for text in texts]
+            markdown_pages = [normalize_unlimited_ocr_markdown(text) for text in texts]
+            if any(not text for text in markdown_pages):
+                raise ProcessingFailedError("Unlimited-OCR produced empty content")
+            return markdown_pages
 
 
 def normalize_unlimited_ocr_output(
