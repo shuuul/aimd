@@ -96,6 +96,7 @@ flowchart TD
 | Markdown shaping | `src/aimd/core/process.py` | Chunking and title extraction for MarkItDown/URL output. |
 | Document conversion | `src/aimd/plugins/doc/` | MarkItDown plugin, Pandoc-supported formats, EPUB cleanup/image extraction, pdf-inspector text-layer PDF conversion. |
 | OCR conversion | `src/aimd/plugins/ocr/` | MarkItDown plugin; engines in `ocr/models/`, image/scanned PDF processing. |
+| Tracked specs | `specs/` | Execution specs with validated lifecycle; rules, numbering, and index live in `specs/README.md`. |
 
 ## CONVENTIONS
 
@@ -123,6 +124,48 @@ flowchart TD
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
 - **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on CUDA-capable non-Darwin platforms.
 - **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.
+
+## TRACKED SPECS
+
+Long-running, multi-workstream, or handoff-heavy work is tracked as execution
+specs in `specs/` with a validated lifecycle. A spec records intent,
+decisions, workstream progress, and acceptance evidence; it does not replace
+durable docs, code, tests, or schemas. Stable behavior must still land in the
+nearest `AGENTS.md`, docs, and code after closeout.
+
+When a spec is required:
+
+- Work spans multiple workstreams, agents, or explicit handoffs.
+- Work needs coordinated decisions or acceptance evidence before parallel
+  work starts.
+
+How to write and close a spec:
+
+1. Copy `specs/000-template.md` to `specs/NNN-kebab-case.md`. Reserve the
+   next free ID by scanning both `specs/` and `specs/archive/`; never reuse,
+   renumber, or delete an ID.
+2. Fill the flat frontmatter (`id`, `title`, `status`, `created`, `updated`,
+   `coordinator`) and every required section: `Context`, `Goal and success
+   criteria`, `Scope and non-goals`, `Decisions`, `Workstreams`,
+   `Verification`, `Documentation sync`, `Progress and handoff`, and
+   `Completion summary`.
+3. Add the index row to `specs/README.md` in ascending ID order and set
+   `status: Active` once the contract is decision-complete. Reserve the ID
+   and index the spec BEFORE parallel work starts.
+4. Workers claim a workstream row (`WS-01`, ...) before editing and append
+   entries under `Progress and handoff`; never rewrite another worker's
+   history. Record blocking at the workstream level, not as a fourth status.
+5. Close out by satisfying every success criterion (or recording the decision
+   that removed one), syncing lasting knowledge into docs/`AGENTS.md`,
+   completing the summary, setting `status: Completed`, and moving the file
+   plus its index row to `specs/archive/` in the same change.
+6. Run `uv run check:specs` and the focused validator tests
+   (`tests/test_check_specs.py`, also covered by `uv run pytest -q`) after
+   any spec change and always before archiving; CI runs the same gate via
+   `uv run python scripts/check_specs.py`.
+
+Canonical lifecycle, numbering, coordination, and closeout rules live in
+`specs/README.md`; `scripts/check_specs.py` enforces them structurally.
 
 ## MODEL AND PRECISION DESIGN
 
@@ -181,6 +224,7 @@ uv run ruff check --fix
 uv run ruff format
 uv run prek --all-files
 uv run prek autoupdate
+uv run python scripts/check_specs.py  # tracked specs lifecycle validator
 
 # Tests
 uv run pytest -q

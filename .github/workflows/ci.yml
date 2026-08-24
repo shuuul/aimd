@@ -68,5 +68,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
+      - name: Check tracked specs
+        run: uv run python scripts/check_specs.py
+
       - name: Run tests
         run: uv run pytest -q
