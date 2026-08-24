@@ -1,6 +1,6 @@
 [project]
 name = "aimd-tool"
-version = "0.23.0"
+version = "0.23.1"
 description = "Context preparation tool for LLM workflows."
 readme = "README.md"
 authors = [

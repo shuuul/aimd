@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/shuuul/aimd/compare/v0.23.0...v0.23.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **url:** download native YouTube captions and format transcripts ([6ac9038](https://github.com/shuuul/aimd/commit/6ac903868caa2cd9e4637deb42c37c00285ab1a9))
+
 ## [0.23.0](https://github.com/shuuul/aimd/compare/v0.22.0...v0.23.0) (2026-08-24)
 
 
