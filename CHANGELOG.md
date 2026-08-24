@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.23.0](https://github.com/shuuul/aimd/compare/v0.22.0...v0.23.0) (2026-08-24)
+
+
+### Features
+
+* **remote:** add OpenAI-compatible ASR and OCR backends ([a81dc82](https://github.com/shuuul/aimd/commit/a81dc82e11caf858d4fb741b68583fd9ca75e26b))
+
+
+### Bug Fixes
+
+* **ocr:** normalize Unlimited-OCR markdown ([b353f72](https://github.com/shuuul/aimd/commit/b353f722db65da3ab14b3f6316769059fee09095))
+
 ## [0.22.0](https://github.com/shuuul/aimd/compare/v0.21.0...v0.22.0) (2026-08-17)
 
 
