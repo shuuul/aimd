@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 from logly import logger
+from yt_dlp.networking.exceptions import HTTPError, TransportError
 
 from .ydl import create_subtitle_ydl
 
@@ -364,16 +367,178 @@ def _iter_subtitle_candidates(
     return candidates
 
 
-def _pick_subtitle_url(entries: Sequence[SubtitleEntry]) -> str | None:
-    """Pick an SRT/VTT/TTML subtitle URL from yt-dlp subtitle entries."""
-    preferred_formats = ["srt", "vtt", "ttml"]
-    for fmt in preferred_formats:
+# YouTube auto-captions advertise json3/srv*/ttml/srt/vtt. Native json3 and
+# srv1 are served directly; ``fmt=srt``/srv2/srv3 are converted on demand and
+# often stall or 502 on long ASR tracks. json3/srv1 are normalized to SRT
+# after download so stripping and ``raw_transcript`` keep working.
+_PREFERRED_SUBTITLE_FORMATS = ("json3", "ttml", "vtt", "srv1", "srt")
+_SUBTITLE_DOWNLOAD_ATTEMPTS = 3
+_SUBTITLE_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
+_RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
+_DEFAULT_CUE_DURATION_MS = 1000
+
+
+def _iter_subtitle_urls(entries: Sequence[SubtitleEntry]) -> list[str]:
+    """Return subtitle URLs in download-preference order."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for fmt in _PREFERRED_SUBTITLE_FORMATS:
         for entry in entries:
-            if entry.get("ext") == fmt:
-                url = entry.get("url")
-                if isinstance(url, str) and url:
-                    return url
-    return None
+            if entry.get("ext") != fmt:
+                continue
+            url = entry.get("url")
+            if isinstance(url, str) and url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return urls
+
+
+def _pick_subtitle_url(entries: Sequence[SubtitleEntry]) -> str | None:
+    """Pick a preferred subtitle URL from yt-dlp subtitle entries."""
+    urls = _iter_subtitle_urls(entries)
+    return urls[0] if urls else None
+
+
+def _ms_to_srt_timestamp(ms: int) -> str:
+    """Format milliseconds as an SRT timestamp (HH:MM:SS,mmm)."""
+    if ms < 0:
+        ms = 0
+    hours, remainder = divmod(ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _cues_to_srt(cues: list[tuple[int, int, str]]) -> str | None:
+    """Render (start_ms, end_ms, text) cues as SRT, or None when empty."""
+    if not cues:
+        return None
+    blocks: list[str] = []
+    for index, (start_ms, end_ms, text) in enumerate(cues, start=1):
+        end = end_ms if end_ms > start_ms else start_ms + _DEFAULT_CUE_DURATION_MS
+        blocks.append(
+            f"{index}\n{_ms_to_srt_timestamp(start_ms)} --> {_ms_to_srt_timestamp(end)}\n{text}"
+        )
+    return "\n\n".join(blocks) + "\n"
+
+
+def _json3_to_srt(text: str) -> str | None:
+    """Convert YouTube json3 timedtext into SRT."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    events = data.get("events")
+    if not isinstance(events, list):
+        return None
+
+    cues: list[tuple[int, int, str]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        segs = event.get("segs")
+        if not isinstance(segs, list):
+            continue
+        parts: list[str] = []
+        for seg in segs:
+            if not isinstance(seg, dict):
+                continue
+            utf8 = seg.get("utf8")
+            if isinstance(utf8, str) and utf8 not in {"\n", "\r\n"}:
+                parts.append(utf8)
+        body = "".join(parts).replace("\n", " ").strip()
+        if not body:
+            continue
+        start = event.get("tStartMs")
+        if not isinstance(start, int | float):
+            continue
+        start_ms = int(start)
+        duration = event.get("dDurationMs")
+        duration_ms = (
+            int(duration)
+            if isinstance(duration, int | float) and duration > 0
+            else _DEFAULT_CUE_DURATION_MS
+        )
+        cues.append((start_ms, start_ms + duration_ms, body))
+    return _cues_to_srt(cues)
+
+
+def _srv1_to_srt(text: str) -> str | None:
+    """Convert YouTube srv1 ``<transcript>`` timedtext into SRT."""
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+
+    cues: list[tuple[int, int, str]] = []
+    for element in root.iter("text"):
+        body = "".join(element.itertext()).replace("\n", " ").strip()
+        if not body:
+            continue
+        try:
+            start_ms = int(float(element.attrib.get("start", "0")) * 1000)
+            duration_s = float(element.attrib.get("dur", "0") or 0)
+        except ValueError:
+            continue
+        duration_ms = (
+            int(duration_s * 1000) if duration_s > 0 else _DEFAULT_CUE_DURATION_MS
+        )
+        cues.append((start_ms, start_ms + duration_ms, body))
+    return _cues_to_srt(cues)
+
+
+def _srv3_to_srt(text: str) -> str | None:
+    """Convert YouTube srv3 ``<timedtext>`` XML into SRT."""
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+
+    cues: list[tuple[int, int, str]] = []
+    for element in root.iter("p"):
+        body = "".join(element.itertext()).replace("\n", " ").strip()
+        if not body:
+            continue
+        try:
+            start_ms = int(float(element.attrib.get("t", "0")))
+            duration_ms = int(float(element.attrib.get("d", "0") or 0))
+        except ValueError:
+            continue
+        if duration_ms <= 0:
+            duration_ms = _DEFAULT_CUE_DURATION_MS
+        cues.append((start_ms, start_ms + duration_ms, body))
+    return _cues_to_srt(cues)
+
+
+def _normalize_subtitle_payload(text: str) -> str | None:
+    """Normalize native YouTube captions to SRT; leave SRT/VTT/TTML unchanged.
+
+    Returns None when the payload looks like a native caption format but yields
+    no cues, so the caller can try the next advertised format.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    head = stripped[:2000]
+    if stripped.startswith("{") and ('"events"' in head or '"wireMagic"' in head):
+        return _json3_to_srt(stripped)
+    if "<transcript" in head:
+        return _srv1_to_srt(stripped)
+    if "<timedtext" in head:
+        return _srv3_to_srt(stripped)
+    return stripped
+
+
+def _is_retryable_subtitle_error(exc: BaseException) -> bool:
+    """Return True for transient timedtext timeouts and gateway failures."""
+    if isinstance(exc, TimeoutError | TransportError):
+        return True
+    if isinstance(exc, HTTPError):
+        return exc.status in _RETRYABLE_HTTP_STATUS
+    return False
 
 
 async def download_subtitle(
@@ -381,7 +546,12 @@ async def download_subtitle(
     platform: str,
     cookie_source: dict[str, Any] | None = None,
 ) -> str | None:
-    """Download subtitle content from URL using yt-dlp and the selected cookies."""
+    """Download subtitle content from URL using yt-dlp and the selected cookies.
+
+    YouTube's on-demand SRT conversion for auto-captions is flaky (timeouts and
+    502s on long videos). Retry the same URL a few times before giving up so a
+    later format/language fallback is not forced by a single blip.
+    """
 
     def _download() -> str:
         with create_subtitle_ydl(
@@ -391,11 +561,27 @@ async def download_subtitle(
             response = ydl.urlopen(url)
             return response.read().decode("utf-8")
 
-    try:
-        return await asyncio.to_thread(_download)
-    except Exception as exc:
-        logger.error(f"Failed to download subtitle from {url}: {exc}")
-        return None
+    for attempt in range(1, _SUBTITLE_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return await asyncio.to_thread(_download)
+        except Exception as exc:
+            if attempt < _SUBTITLE_DOWNLOAD_ATTEMPTS and _is_retryable_subtitle_error(
+                exc
+            ):
+                delay = _SUBTITLE_RETRY_BACKOFF_SECONDS[
+                    min(attempt - 1, len(_SUBTITLE_RETRY_BACKOFF_SECONDS) - 1)
+                ]
+                logger.warning(
+                    "Subtitle download failed "
+                    f"(attempt {attempt}/{_SUBTITLE_DOWNLOAD_ATTEMPTS}): {exc}; "
+                    f"retrying in {delay}s"
+                )
+                if delay:
+                    await asyncio.sleep(delay)
+                continue
+            logger.error(f"Failed to download subtitle from {url}: {exc}")
+            return None
+    return None
 
 
 async def extract_subtitles(
@@ -494,26 +680,32 @@ async def extract_subtitles(
                 logger.error(f"Unsupported platform for subtitles: {platform}")
                 return None
 
-            sub_url = _pick_subtitle_url(selected_sub)
-            if not sub_url:
+            sub_urls = _iter_subtitle_urls(selected_sub)
+            if not sub_urls:
                 logger.warning(
                     "No suitable subtitle format found for "
-                    f"{selected_lang} (tried SRT, VTT, TTML)"
+                    f"{selected_lang} (tried json3, TTML, VTT, srv1, SRT)"
                 )
                 continue
 
-            subtitle_content = await download_subtitle(
-                sub_url,
-                platform,
-                cookie_source=cookie_source,
-            )
-            if subtitle_content and subtitle_content.strip():
-                logger.info(
-                    f"Selected subtitle language: {selected_lang} "
-                    f"({'manual' if is_manual else 'auto'})"
+            for sub_url in sub_urls:
+                subtitle_content = await download_subtitle(
+                    sub_url,
+                    platform,
+                    cookie_source=cookie_source,
                 )
-                logger.info(f"Successfully extracted subtitles using {platform} format")
-                return subtitle_content
+                if not subtitle_content or not subtitle_content.strip():
+                    continue
+                normalized = _normalize_subtitle_payload(subtitle_content)
+                if normalized and normalized.strip():
+                    logger.info(
+                        f"Selected subtitle language: {selected_lang} "
+                        f"({'manual' if is_manual else 'auto'})"
+                    )
+                    logger.info(
+                        f"Successfully extracted subtitles using {platform} format"
+                    )
+                    return normalized
 
         logger.info("No suitable subtitles found")
         return None

@@ -47,7 +47,8 @@ core processing → feature plugins via the `dir=` parameter of
 
 ## SUBTITLE FORMATTING
 
-URL-sourced subtitles (SRT/VTT/TTML) are simplified to plain text by default.
+URL-sourced subtitles (SRT/VTT/TTML, plus YouTube json3/srv1/srv3
+normalized to SRT) are simplified to plain text by default.
 The `raw_transcript` field on `ProcessInput` (default `False`) controls this:
 
 - **CLI**: `--raw-transcript` flag
@@ -56,7 +57,11 @@ The `raw_transcript` field on `ProcessInput` (default `False`) controls this:
 
 The stripping is performed by `strip_subtitle_formatting()` in
 `aimd.plugins.url.markdown`, applied in `aimd.plugins.url._plugin` before
-`format_content()` embeds the text into the markdown output.
+`format_content()` embeds the text into the markdown output. Default
+(non-`raw_transcript`) output linearizes YouTube ASR rolling windows so
+json3, srv1, SRT, VTT, and TTML produce the same Markdown body, then
+emits one sentence per line. YouTube auto-caption ``>>`` speaker-change
+markers are kept at the start of the new turn.
 
 ## TRANSCRIPTION MODELS
 

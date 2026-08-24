@@ -101,6 +101,12 @@ def create_info_ydl(
     return yt_dlp.YoutubeDL(ydl_opts)
 
 
+# yt-dlp's networking default is 20s. YouTube timedtext conversion of long
+# ASR tracks (especially ``fmt=srt``) can stall past that before succeeding
+# or returning 502, so subtitle fetches wait a bit longer.
+SUBTITLE_SOCKET_TIMEOUT = 40.0
+
+
 def create_subtitle_ydl(
     *,
     platform: str,
@@ -108,6 +114,7 @@ def create_subtitle_ydl(
 ) -> yt_dlp.YoutubeDL:
     """Create a YoutubeDL client for direct subtitle download."""
     ydl_opts = _base_ydl_opts(platform)
+    ydl_opts["socket_timeout"] = SUBTITLE_SOCKET_TIMEOUT
     apply_cookie_source(ydl_opts, cookie_source)
 
     return yt_dlp.YoutubeDL(ydl_opts)
