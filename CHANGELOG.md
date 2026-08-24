@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.2](https://github.com/shuuul/aimd/compare/v0.23.1...v0.23.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **url:** strip YouTube word timing tags ([445eb16](https://github.com/shuuul/aimd/commit/445eb16356b2e88f5fef5a4186a32957583bde89))
+
 ## [0.23.1](https://github.com/shuuul/aimd/compare/v0.23.0...v0.23.1) (2026-08-24)
 
 
