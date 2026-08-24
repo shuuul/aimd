@@ -12,12 +12,12 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
-| [001-remote-asr-ocr.md](001-remote-asr-ocr.md) | Draft | Opt-in OpenAI-compatible ASR/OCR HTTP backends for dspark vLLM |
 
 ## Archived specs
 
 | Spec | Completed | Outcome |
 | --- | --- | --- |
+| [001-remote-asr-ocr.md](archive/001-remote-asr-ocr.md) | 2026-08-24 | Opt-in OpenAI-compatible ASR/OCR HTTP backends for dspark vLLM |
 
 ## Lifecycle
 

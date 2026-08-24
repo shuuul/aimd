@@ -70,6 +70,9 @@ async def extract_content_from_audio(
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
     context: str | None = None,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
 ) -> str | None:
     """Extract content by downloading audio and transcribing it."""
     if save_original_path is not None:
@@ -94,6 +97,9 @@ async def extract_content_from_audio(
             cancellation_check=cancellation_check,
             progress_reporter=progress_reporter,
             context=context,
+            asr_base_url=asr_base_url,
+            asr_model=asr_model,
+            asr_api_key=asr_api_key,
         )
 
     with tempfile.TemporaryDirectory(dir=temp_dir) as tmp:
@@ -111,6 +117,9 @@ async def extract_content_from_audio(
             cancellation_check=cancellation_check,
             progress_reporter=progress_reporter,
             context=context,
+            asr_base_url=asr_base_url,
+            asr_model=asr_model,
+            asr_api_key=asr_api_key,
         )
 
 
@@ -130,6 +139,9 @@ async def _download_and_transcribe_audio(
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
     context: str | None = None,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
 ) -> str | None:
     """Download URL audio and transcribe it for fallback extraction."""
     try:
@@ -155,6 +167,9 @@ async def _download_and_transcribe_audio(
             cancellation_check=cancellation_check,
             progress_reporter=progress_reporter,
             context=context,
+            asr_base_url=asr_base_url,
+            asr_model=asr_model,
+            asr_api_key=asr_api_key,
         )
         if transcribed_text and len(transcribed_text) > 10:
             return transcribed_text

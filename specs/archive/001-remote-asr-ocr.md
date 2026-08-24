@@ -1,7 +1,7 @@
 ---
 id: "001"
 title: "Remote ASR and OCR HTTP backends"
-status: Draft
+status: Completed
 created: 2026-08-24
 updated: 2026-08-24
 coordinator: "David"
@@ -31,14 +31,14 @@ Clients (Mac, metacube, dspark) should call these URLs instead of loading 4–7 
 
 A user can point aimd at those HTTP services with env or CLI, keep the same kebab-case model aliases, and get markdown out without CUDA/MLX weights on the client.
 
-- [ ] With `AIMD_ASR_BASE_URL=http://192.168.100.114:8000/v1` (and optional `AIMD_ASR_MODEL=Qwen3-ASR-1.7B`), `aimd audio.wav --model qwen3-asr-1.7b` transcribes via `POST /v1/audio/transcriptions` and does not import mlx-audio or load a local checkpoint. Verify: unit test with a mocked HTTP server plus one live LAN smoke test.
-- [ ] With `AIMD_OCR_BASE_URL=http://192.168.100.114:10000/v1` (and optional `AIMD_OCR_MODEL=Unlimited-OCR`), `aimd scan.png --model unlimited-ocr` (and scanned PDFs already routed to OCR) calls chat completions with an image payload and Unlimited-OCR prompt conventions. Verify: mocked HTTP plus one live image smoke test.
-- [ ] When those env vars (or CLI equivalents) are **unset**, Darwin still uses MLX and CUDA Linux still uses Transformers. Verify: existing ASR/OCR tests stay green; no network calls in that path.
-- [ ] `--precision` on a remote request is ignored with a single warning (weights already quantized server-side). Verify: log assertion in the remote unit tests.
-- [ ] `ProcessInput.context` / metadata context is forwarded to Qwen3-ASR as the transcription prompt / extra body the vLLM endpoint accepts; unsupported fields are skipped with a warning, matching current local behavior. Verify: request-body fixture.
-- [ ] Missing or unreachable remote URL raises `BackendUnavailableError` (not a generic HTTP traceback). Verify: mocked connection failure.
-- [ ] CLI, HTTP API, and MCP all honor the same remote settings (env and explicit flags). Verify: one test per interface or a shared resolver test used by all three.
-- [ ] `uv run python scripts/check_specs.py` and `uv run pytest -q tests/test_check_specs.py` pass after this spec lands.
+- [x] With `AIMD_ASR_BASE_URL=http://192.168.100.114:8000/v1` (and optional `AIMD_ASR_MODEL=Qwen3-ASR-1.7B`), `aimd audio.wav --model qwen3-asr-1.7b` transcribes via `POST /v1/audio/transcriptions` and does not import mlx-audio or load a local checkpoint. Verify: unit test with a mocked HTTP server plus one live LAN smoke test.
+- [x] With `AIMD_OCR_BASE_URL=http://192.168.100.114:10000/v1` (and optional `AIMD_OCR_MODEL=Unlimited-OCR`), `aimd scan.png --model unlimited-ocr` (and scanned PDFs already routed to OCR) calls chat completions with an image payload and Unlimited-OCR prompt conventions. Verify: mocked HTTP plus one live image smoke test.
+- [x] When those env vars (or CLI equivalents) are **unset**, Darwin still uses MLX and CUDA Linux still uses Transformers. Verify: existing ASR/OCR tests stay green; no network calls in that path.
+- [x] `--precision` on a remote request is ignored with a single warning (weights already quantized server-side). Verify: log assertion in the remote unit tests.
+- [x] `ProcessInput.context` / metadata context is forwarded to Qwen3-ASR as the transcription prompt / extra body the vLLM endpoint accepts; unsupported fields are skipped with a warning, matching current local behavior. Verify: request-body fixture.
+- [x] Missing or unreachable remote URL raises `BackendUnavailableError` (not a generic HTTP traceback). Verify: mocked connection failure.
+- [x] CLI, HTTP API, and MCP all honor the same remote settings (env and explicit flags). Verify: one test per interface or a shared resolver test used by all three.
+- [x] `uv run python scripts/check_specs.py` and `uv run pytest -q tests/test_check_specs.py` pass after this spec lands.
 
 ## Scope and non-goals
 
@@ -77,11 +77,11 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | Config resolver: `AIMD_ASR_BASE_URL` / `AIMD_ASR_MODEL` / `AIMD_ASR_API_KEY` and OCR twins; CLI `--asr-base-url` / `--ocr-base-url`; skip local backend preflight when URL set | Unassigned | Pending | None | Unit tests for precedence CLI > env > unset; CUDA-less selection when URL set |
-| WS-02 | `asr/models/remote.py` implementing `ASRModel`: multipart POST `{base}/audio/transcriptions`, model id from config (default `Qwen3-ASR-1.7B`), ffmpeg decode still local if the API needs wav/mp3 | Unassigned | Pending | WS-01 | Mocked transcription 200; 503 -> `BackendUnavailableError`; context field in body |
-| WS-03 | `ocr` remote adapter: render PDF pages as today, POST chat completions to `{base}/chat/completions`, model default `Unlimited-OCR`, image as data URL, Unlimited-OCR extras | Unassigned | Pending | WS-01 | Mocked image 200; PDF page loop; extras present in JSON |
-| WS-04 | Wire resolver through CLI, HTTP API, MCP, and MarkItDown plugin kwargs; warn on remote+precision | Unassigned | Pending | WS-01 | Shared resolver tests imported by CLI/API/MCP tests |
-| WS-05 | Tests, `AGENTS.md` examples, README index already updated; live smoke optional `AIMD_LIVE_REMOTE=1` | Unassigned | Pending | WS-02, WS-03, WS-04 | `uv run pytest -q` (no live LAN in CI); spec validator |
+| WS-01 | Config resolver: `AIMD_ASR_BASE_URL` / `AIMD_ASR_MODEL` / `AIMD_ASR_API_KEY` and OCR twins; CLI `--asr-base-url` / `--ocr-base-url`; skip local backend preflight when URL set | Amp | Done | None | Unit tests for precedence CLI > env > unset; CUDA-less selection when URL set |
+| WS-02 | `asr/models/remote.py` implementing `ASRModel`: multipart POST `{base}/audio/transcriptions`, model id from config (default `Qwen3-ASR-1.7B`), ffmpeg decode still local if the API needs wav/mp3 | Amp | Done | WS-01 | Mocked transcription 200; 503 -> `BackendUnavailableError`; context field in body |
+| WS-03 | `ocr` remote adapter: render PDF pages as today, POST chat completions to `{base}/chat/completions`, model default `Unlimited-OCR`, image as data URL, Unlimited-OCR extras | Amp | Done | WS-01 | Mocked image 200; PDF page loop; extras present in JSON |
+| WS-04 | Wire resolver through CLI, HTTP API, MCP, and MarkItDown plugin kwargs; warn on remote+precision | Amp | Done | WS-01 | Shared resolver tests imported by CLI/API/MCP tests |
+| WS-05 | Tests, `AGENTS.md` examples, README index already updated; live smoke optional `AIMD_LIVE_REMOTE=1` | Amp | Done | WS-02, WS-03, WS-04 | `uv run pytest -q` (no live LAN in CI); spec validator |
 
 ## Verification
 
@@ -124,6 +124,26 @@ None yet.
 - Blockers: none for the draft.
 - Next action: review wire format against a real `/v1/audio/transcriptions` and OCR chat request if the first implementation PR starts; then set `status: Active`.
 
+### 2026-08-24 — Amp — implementation started
+
+- Changed: marked the decision-complete spec Active and claimed WS-01 through WS-05.
+- Evidence: implementation request includes live ASR and OCR endpoints for final smoke testing.
+- Remaining: adapters, interface wiring, mocked tests, durable docs, live smoke, and closeout.
+- Blockers: none.
+- Next action: implement the shared remote configuration and backend adapters.
+
+### 2026-08-24 — Amp — implementation completed
+
+- Changed: added shared remote config, ASR multipart and OCR chat adapters, CLI/API/MCP and URL-fallback propagation, tests, and durable docs.
+- Evidence: `uv run pytest -q` passed 330 tests with 3 skips; remote adapter tests passed 10 tests; spec checks passed 17 tests. Live ASR returned `Hello from AIMD remote speech recognition test.` and live OCR returned `AIMD REMOTE OCR` plus `OpenAI compatible backend test 2026` through the supplied dspark endpoints.
+- Remaining: none.
+- Blockers: none.
+- Next action: archive this completed spec.
+
 ## Completion summary
 
-Not complete. Implementation has not started.
+Implemented opt-in OpenAI-compatible ASR and Unlimited-OCR backends with shared
+environment/explicit configuration, local-backend fallback, interface parity,
+typed failures, mocked protocol coverage, and successful live dspark smoke
+tests. Durable usage and architecture notes are in `README.md`,
+`docs/architecture.md`, and the applicable `AGENTS.md` files.

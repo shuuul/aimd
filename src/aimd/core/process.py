@@ -460,6 +460,9 @@ async def convert_url_with_markitdown(
     | None = None,
     context: str | None = None,
     metadata_context: bool = True,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
 ) -> tuple[TextContext, str, str]:
     """Convert a URL through MarkItDown and AIMD's bundled URL plugin."""
     md = MarkItDown(enable_builtins=False, enable_plugins=True)
@@ -480,6 +483,9 @@ async def convert_url_with_markitdown(
         progress_reporter=progress_reporter,
         context=context,
         metadata_context=metadata_context,
+        asr_base_url=asr_base_url,
+        asr_model=asr_model,
+        asr_api_key=asr_api_key,
     )
 
     return (
@@ -507,6 +513,12 @@ async def convert_file_with_markitdown(
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
     context: str | None = None,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
+    ocr_base_url: str | None = None,
+    ocr_model: str | None = None,
+    ocr_api_key: str | None = None,
     *,
     max_chunk_size: int = 40000,
 ) -> tuple[TextContext, str, Path | None]:
@@ -542,6 +554,12 @@ async def convert_file_with_markitdown(
         cancellation_check=cancellation_check,
         progress_reporter=progress_reporter,
         context=context,
+        asr_base_url=asr_base_url,
+        asr_model=asr_model,
+        asr_api_key=asr_api_key,
+        ocr_base_url=ocr_base_url,
+        ocr_model=ocr_model,
+        ocr_api_key=ocr_api_key,
     )
     markdown = result.markdown
     return (
@@ -658,6 +676,12 @@ def _optional_processing_kwargs(
         "progress_reporter": request.progress_reporter,
         "context": request.context,
         "metadata_context": request.metadata_context,
+        "asr_base_url": request.asr_base_url,
+        "asr_model": request.asr_model,
+        "asr_api_key": request.asr_api_key,
+        "ocr_base_url": request.ocr_base_url,
+        "ocr_model": request.ocr_model,
+        "ocr_api_key": request.ocr_api_key,
     }
     kwargs: dict[str, object] = {}
     for name, value in optional_values.items():

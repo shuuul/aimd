@@ -60,6 +60,24 @@ class ProcessRequest(BaseModel):
     )
     model: str | None = Field(default=None, description=MODEL_HELP_TEXT)
     precision: str | None = Field(default=None, description=PRECISION_HELP_TEXT)
+    asr_base_url: str | None = Field(
+        default=None, description="OpenAI-compatible remote ASR base URL."
+    )
+    asr_model: str | None = Field(
+        default=None, description="Model ID served by the remote ASR endpoint."
+    )
+    asr_api_key: str | None = Field(
+        default=None, description="Bearer token for the remote ASR endpoint."
+    )
+    ocr_base_url: str | None = Field(
+        default=None, description="OpenAI-compatible remote OCR base URL."
+    )
+    ocr_model: str | None = Field(
+        default=None, description="Model ID served by the remote OCR endpoint."
+    )
+    ocr_api_key: str | None = Field(
+        default=None, description="Bearer token for the remote OCR endpoint."
+    )
     context: str | None = Field(default=None, description=CONTEXT_HELP_TEXT)
     metadata_context: bool = Field(
         default=True,

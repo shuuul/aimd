@@ -88,6 +88,12 @@ def _build_process_input(
         metadata_context=request.metadata_context,
         cancellation_check=cancellation_check,
         progress_reporter=progress_reporter,
+        asr_base_url=request.asr_base_url,
+        asr_model=request.asr_model,
+        asr_api_key=request.asr_api_key,
+        ocr_base_url=request.ocr_base_url,
+        ocr_model=request.ocr_model,
+        ocr_api_key=request.ocr_api_key,
     )
 
 

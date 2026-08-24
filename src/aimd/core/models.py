@@ -53,6 +53,12 @@ class ProcessInput:
     ) = None
     context: str | None = None
     metadata_context: bool = True
+    asr_base_url: str | None = None
+    asr_model: str | None = None
+    asr_api_key: str | None = None
+    ocr_base_url: str | None = None
+    ocr_model: str | None = None
+    ocr_api_key: str | None = None
 
 
 @dataclass(slots=True)

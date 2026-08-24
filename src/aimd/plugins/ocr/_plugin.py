@@ -59,6 +59,9 @@ async def _recognize_ocr_result(
     cancellation_check: Callable[[], bool] | None = None,
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
+    ocr_base_url: str | None = None,
+    ocr_model: str | None = None,
+    ocr_api_key: str | None = None,
 ) -> OCRResult:
     """Validate an OCR request and return the backend result."""
     path = Path(input_path)
@@ -77,7 +80,16 @@ async def _recognize_ocr_result(
     if cancellation_check is not None and cancellation_check():
         raise ProcessingCancelledError("OCR cancelled before model inference")
 
-    backend = create_ocr_backend()
+    remote_kwargs = {
+        name: value
+        for name, value in {
+            "base_url": ocr_base_url,
+            "remote_model": ocr_model,
+            "api_key": ocr_api_key,
+        }.items()
+        if value is not None
+    }
+    backend = create_ocr_backend(**remote_kwargs)
     result = await asyncio.to_thread(
         backend.recognize,
         path,
@@ -112,6 +124,9 @@ def _recognize_ocr_sync(
     cancellation_check: Callable[[], bool] | None = None,
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
+    ocr_base_url: str | None = None,
+    ocr_model: str | None = None,
+    ocr_api_key: str | None = None,
 ) -> DocumentConverterResult:
     """Synchronous MarkItDown boundary: title + markdown only."""
     result = asyncio.run(
@@ -125,6 +140,9 @@ def _recognize_ocr_sync(
             precision=precision,
             cancellation_check=cancellation_check,
             progress_reporter=progress_reporter,
+            ocr_base_url=ocr_base_url,
+            ocr_model=ocr_model,
+            ocr_api_key=ocr_api_key,
         )
     )
     title, markdown = _ocr_result_to_markdown(result)
@@ -215,4 +233,7 @@ class AimdOCRConverter(DocumentConverter):
             precision=kwargs.get("precision"),
             cancellation_check=kwargs.get("cancellation_check"),
             progress_reporter=kwargs.get("progress_reporter"),
+            ocr_base_url=kwargs.get("ocr_base_url"),
+            ocr_model=kwargs.get("ocr_model"),
+            ocr_api_key=kwargs.get("ocr_api_key"),
         )

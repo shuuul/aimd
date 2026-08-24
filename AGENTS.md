@@ -123,6 +123,7 @@ flowchart TD
 - **ASR context biasing**: `ProcessInput.context` (explicit biasing text) and `ProcessInput.metadata_context` (default `True`) are forwarded by CLI (`--context`/`--no-context`), HTTP API, MCP, and core MarkItDown kwargs. The URL plugin builds context from page metadata (title/author/description/tags/chapters, capped at 2000 chars) via `build_metadata_context` in `aimd.plugins.url.metadata` and injects it into the audio fallback. Qwen3-ASR consumes it as a system prompt (`system_prompt` in mlx-audio, a system chat message in Transformers); unsupported models skip it with a warning.
 - **uv only**: use `uv run`, `uv sync`; avoid poetry/pip for local development workflows.
 - **Platform-conditional audio deps**: `mlx-audio` on Darwin; Qwen3-ASR runs through the Transformers backend on CUDA-capable non-Darwin platforms.
+- **Remote inference**: `AIMD_ASR_BASE_URL` and `AIMD_OCR_BASE_URL` opt into OpenAI-compatible HTTP backends and bypass local MLX/CUDA preflight. Optional `{ASR,OCR}_{MODEL,API_KEY}` environment values have matching `AIMD_` prefixes and explicit CLI/API/MCP fields; bare server URLs gain `/v1`. Remote precision is server-owned and local `precision` is ignored with one warning.
 - **Module boundaries**: `aimd.core` owns interface-independent routing and `TextContext` wrapping; `aimd.plugins.url` owns URL extraction/readable HTML and its MarkItDown plugin; `aimd.plugins.asr` owns ASR engines and the local audio/video MarkItDown plugin; `aimd.plugins.doc` and `aimd.plugins.ocr` own their MarkItDown plugins.
 
 ## TRACKED SPECS

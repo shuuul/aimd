@@ -6,14 +6,18 @@ import platform
 import shutil
 import tempfile
 
+from logly import logger
+
 from aimd.core.errors import (
     BackendUnavailableError,
     ProcessingFailedError,
 )
+from aimd.core.remote import RemoteBackendConfig, resolve_remote_backend
 
 from .const import IMAGE_FILE_EXTENSIONS
 from .models import create_transformers_ocr_model
 from .models.mlx import MLXVLMOCRModel
+from .remote import RemoteOCRClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,8 +250,71 @@ class TransformersOCRBackend:
         return OCRResult(title=input_path.stem, pages=pages)
 
 
-def create_ocr_backend() -> MLXVLMOCRBackend | TransformersOCRBackend:
+class RemoteOCRBackend:
+    """Run OCR through an OpenAI-compatible Unlimited-OCR service."""
+
+    name = "remote"
+    runtime = "http"
+
+    def __init__(self, config: RemoteBackendConfig) -> None:
+        self.client = RemoteOCRClient(config)
+
+    def recognize(
+        self,
+        input_path: Path,
+        *,
+        model: str | None = None,  # noqa: ARG002 - remote config owns served model
+        language: str | None = None,  # noqa: ARG002 - Unlimited-OCR ignores it
+        start: int | None = None,
+        end: int | None = None,
+        temp_dir: Path | None = None,
+        precision: str | None = None,
+    ) -> OCRResult:
+        if precision is not None:
+            logger.warning(
+                "Ignoring OCR precision for remote inference; server-side weights "
+                "already define their precision."
+            )
+        if input_path.suffix.lower() in IMAGE_FILE_EXTENSIONS:
+            pages = (
+                OCRPage(
+                    page_index=None,
+                    text=self.client.recognize_image(input_path),
+                ),
+            )
+        elif input_path.suffix.lower() == ".pdf":
+            rendered_pages = _render_pdf_pages(
+                input_path, start=start, end=end, temp_dir=temp_dir
+            )
+            try:
+                pages = tuple(
+                    OCRPage(
+                        page_index=page_index,
+                        text=self.client.recognize_image(image_path, multi_page=True),
+                    )
+                    for page_index, image_path in rendered_pages
+                )
+            finally:
+                _cleanup_rendered_pages(rendered_pages)
+        else:
+            raise ProcessingFailedError(
+                "Remote OCR supports image files and PDFs only."
+            )
+        return OCRResult(title=input_path.stem, pages=pages)
+
+
+def create_ocr_backend(
+    *,
+    base_url: str | None = None,
+    remote_model: str | None = None,
+    api_key: str | None = None,
+) -> MLXVLMOCRBackend | TransformersOCRBackend | RemoteOCRBackend:
     """Create the OCR backend adapter for the current platform."""
+    remote_config = resolve_remote_backend(
+        "ocr", base_url=base_url, model=remote_model, api_key=api_key
+    )
+    if remote_config is not None:
+        return RemoteOCRBackend(remote_config)
     resolved = select_ocr_backend()
     if resolved == "mlx-vlm":
         return MLXVLMOCRBackend()

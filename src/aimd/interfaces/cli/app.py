@@ -101,6 +101,42 @@ def process(
         "--precision",
         help=PRECISION_HELP_TEXT,
     ),
+    asr_base_url: Optional[str] = typer.Option(
+        None,
+        "--asr-base-url",
+        envvar="AIMD_ASR_BASE_URL",
+        help="OpenAI-compatible ASR base URL; bare server URLs add /v1.",
+    ),
+    asr_model: Optional[str] = typer.Option(
+        None,
+        "--asr-model",
+        envvar="AIMD_ASR_MODEL",
+        help="Model ID served by the remote ASR endpoint.",
+    ),
+    asr_api_key: Optional[str] = typer.Option(
+        None,
+        "--asr-api-key",
+        envvar="AIMD_ASR_API_KEY",
+        help="Bearer token for the remote ASR endpoint.",
+    ),
+    ocr_base_url: Optional[str] = typer.Option(
+        None,
+        "--ocr-base-url",
+        envvar="AIMD_OCR_BASE_URL",
+        help="OpenAI-compatible OCR base URL; bare server URLs add /v1.",
+    ),
+    ocr_model: Optional[str] = typer.Option(
+        None,
+        "--ocr-model",
+        envvar="AIMD_OCR_MODEL",
+        help="Model ID served by the remote OCR endpoint.",
+    ),
+    ocr_api_key: Optional[str] = typer.Option(
+        None,
+        "--ocr-api-key",
+        envvar="AIMD_OCR_API_KEY",
+        help="Bearer token for the remote OCR endpoint.",
+    ),
     context: Optional[str] = typer.Option(
         None,
         "--context",
@@ -203,6 +239,12 @@ def process(
                     precision=precision,
                     context=context,
                     metadata_context=not no_context,
+                    asr_base_url=asr_base_url,
+                    asr_model=asr_model,
+                    asr_api_key=asr_api_key,
+                    ocr_base_url=ocr_base_url,
+                    ocr_model=ocr_model,
+                    ocr_api_key=ocr_api_key,
                 )
             )
             logger.info(f"Task: {result.task_type}")

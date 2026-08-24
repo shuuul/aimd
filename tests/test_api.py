@@ -128,6 +128,36 @@ def test_process_forwards_model_and_precision(monkeypatch) -> None:
     assert seen == {"model": "qwen3-asr-1.7b", "precision": "4bit"}
 
 
+def test_process_forwards_remote_settings(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_process_input(request):
+        seen["asr_base_url"] = request.asr_base_url
+        seen["ocr_base_url"] = request.ocr_base_url
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="t", chunk_list=["x"]),
+        )
+
+    monkeypatch.setattr(
+        "aimd.interfaces.api.app.process_core_input", _fake_process_input
+    )
+    response = TestClient(create_app()).post(
+        "/v1/process",
+        json={
+            "input_source": "input.mp3",
+            "asr_base_url": "http://asr.example/v1",
+            "ocr_base_url": "http://ocr.example/v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen == {
+        "asr_base_url": "http://asr.example/v1",
+        "ocr_base_url": "http://ocr.example/v1",
+    }
+
+
 def test_process_maps_domain_error_to_http_status(monkeypatch) -> None:
     client = _make_client(
         monkeypatch, process_exc=BackendUnavailableError("unavailable")

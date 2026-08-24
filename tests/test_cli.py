@@ -100,6 +100,48 @@ def test_cli_precision_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
     assert seen["precision"] == "4bit"
 
 
+def test_cli_remote_options_are_forwarded(monkeypatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_process_input(request):
+        seen.update(
+            asr_base_url=request.asr_base_url,
+            asr_model=request.asr_model,
+            ocr_base_url=request.ocr_base_url,
+            ocr_model=request.ocr_model,
+        )
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="Demo", chunk_list=["hello"]),
+            markdown="hello",
+        )
+
+    monkeypatch.setattr(cli_app, "process_input", _fake_process_input)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "input.mp3",
+            "--asr-base-url",
+            "http://asr.example/v1",
+            "--asr-model",
+            "asr-served",
+            "--ocr-base-url",
+            "http://ocr.example/v1",
+            "--ocr-model",
+            "ocr-served",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen == {
+        "asr_base_url": "http://asr.example/v1",
+        "asr_model": "asr-served",
+        "ocr_base_url": "http://ocr.example/v1",
+        "ocr_model": "ocr-served",
+    }
+
+
 def test_cli_task_option_is_forwarded(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, object] = {}
 

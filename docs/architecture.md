@@ -13,9 +13,9 @@ The `aimd` package uses MarkItDown as the URL/local-file conversion contract and
 - `aimd.interfaces.api`: FastAPI-backed HTTP API module (`aimd.interfaces.api:main`).
 - `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
 - `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Logic lives directly under `aimd.plugins.url/` (flattened).
-- `aimd.plugins.asr`: MarkItDown plugin for local audio/video transcription, audio preprocessing, and platform backend selection. Backend implementations live under `aimd.plugins.asr.models` (`mlx`, `transformers`).
+- `aimd.plugins.asr`: MarkItDown plugin for audio/video transcription, audio preprocessing, and backend selection. Backend implementations live under `aimd.plugins.asr.models` (`mlx`, `transformers`, `remote`).
 - `aimd.plugins.doc`: MarkItDown plugin for document conversion. EPUB uses a custom spine/image extraction pipeline; other Pandoc-supported formats use direct Pandoc conversion; text-layer PDFs use pdf-inspector (`AimdPdfConverter`) ahead of MarkItDown's built-in `PdfConverter`.
-- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs. Engine implementations live under `aimd.plugins.ocr.models` (`mlx`, `unlimited`, `glm`), with four MLX checkpoints each for Unlimited-OCR and GLM-OCR on macOS/Apple Silicon, and dedicated CUDA Transformers adapters on Linux.
+- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs. Engine implementations include local MLX/Transformers models and an OpenAI-compatible remote Unlimited-OCR adapter.
 
 Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
 
@@ -77,11 +77,17 @@ Model selection is task-specific and flows through `ProcessInput.model` to the s
 
 | Task | Backend boundary | Supported model source |
 |------|-----------------|------------------------|
-| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | Qwen3-ASR 1.7B/0.6B MLX checkpoints (`4bit`, `6bit`, `8bit`, `bf16`) by default on Apple Silicon; Qwen3-ASR via native Transformers (`transformers>=5.14.1`, `Qwen/Qwen3-ASR-*-hf`) on CUDA-capable non-Darwin platforms and as an explicit opt-in on macOS/MPS. |
+| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | Qwen3-ASR 1.7B/0.6B through local MLX/Transformers, or remote `/v1/audio/transcriptions` when `AIMD_ASR_BASE_URL` is set. |
 | Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` plugin entry points. |
-| OCR | MarkItDown + `aimd.plugins.ocr` plugin | Four `mlx-community/Unlimited-OCR-*` and four `mlx-community/GLM-OCR-*` checkpoints on macOS/Apple Silicon; `baidu/Unlimited-OCR` and `zai-org/GLM-OCR` through dedicated CUDA Transformers adapters on Linux. |
+| OCR | MarkItDown + `aimd.plugins.ocr` plugin | Local MLX/Transformers models, or remote Unlimited-OCR chat completions when `AIMD_OCR_BASE_URL` is set. |
 
 The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.plugins.asr.const` and `aimd.plugins.ocr.backends`.
+
+Remote settings flow through `ProcessInput` and MarkItDown kwargs so CLI, API,
+MCP, local-file work, and URL audio fallback share one selection path. Explicit
+request values override `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`. A configured
+remote URL bypasses local CUDA/MLX preflight; without one, local behavior is
+unchanged.
 
 For performance expectations and benchmarking guidance, see [Performance](performance.md).
 For the authenticated loopback process, path, job, and output-lifetime boundary used by

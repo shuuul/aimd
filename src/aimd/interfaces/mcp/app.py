@@ -60,6 +60,12 @@ async def process_input(
     precision: str | None = None,
     context: str | None = None,
     metadata_context: bool = True,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
+    ocr_base_url: str | None = None,
+    ocr_model: str | None = None,
+    ocr_api_key: str | None = None,
 ) -> dict[str, Any]:
     """Process audio/video/url/documents and return markdown context.
 
@@ -93,6 +99,12 @@ async def process_input(
                 precision=precision,
                 context=context,
                 metadata_context=metadata_context,
+                asr_base_url=asr_base_url,
+                asr_model=asr_model,
+                asr_api_key=asr_api_key,
+                ocr_base_url=ocr_base_url,
+                ocr_model=ocr_model,
+                ocr_api_key=ocr_api_key,
             )
         )
 

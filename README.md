@@ -31,10 +31,10 @@ Prepare LLM-ready context from URLs, audio/video, and documents.
 
 - **One input command** for URLs, audio/video files, EPUB documents, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
 - **URL extraction** through bundled `aimd.plugins.url`: yt-dlp transcript URLs such as podcasts, YouTube, and Bilibili, plus opt-in readable HTML extraction through Defuddle.
-- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, or Qwen3-ASR through native Transformers (`transformers>=5.14.1`) on CUDA-capable non-Darwin platforms and as an explicit opt-in model path on macOS.
+- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, Qwen3-ASR through native Transformers on CUDA, or an opt-in OpenAI-compatible remote endpoint.
 - **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
 - **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
-- **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon and CUDA VLM OCR models through Transformers on Linux.
+- **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon, CUDA VLM OCR models through Transformers on Linux, or an opt-in remote Unlimited-OCR endpoint.
 - **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
 
 ## Install
@@ -88,6 +88,7 @@ Platform notes:
 - Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
 - Explicit `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) transcription model IDs use native Transformers Qwen3-ASR (`transformers>=5.14.1`); on macOS this is an opt-in MPS path, not the default.
 - Linux OCR uses the Transformers backend with CUDA. macOS MLX OCR defaults to the 4-bit Unlimited-OCR checkpoint.
+- Setting `AIMD_ASR_BASE_URL` or `AIMD_OCR_BASE_URL` uses an OpenAI-compatible remote service and skips local MLX/CUDA model loading for that modality.
 - Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
 
 ## Quick start
@@ -108,6 +109,27 @@ aimd scan.pdf --task ocr --start 0 --end 2
 aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
 aimd "https://youtube.com/watch?v=..." --raw-transcript
 ```
+
+### Remote ASR and OCR
+
+Remote inference is opt-in. Base URLs may include `/v1`; aimd adds it when a
+bare server URL is supplied. The server controls weight precision, so
+`--precision` is ignored with a warning in remote mode.
+
+```bash
+AIMD_ASR_BASE_URL=http://192.168.100.114:8000 \
+AIMD_ASR_MODEL=Qwen3-ASR-1.7B \
+  aimd audio.wav --model qwen3-asr-1.7b
+
+AIMD_OCR_BASE_URL=http://192.168.100.114:10000 \
+AIMD_OCR_MODEL=Unlimited-OCR \
+  aimd scan.png --model unlimited-ocr
+```
+
+Equivalent CLI options are `--asr-base-url`, `--asr-model`, `--asr-api-key`,
+`--ocr-base-url`, `--ocr-model`, and `--ocr-api-key`. HTTP API request fields
+and MCP tool parameters use the same underscore names. API keys default to
+`not-needed` for unauthenticated LAN services.
 
 ## CLI usage
 

@@ -126,6 +126,33 @@ async def test_mcp_process_input_forwards_precision(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_process_input_forwards_remote_settings(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_process_input(request):
+        seen["asr_base_url"] = request.asr_base_url
+        seen["ocr_base_url"] = request.ocr_base_url
+        return ProcessResult(
+            task_type="transcript",
+            text_context=TextContext(title="t", chunk_list=["x"]),
+        )
+
+    monkeypatch.setattr(
+        "aimd.interfaces.mcp.app.process_core_input", _fake_process_input
+    )
+    await mcp_app.process_input(
+        "input.mp3",
+        asr_base_url="http://asr.example/v1",
+        ocr_base_url="http://ocr.example/v1",
+    )
+
+    assert seen == {
+        "asr_base_url": "http://asr.example/v1",
+        "ocr_base_url": "http://ocr.example/v1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_mcp_process_input_schema_exposes_precision() -> None:
     tools = await mcp_app.mcp.list_tools()
     process_tool = next(tool for tool in tools if tool.name == "process_input")

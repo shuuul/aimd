@@ -58,6 +58,9 @@ async def get_text_from_url(
     | None = None,
     context: str | None = None,
     metadata_context: bool = True,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
 ) -> UrlTextResult:
     """Extract text content from transcript-capable URLs using yt-dlp."""
     if not url.startswith(("http://", "https://")):
@@ -129,6 +132,9 @@ async def get_text_from_url(
         cancellation_check=cancellation_check,
         progress_reporter=progress_reporter,
         context=asr_context,
+        asr_base_url=asr_base_url,
+        asr_model=asr_model,
+        asr_api_key=asr_api_key,
     )
 
     if audio_content and audio_content.strip():
@@ -183,6 +189,9 @@ class AimdUrlTranscriptConverter(DocumentConverter):
                 progress_reporter=kwargs.get("progress_reporter"),
                 context=kwargs.get("context"),
                 metadata_context=kwargs.get("metadata_context", True),
+                asr_base_url=kwargs.get("asr_base_url"),
+                asr_model=kwargs.get("asr_model"),
+                asr_api_key=kwargs.get("asr_api_key"),
             )
         )
 

@@ -21,11 +21,13 @@ from aimd.core.errors import (
     ProcessingFailedError,
     UnsupportedInputError,
 )
+from aimd.core.remote import resolve_remote_backend
 
 from .capabilities import select_transcription_backend
 from .const import AUDIO_EXTENSIONS, TRANSFORMERS_ASR_MODELS, VIDEO_FILE_EXTENSIONS
 from .models.base import ASRModel
 from .models.mlx import MLXAudioASRModel
+from .models.remote import RemoteASRModel
 from .models.transformers import TransformersASRModel
 
 __plugin_interface_version__ = 1
@@ -89,6 +91,9 @@ async def transcribe_file(
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
     context: str | None = None,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
 ) -> str:
     """Transcribe an audio or video file with the platform ASR backend."""
     file_path = Path(file_path)
@@ -109,14 +114,26 @@ async def transcribe_file(
     else:
         logger.info(f"Processing audio file: {file_path}")
 
-    backend = _select_backend_for_model(model)
+    remote_config = resolve_remote_backend(
+        "asr", base_url=asr_base_url, model=asr_model, api_key=asr_api_key
+    )
+    backend = (
+        "remote" if remote_config is not None else _select_backend_for_model(model)
+    )
     logger.info(f"Using transcription backend: {backend}")
 
-    asr_model: ASRModel
-    if backend == "mlx":
-        asr_model = MLXAudioASRModel(model, precision=precision)
+    model_adapter: ASRModel
+    if remote_config is not None:
+        if precision is not None:
+            logger.warning(
+                "Ignoring ASR precision for remote inference; server-side weights "
+                "already define their precision."
+            )
+        model_adapter = RemoteASRModel(remote_config)
+    elif backend == "mlx":
+        model_adapter = MLXAudioASRModel(model, precision=precision)
     else:
-        asr_model = TransformersASRModel(model, precision=precision)
+        model_adapter = TransformersASRModel(model, precision=precision)
 
     from .audio_utils import get_audio_duration, segment_audio
 
@@ -152,7 +169,7 @@ async def transcribe_file(
                     f"Transcribing segment {i + 1}/{len(segments)}: {segment_path.name}"
                 )
                 text = await _transcribe_segment_with_fallback(
-                    asr_model,
+                    model_adapter,
                     segment_path,
                     backend,
                     language=language,
@@ -173,7 +190,7 @@ async def transcribe_file(
                 segment_path.unlink(missing_ok=True)
     else:
         return await _transcribe_segment_with_fallback(
-            asr_model,
+            model_adapter,
             file_path,
             backend,
             language=language,
@@ -200,6 +217,9 @@ def _transcribe_file_sync(
     progress_reporter: Callable[[str, int | None, int | None, str | None], None]
     | None = None,
     context: str | None = None,
+    asr_base_url: str | None = None,
+    asr_model: str | None = None,
+    asr_api_key: str | None = None,
 ) -> str:
     """Synchronous MarkItDown boundary for ASR transcription."""
     return asyncio.run(
@@ -212,6 +232,9 @@ def _transcribe_file_sync(
             cancellation_check=cancellation_check,
             progress_reporter=progress_reporter,
             context=context,
+            asr_base_url=asr_base_url,
+            asr_model=asr_model,
+            asr_api_key=asr_api_key,
         )
     )
 
@@ -248,6 +271,9 @@ class AimdASRConverter(DocumentConverter):
             cancellation_check=kwargs.get("cancellation_check"),
             progress_reporter=kwargs.get("progress_reporter"),
             context=kwargs.get("context"),
+            asr_base_url=kwargs.get("asr_base_url"),
+            asr_model=kwargs.get("asr_model"),
+            asr_api_key=kwargs.get("asr_api_key"),
         )
 
         return DocumentConverterResult(
