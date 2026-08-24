@@ -1307,6 +1307,24 @@ you've discovered something surprising.
     )
 
 
+def test_strip_subtitle_formatting_removes_youtube_word_timestamps() -> None:
+    """Enhanced translated VTT must not leak word timing tags or duplicate cues."""
+    vtt = """WEBVTT
+Kind: captions
+Language: zh-Hans
+
+00:00:00.000 --> 00:00:02.000
+你<00:00:00.340><c>发现</c><00:00:00.600><c>了一些</c><00:00:01.120><c>关于</c>
+
+00:00:01.000 --> 00:00:03.000
+你发现了一些关于 大脑<00:00:01.660><c>的惊人秘密。</c>
+
+00:00:02.000 --> 00:00:04.000
+大脑的惊人秘密。
+"""
+    assert strip_subtitle_formatting(vtt) == "你发现了一些关于 大脑的惊人秘密。"
+
+
 def test_stripped_markdown_body_is_stable_across_subtitle_formats() -> None:
     """Default Markdown body should not depend on which timedtext format won."""
     expected = "you've discovered something about the brain"

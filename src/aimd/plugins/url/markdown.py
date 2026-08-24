@@ -12,6 +12,11 @@ _TIMESTAMP_RE = re.compile(
 _SEQUENCE_RE = re.compile(r"^\d+$")
 _VTT_HEADER_RE = re.compile(r"^WEBVTT", re.IGNORECASE)
 _VTT_META_RE = re.compile(r"^(Kind:|Language:)", re.IGNORECASE)
+_VTT_WORD_TIMESTAMP_RE = re.compile(r"<\d{1,2}:\d{2}:\d{2}\.\d{3}>")
+_SUBTITLE_TAG_RE = re.compile(
+    r"</?(?:b|c(?:\.[^>]*)?|font(?:\s+[^>]*)?|i|lang(?:\s+[^>]*)?|rt|ruby|u|v(?:\s+[^>]*)?)>",
+    re.IGNORECASE,
+)
 _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _SPEAKER_MARKERS = {">>", "<<"}
 _SENTENCE_END_RE = re.compile(r"[.!?。！？…][\"'”’)\]]*$")
@@ -171,7 +176,13 @@ def _timed_cue_texts(text: str) -> list[str]:
             continue
         if stripped.startswith("NOTE "):
             continue
-        text_lines.append(stripped)
+        # YouTube enhanced VTT puts word-level timestamps and ``<c>`` tags in
+        # cue text. Remove them before overlap matching; otherwise identical
+        # rolling captions look different and are emitted more than once.
+        cue_text = _VTT_WORD_TIMESTAMP_RE.sub("", stripped)
+        cue_text = _SUBTITLE_TAG_RE.sub("", cue_text).strip()
+        if cue_text:
+            text_lines.append(cue_text)
     return text_lines
 
 
