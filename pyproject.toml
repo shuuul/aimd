@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Shu Li", email = "zetarylee@gmail.com" }
 ]
+license = "Apache-2.0"
 requires-python = ">=3.11, <3.14"
 dependencies = [
     # addict/easydict/einops/matplotlib/torchvision are imported by

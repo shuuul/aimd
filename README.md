@@ -17,7 +17,7 @@
     <img src="https://img.shields.io/github/v/release/shuuul/aimd" alt="Latest release">
   </a>
   <a href="https://github.com/shuuul/aimd/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+    <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache License 2.0">
   </a>
 </div>
 
@@ -370,4 +370,4 @@ base URI alongside `TextContext` title, chunks, and split metadata.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/shuuul/aimd/blob/main/LICENSE).
+Apache-2.0. See [LICENSE](https://github.com/shuuul/aimd/blob/main/LICENSE).

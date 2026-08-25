@@ -1,7 +1,7 @@
 ---
 name: aimd
 description: Converts URLs, audio/video, documents, PDFs, and images into LLM-ready Markdown with the aimd CLI. Use when an agent needs to prepare readable text context from local files or web/media sources.
-license: MIT
+license: Apache-2.0
 compatibility: Requires uv and local file or network access for the requested input. macOS Apple Silicon uses MLX backends for local ASR/OCR; Linux ASR/OCR expects CUDA-capable Transformers backends.
 metadata:
   source: https://github.com/shuuul/aimd
