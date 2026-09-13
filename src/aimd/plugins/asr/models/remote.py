@@ -14,6 +14,7 @@ from aimd.core.errors import BackendUnavailableError, ProcessingFailedError
 from aimd.core.remote import RemoteBackendConfig
 
 from ..audio_utils import convert_to_wav_if_needed
+from .transformers import parse_qwen_output
 
 
 class RemoteASRModel:
@@ -90,7 +91,12 @@ class RemoteASRModel:
         text = payload.get("text") if isinstance(payload, dict) else None
         if not isinstance(text, str) or not text.strip():
             raise ProcessingFailedError("Remote ASR produced empty transcription")
-        return text.strip()
+        # vLLM-served Qwen3-ASR may echo the protocol prefix before the
+        # transcript; share the local Transformers parser for the same model.
+        transcription = parse_qwen_output(text)
+        if not transcription:
+            raise ProcessingFailedError("Remote ASR produced empty transcription")
+        return transcription
 
 
 def _multipart_body(file_path: Path, fields: dict[str, str]) -> tuple[bytes, str]:

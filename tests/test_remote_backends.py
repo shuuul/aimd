@@ -22,6 +22,7 @@ from aimd.plugins.ocr.remote import RemoteOCRClient
 class _RecordingHandler(BaseHTTPRequestHandler):
     records: list[dict[str, object]] = []
     statuses: dict[str, int] = {}
+    bodies: dict[str, bytes] = {}
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         body = self.rfile.read(int(self.headers.get("content-length", "0")))
@@ -32,6 +33,10 @@ class _RecordingHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("content-type", "application/json")
         self.end_headers()
+        override = self.bodies.get(self.path)
+        if override is not None:
+            self.wfile.write(override)
+            return
         if self.path.endswith("/audio/transcriptions"):
             payload = {"text": "remote transcription"}
         else:
@@ -47,6 +52,7 @@ def _mock_server():
     handler = type("RecordingHandler", (_RecordingHandler,), {})
     handler.records = []
     handler.statuses = {}
+    handler.bodies = {}
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -233,3 +239,17 @@ def test_remote_ocr_precision_warns_once(monkeypatch, tmp_path: Path) -> None:
 
     assert len(warnings) == 1
     assert "Ignoring OCR precision" in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_remote_asr_strips_qwen_protocol_prefix(tmp_path: Path) -> None:
+    audio = tmp_path / "sample.wav"
+    audio.write_bytes(b"RIFF-test-audio")
+    with _mock_server() as (base_url, handler):
+        handler.bodies["/v1/audio/transcriptions"] = json.dumps(
+            {"text": "language Chinese<asr_text>你好，测试语音。"}
+        ).encode()
+        model = RemoteASRModel(RemoteBackendConfig(base_url, "Qwen3-ASR-1.7B", "key"))
+        result = await model.transcribe(audio)
+
+    assert result == "你好，测试语音。"

@@ -280,7 +280,7 @@ def _inputs_to_model_device(inputs, model: object):
     return moved
 
 
-def _parse_qwen_output(output: str) -> str:
+def parse_qwen_output(output: str) -> str:
     """Extract transcription text from Qwen3-ASR generated output."""
     text = output.strip()
     marker = "<asr_text>"
@@ -394,4 +394,4 @@ def _transcribe_qwen(
         )
     else:
         raise ProcessingFailedError("Qwen3-ASR processor cannot decode outputs")
-    return _parse_qwen_output(text).strip()
+    return parse_qwen_output(text).strip()

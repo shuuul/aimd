@@ -19,9 +19,9 @@ from aimd.plugins.asr.const import (
 from aimd.plugins.asr.models.transformers import (
     TransformersASRModel,
     _get_model_and_processor,
-    _parse_qwen_output,
     _resolve_language,
     _resolve_torch_dtype,
+    parse_qwen_output,
 )
 
 
@@ -65,11 +65,11 @@ def test_resolve_qwen_language_code() -> None:
 
 
 def test_parse_qwen_output_extracts_asr_text() -> None:
-    assert _parse_qwen_output("language English<asr_text>Hello world") == "Hello world"
+    assert parse_qwen_output("language English<asr_text>Hello world") == "Hello world"
 
 
 def test_parse_qwen_output_falls_back_to_plain_text() -> None:
-    assert _parse_qwen_output("Hello world") == "Hello world"
+    assert parse_qwen_output("Hello world") == "Hello world"
 
 
 @pytest.mark.skipif(
