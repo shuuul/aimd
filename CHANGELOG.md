@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.3](https://github.com/shuuul/aimd/compare/v0.23.2...v0.23.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **asr:** strip Qwen3-ASR protocol prefix from remote output ([9c55a37](https://github.com/shuuul/aimd/commit/9c55a37a4cbf39d9188edaab3272d9489188ac4a))
+* **ocr:** normalize served Unlimited-OCR layout protocol variants ([07c9d45](https://github.com/shuuul/aimd/commit/07c9d45a45339e43ee9d9646a7d92dcc23960d8f))
+
 ## [0.23.2](https://github.com/shuuul/aimd/compare/v0.23.1...v0.23.2) (2026-08-24)
 
 
