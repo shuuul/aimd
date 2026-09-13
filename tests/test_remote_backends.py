@@ -253,3 +253,20 @@ async def test_remote_asr_strips_qwen_protocol_prefix(tmp_path: Path) -> None:
         result = await model.transcribe(audio)
 
     assert result == "你好，测试语音。"
+
+
+def test_remote_ocr_normalizes_served_layout_protocol(tmp_path: Path) -> None:
+    image = tmp_path / "scan.png"
+    image.write_bytes(b"fake-png")
+    raw = (
+        "header [162, 222, 618, 349]<|/det|># Report\n"
+        "text [0, 0, 100, 20]<|/det|>body text"
+    )
+    with _mock_server() as (base_url, handler):
+        handler.bodies["/v1/chat/completions"] = json.dumps(
+            {"choices": [{"message": {"content": raw}}]}
+        ).encode()
+        client = RemoteOCRClient(RemoteBackendConfig(base_url, "Unlimited-OCR", "key"))
+        result = client.recognize_image(image)
+
+    assert result == "# Report\n\nbody text"

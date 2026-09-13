@@ -643,6 +643,26 @@ def test_normalize_unlimited_ocr_markdown_removes_layout_protocol() -> None:
     )
 
 
+def test_normalize_unlimited_ocr_markdown_tolerates_missing_open_det_tag() -> None:
+    raw = (
+        "header [162, 222, 618, 349]<|/det|># Report\n"
+        "text [0, 0, 100, 20]<|/det|>body text\n"
+        "continued line\n"
+        "image [10, 20, 30, 40]<|/det|>\n"
+        "text [50, 60, 70, 80]<|/det|>- list item"
+    )
+
+    assert normalize_unlimited_ocr_markdown(raw) == (
+        "# Report\n\nbody text\ncontinued line\n\n- list item"
+    )
+
+
+def test_normalize_unlimited_ocr_markdown_keeps_plain_markdown() -> None:
+    raw = "# Plain markdown\n\nNo protocol tokens here."
+
+    assert normalize_unlimited_ocr_markdown(raw) == raw
+
+
 def test_read_unlimited_ocr_output_files_fallback(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     nested = output_dir / "scan"

@@ -13,15 +13,17 @@ from .base import (
 )
 
 UNLIMITED_OCR_MODEL_ID = "baidu/Unlimited-OCR"
+# Detection lines normally open with <|det|>, but vLLM-served checkpoints may
+# emit the category and box without the opening token (header [x, y]<|/det|>).
 _DETECTION_LINE = re.compile(
-    r"<\|det\|>([^<\s]+)(?:\s*\[[^\]]*\])?\s*<\|/det\|>(.*)",
+    r"(?:<\|det\|>)?([^<\s|]+)(?:\s*\[[^\]]*\])?\s*<\|/det\|>(.*)",
     re.DOTALL,
 )
 
 
 def normalize_unlimited_ocr_markdown(raw: str) -> str:
     """Remove Unlimited-OCR layout protocol while preserving document content."""
-    if "<|det|>" not in raw:
+    if "<|det|>" not in raw and "<|/det|>" not in raw:
         return raw.strip()
 
     blocks: list[list[str]] = []
