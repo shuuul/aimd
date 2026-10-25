@@ -101,6 +101,54 @@ for only 1.01-1.15 tokens per verify, so simulated decode came out
 0.63-1.01x. Remaining decode headroom is WS-08 (custom Metal kernels inside
 the MLX graph).
 
+### WS-08 decode-step kernel profile
+
+`cargo run --release -p aimd-mlx --example bench_ops` times every
+decode-step op at the real shapes as a dependent chain (GPU time plus Metal
+encode per kernel). Weights rotate through ~96 MB of distinct random 4-bit
+copies, so the system-level cache cannot hide reads. The practical read
+roofline is ~166 GB/s (the lm_head qmv; spec is 200 GB/s). Summing the ops
+reproduces the measured steps: OCR ~4.75 ms estimated vs ~5.1 ms measured,
+ASR ~8.9 ms vs ~8.5 ms. Dispatch floor is 2.3 µs per kernel.
+
+| Op (per layer unless noted) | µs | Bytes | % of roofline |
+|---|---|---|---|
+| ASR qmv 2048->2048 (q, o) | 20.1 | 2.36 MB | 71% |
+| ASR qmv 2048->1024 (k, v) | 11.9 | 1.18 MB | 60% |
+| ASR qmv up\|gate + down (2048<->6144) | 101.9 per pair | 14.2 MB | 84% |
+| ASR sdpa 16q/8kv, kv 256 / 1024 | 15.6 / 43.1 | 1.0 / 4.2 MB | 40% / 59% |
+| ASR lm_head 2048->151936 (per token) | 1063 | 175 MB | ~100% |
+| ASR rms_norm, rope, kv row write, swiglu | 2.2-2.8 each | — | dispatch-bound |
+| OCR qmv 1280->1280 (q, k, v, o) | 11.4 | 0.92 MB | 49% |
+| OCR shared expert up\|gate + down (1280<->1792) | 31.0 per pair | 2.58 MB | 50% |
+| OCR gather_qmm up + down, 6 of 64 experts, + sum | 82.4 | 7.74 MB | 57% |
+| OCR router: gate matmul (W_g.T view) + softmax + top-6 | ~8.5 + 2.6 + ~12 | — | dispatch-bound |
+| OCR sdpa 10 heads, kv 2455 (prefill + ring) | 102.2 | 12.6 MB | 74% |
+| OCR lm_head 1280->129280 (per token) | 561 | 93 MB | ~100% |
+
+Where an OCR token's ~5.1 ms goes: attention over the kept 2327-token prefill
+KV ~1.2 ms, routed experts ~1.0 ms, q/k/v/o ~0.55 ms, shared experts ~0.5 ms,
+lm_head 0.56 ms, router ~0.25 ms, the rest small ops. ASR is dominated by
+qmv (~6 ms of ~8.5 ms) already at 60-84% of roofline, plus lm_head at
+roofline.
+
+Candidates ranked by expected saving per token:
+
+1. Fused q|k|v projection (load-time weight concatenation, plain MLX, no
+   custom kernel): OCR ~0.2 ms, ASR ~0.3 ms. Small qmv shapes run at 49-60%
+   of roofline, so one wider qmv beats three narrow ones.
+2. Fused MoE expert kernel (gather up|gate + SwiGLU + down + weighted sum):
+   82 µs at 57% -> ~50 µs per layer, OCR ~0.35 ms.
+3. Split-K decode attention for long KV (flash-decoding style): OCR
+   102 -> ~80 µs per layer (~0.25 ms), ASR ~0.3 ms on long clips.
+4. Fused router (gemv + softmax + top-6 in one kernel): ~23 -> ~4 µs per
+   layer, OCR ~0.2 ms.
+5. Small-op fusion (rms_norm + rope + KV row write): ~10 µs per layer, both
+   models.
+
+Ceiling if all land: OCR decode ~1.25x, ASR ~1.15x. Prefill and the OCR
+vision tower (2.6 s of a 4.8 s page) are separate targets.
+
 ## Smoke-test record (Python era)
 
 Functional smoke tests of the Python package, not benchmarks. They verified that the
