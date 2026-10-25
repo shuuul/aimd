@@ -77,12 +77,18 @@ jobs:
       - name: Install mlx
         run: |
           brew install mlx
+          # The runner image's formula index can lag behind (auto-update is
+          # off), so refresh it once when the poured mlx is not the pinned one.
+          if [ "$(brew list --versions mlx)" != "mlx ${MLX_BREW_VERSION}" ]; then
+            brew update
+            brew upgrade mlx
+          fi
           installed="$(brew list --versions mlx)"
           echo "$installed"
-          case "$installed" in
-            *" ${MLX_BREW_VERSION}"*) ;;
-            *) echo "::warning::brew mlx is '$installed', expected ${MLX_BREW_VERSION}; bump MLX_BREW_VERSION (cache key)" ;;
-          esac
+          if [ "$installed" != "mlx ${MLX_BREW_VERSION}" ]; then
+            echo "::error::brew mlx is '$installed', expected ${MLX_BREW_VERSION}; bump MLX_BREW_VERSION (cache key) and the shim"
+            exit 1
+          fi
 
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -85,7 +85,12 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Install brew dependencies
-        run: brew install mlx pandoc mupdf ffmpeg
+        # Refresh the runner's stale formula index so the shim builds against
+        # current brew mlx (auto-update is off for the other brew calls).
+        run: |
+          brew update
+          brew install mlx pandoc mupdf ffmpeg
+          brew list --versions mlx
 
       - uses: Swatinem/rust-cache@v2
         with:
