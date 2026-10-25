@@ -43,7 +43,7 @@ env:
 jobs:
   build:
     name: Build + smoke (macOS arm64)
-    runs-on: macos-14
+    runs-on: xcode-27
     timeout-minutes: 45
     outputs:
       tag_name: ${{ steps.version.outputs.tag_name }}
@@ -96,7 +96,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-          shared-key: rust-release-macos14
+          shared-key: rust-release-macos27
           save-if: false
 
       - name: Build release binaries

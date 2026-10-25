@@ -74,10 +74,13 @@ jobs:
           uvx ruff@0.16.3 format --check scripts
 
   test:
-    name: cargo macos-14
+    name: cargo macos-27
     needs: lint
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: macos-14
+    # macOS 27 (`xcode-27` image): brew ships the current mlx bottle only for
+    # the newest macOS (arm64_golden_gate); older images build mlx from
+    # source (~30+ min). Bump with brew's bottle tags, not on a schedule.
+    runs-on: xcode-27
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -113,7 +116,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-          shared-key: rust-macos14
+          shared-key: rust-macos27
           cache-on-failure: true
           # main writes the cache every PR can restore; a PR also saves its
           # own (PR-scoped) cache so follow-up pushes skip the cold build.
