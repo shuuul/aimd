@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-audio==0.5.3",
+#     "numpy==2.4.6",
+# ]
+# ///
 """Export golden decoder reference fixtures for the Qwen3-ASR native port (WS-06b).
 
 Runs the mlx-audio Qwen3-ASR TEXT DECODER (checkpoint
@@ -33,7 +41,7 @@ Reference chain (mirrors mlx-audio ``Qwen3ASRModel`` exactly):
 
 Usage::
 
-    uv run python scripts/export_asr_decoder_reference.py \\
+    uv run scripts/export_asr_decoder_reference.py \\
         [--out crates/aimd-engine/tests/golden/asr_decoder] [--checkpoint DIR]
 
 Deterministic: fixed seed, fixed prompt fixture, no wall-clock inputs.

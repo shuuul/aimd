@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-vlm==0.7.0",
+#     "numpy==2.4.6",
+# ]
+# ///
 """Export golden decoder reference fixtures for the Unlimited-OCR native port (WS-07b).
 
 Runs the mlx-vlm Unlimited-OCR DeepSeek-V2-lite LANGUAGE DECODER (checkpoint
@@ -58,7 +66,7 @@ Reference chain (mirrors mlx_vlm ``generate_step`` for this model):
 
 Usage::
 
-    uv run python scripts/export_ocr_decoder_reference.py \\
+    uv run scripts/export_ocr_decoder_reference.py \\
         [--out crates/aimd-engine/tests/golden/ocr_decoder] [--checkpoint DIR]
 
 Deterministic: fixed seed, fixed prompt fixture, no wall-clock inputs.

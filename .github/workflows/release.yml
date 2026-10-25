@@ -1,222 +1,208 @@
 name: Release
 
+# Tag-driven release (release-please removed, specs/002-native-engine.md):
+#   1. bump `[workspace.package] version` in Cargo.toml, `cargo update
+#      --workspace`, commit `chore(release): vX.Y.Z`;
+#   2. push tag `vX.Y.Z`.
+# This workflow then verifies the tag matches the workspace version, builds
+# and smoke-tests the three binaries, creates the GitHub Release with
+# generated notes, and opens a formula bump PR on shuuul/homebrew-tap. The
+# tap's brew test-bot CI builds bottles on that PR; its `brew pr-pull`
+# workflow publishes them.
+#
+# Secret: HOMEBREW_TAP_TOKEN — fine-grained PAT scoped to shuuul/homebrew-tap
+# with Contents: read/write and Pull requests: read/write.
+
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Existing release tag to rebuild/publish (e.g. v0.15.0). Leave empty for release-please only."
-        required: false
+        description: "Existing Rust release tag (e.g. v1.0.0)"
+        required: true
         type: string
-        default: ""
+      open_tap_pr:
+        description: "Open the formula bump PR on shuuul/homebrew-tap"
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
+
+env:
+  TAP_REPO: shuuul/homebrew-tap
+  FORMULA_PATH: Formula/aimd.rb
 
 jobs:
-  release-please:
-    name: Release Please
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.flags.outputs.release_created }}
-      tag_name: ${{ steps.flags.outputs.tag_name }}
-    steps:
-      - name: Create or update release PR
-        id: release
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.tag_name == '' }}
-        uses: googleapis/release-please-action@v5
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
-      - name: Resolve release outputs
-        id: flags
-        shell: bash
-        run: |
-          if [ -n "${MANUAL_TAG}" ]; then
-            echo "release_created=true" >> "$GITHUB_OUTPUT"
-            echo "tag_name=${MANUAL_TAG}" >> "$GITHUB_OUTPUT"
-          else
-            echo "release_created=${RP_CREATED}" >> "$GITHUB_OUTPUT"
-            echo "tag_name=${RP_TAG}" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          MANUAL_TAG: ${{ inputs.tag_name }}
-          RP_CREATED: ${{ steps.release.outputs.release_created }}
-          RP_TAG: ${{ steps.release.outputs.tag_name }}
-
   build:
-    name: Build Python distributions
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    runs-on: ubuntu-latest
-
+    name: Build + smoke (macOS arm64)
+    runs-on: macos-14
+    outputs:
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      version: ${{ steps.version.outputs.version }}
+      url: ${{ steps.source.outputs.url }}
+      sha256: ${{ steps.source.outputs.sha256 }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "false"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
     steps:
-      - name: Check out repository
+      - name: Check out tag
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ env.TAG_NAME }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version-file: ".python-version"
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-
-      - name: Verify tag matches package version
+      - name: Verify tag matches workspace version
+        id: version
         shell: bash
         run: |
-          expected="${RELEASE_TAG#v}"
-          python - <<'PY' "$expected"
-          import sys
-          import tomllib
+          set -euo pipefail
+          case "$TAG_NAME" in
+            v*) tag_version="${TAG_NAME#v}" ;;
+            *) echo "::error::Unsupported tag '$TAG_NAME' (want vX.Y.Z)"; exit 1 ;;
+          esac
+          # --locked also fails fast when Cargo.lock is stale after a bump.
+          version="$(cargo metadata --no-deps --locked --format-version 1 \
+            | jq -r '[.packages[] | select(.name == "aimd-cli")][0].version')"
+          if [ "$version" != "$tag_version" ]; then
+            echo "::error::Tag $TAG_NAME does not match workspace version $version"
+            exit 1
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-          expected = sys.argv[1]
-          with open("pyproject.toml", "rb") as f:
-              data = tomllib.load(f)
-          name = data["project"]["name"]
-          actual = data["project"]["version"]
+      - name: Install brew dependencies
+        run: brew install mlx pandoc mupdf ffmpeg
 
-          if actual != expected:
-              print(f"Tag {expected!r} does not match {name} version {actual!r}")
-              raise SystemExit(1)
-          PY
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: rust-release-macos14
+          save-if: false
+
+      - name: Build release binaries
+        run: |
+          MLX_PREFIX="$(brew --prefix mlx)"
+          export MLX_PREFIX
+          cargo build --release --locked -p aimd-cli -p aimd-api -p aimd-mcp
+
+      # Mirrors the formula's `test do` block: hermetic, no weights/network.
+      - name: Smoke test
+        shell: bash
         env:
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-
-      - name: Build aimd-tool distribution
-        run: uv build --out-dir dist
-
-      - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: python-distributions
-          path: dist/*
-          if-no-files-found: error
-
-  smoke-install:
-    name: Smoke install (${{ matrix.os }})
-    needs:
-      - release-please
-      - build
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-14
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version-file: ".python-version"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-
-      - name: Install released ref as uv tool
-        run: >-
-          uv tool install --force
-          "aimd-tool[all] @ git+https://github.com/${{ github.repository }}.git@${{ needs.release-please.outputs.tag_name }}"
-
-      - name: Verify installed executables
-        shell: bash
+          AIMD_MLX_DEVICE: cpu
         run: |
-          aimd --help >/dev/null
-          command -v aimd-api >/dev/null
-          command -v aimd-mcp >/dev/null
-          python_bin="$(uv tool dir)/aimd-tool/bin/python"
-          "$python_bin" - <<'PY'
-          import aimd.core
-          import aimd.interfaces.api
-          import aimd.interfaces.mcp
+          set -euo pipefail
+          bin="$GITHUB_WORKSPACE/target/release"
+          work="$(mktemp -d)"
+          cd "$work"
+          "$bin/aimd" --help | grep -q "Usage: aimd"
+          printf '# Release Smoke\n\nhermetic passthrough\n' > note.md
+          "$bin/aimd" note.md -o note_out.md
+          grep -q "hermetic passthrough" note_out.md
+          printf '<html><body><h1>Brew</h1><p>pandoc <b>works</b></p></body></html>' > page.html
+          "$bin/aimd" page.html -o page_out.md
+          grep -qF "pandoc **works**" page_out.md
+          "$bin/aimd-api" --help | grep -q "loopback-only"
+          test -x "$bin/aimd-mcp"
 
-          assert aimd.core.__name__ == "aimd.core"
-          assert aimd.interfaces.api.create_app().__class__.__name__ == "FastAPI"
-          assert aimd.interfaces.mcp.mcp.__class__.__name__ in {"FastMCP", "MCPServer"}
-          PY
+      - name: Hash source tarball
+        id: source
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${REPO}/archive/refs/tags/${TAG_NAME}.tar.gz"
+          sha256="$(curl -fsSL --retry 3 "$url" | shasum -a 256 | cut -d' ' -f1)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "$url $sha256"
 
   github-release:
-    name: Attach artifacts to GitHub Release
-    needs:
-      - release-please
-      - build
-      - smoke-install
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    name: Create GitHub Release
+    needs: build
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: python-distributions
-          path: dist
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.build.outputs.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG_NAME" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists."
+          else
+            gh release create "$TAG_NAME" --repo "$REPO" --verify-tag --generate-notes --title "$TAG_NAME"
+          fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: dist/*
-
-  pypi-publish:
-    name: Publish to PyPI
-    needs:
-      - release-please
-      - build
-      - smoke-install
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+  tap-pr:
+    name: Open formula bump PR
+    needs: build
+    if: ${{ inputs.open_tap_pr != false }}
     runs-on: ubuntu-latest
-
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      SRC_URL: ${{ needs.build.outputs.url }}
+      SRC_SHA256: ${{ needs.build.outputs.sha256 }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: python-distributions
-          path: dist
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          # This job only runs `uv publish` and never checks out the repo, so
-          # there are no dependency files to key a cache on.
-          enable-cache: false
-
-      - name: Publish distributions to PyPI
+      - name: Require tap token
         shell: bash
         run: |
-          set +e
-          output="$(uv publish --trusted-publishing always dist/aimd_tool-* 2>&1)"
-          status=$?
-          echo "$output"
-          if [ "$status" -eq 0 ]; then
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set; cannot open the ${TAP_REPO} PR"
+            exit 1
+          fi
+
+      - name: Check out tap
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Bump formula and open PR
+        working-directory: tap
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          sed -i -E \
+            -e "s|^  url \"[^\"]*\"|  url \"${SRC_URL}\"|" \
+            -e "s|^  sha256 \"[^\"]*\"|  sha256 \"${SRC_SHA256}\"|" \
+            "$FORMULA_PATH"
+          if git diff --quiet; then
+            echo "Formula already at ${VERSION}; nothing to do."
             exit 0
           fi
-          if echo "$output" | grep -qiE 'already exists|file already exists'; then
-            echo "Version already exists on PyPI; skipping upload."
+          git diff
+          branch="bump-aimd-${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "aimd ${VERSION}"
+          git push --force origin "$branch"
+          if [ -n "$(gh pr list --repo "$TAP_REPO" --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "PR for $branch already open; branch updated."
             exit 0
           fi
-          exit "$status"
+          gh pr create --repo "$TAP_REPO" --base main --head "$branch" \
+            --title "aimd ${VERSION}" \
+            --body "Bump aimd to ${VERSION} (${SRC_URL}). Opened by the shuuul/aimd release workflow. Bottles are built by brew test-bot on this PR; publish them with the tap's \`brew pr-pull\` workflow."

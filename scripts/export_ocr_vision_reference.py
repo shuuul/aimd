@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-vlm==0.7.0",
+#     "numpy==2.4.6",
+#     "pillow==12.3.0",
+# ]
+# ///
 """Export golden reference tensors for the Unlimited-OCR vision path (WS-07a).
 
 Loads `mlx-community/Unlimited-OCR-4bit` from the local HF cache through the

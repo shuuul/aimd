@@ -1,4 +1,16 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "numpy==2.4.6",
+#     "pillow==12.3.0",
+#     "transformers==5.17.0",
+#     "tokenizers==0.23.2",
+#     "mlx-vlm==0.7.0",
+#     "mlx==0.32.2",
+#     "torch==2.14.0",
+# ]
+# ///
 """Export golden tokenizer/chat-template fixtures for the native engine (WS-04).
 
 Runs the reference Hugging Face tokenization paths over deterministic inputs and
@@ -66,7 +78,7 @@ self-check that the recorded ``prompt_text``/segment encoding round-trips to
 
 Usage::
 
-    uv run python scripts/export_tokenizer_reference.py [--out crates/aimd-engine/tests/golden/tokenizer]
+    uv run scripts/export_tokenizer_reference.py [--out crates/aimd-engine/tests/golden/tokenizer]
 
 Deterministic: fixed synthetic inputs, no wall-clock, no randomness.
 """

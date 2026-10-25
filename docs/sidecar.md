@@ -1,7 +1,9 @@
 # Local desktop sidecar contract
 
-The AIMD HTTP API can run as a same-user, same-machine desktop sidecar. This boundary is
-not a remote or multi-user service.
+The AIMD HTTP API (`aimd-api`, installed by `brew install shuuul/tap/aimd`) can run as a
+same-user, same-machine desktop sidecar. This boundary is not a remote or multi-user
+service. `aimd-api` takes no command-line options; it is configured only through the
+environment variables below (`aimd-api --help` lists them).
 
 ## Launch and readiness
 
@@ -14,15 +16,17 @@ The desktop launcher owns process supervision:
 3. Generate a cryptographically random per-process bearer secret and pass it only through
    `AIMD_API_TOKEN`. The renderer must never receive this secret.
 4. Pass every source/destination directory granted by the user in the path-separated
-   `AIMD_ALLOWED_ROOTS` value.
+   (`:` on macOS) `AIMD_ALLOWED_ROOTS` value. Optionally set `AIMD_BLOB_DIR` for uploaded
+   blobs and `AIMD_TEMP_DIR` for temporary work.
 5. Poll authenticated `GET /readyz` until it returns `200 {"status":"ok"}`. `GET
    /healthz` is the liveness endpoint and uses the same authentication.
 
 The parent keeps ownership of the child process. On application shutdown it sends the
 normal process termination signal and waits for the sidecar's graceful shutdown. AIMD
-requests cooperative cancellation for active jobs, waits up to five seconds, then
-cancels remaining asyncio tasks; the parent may force-kill the process after its own
-deadline. A sidecar exit or failed readiness deadline is a startup/runtime failure, not a
+requests cooperative cancellation for active jobs on `SIGTERM`/`SIGINT`, waits up to
+five seconds, then aborts the remaining job runners (`Job task cancelled`) and exits
+without waiting for model calls still in flight; the parent may force-kill the process
+after its own deadline. A sidecar exit or failed readiness deadline is a startup/runtime failure, not a
 reason to launch a second unsupervised process.
 
 ## Authentication and transport

@@ -1,6 +1,15 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-vlm==0.7.0",
+#     "numpy==2.4.6",
+#     "pillow==12.3.0",
+# ]
+# ///
 """Dump the reference vision features spliced into the <image> positions.
 
-Usage: uv run python scripts/ocr_e2e_features.py crates/aimd-engine/tests/golden/ocr_e2e <out_dir> name [name...]
+Usage: uv run scripts/ocr_e2e_features.py crates/aimd-engine/tests/golden/ocr_e2e <out_dir> name [name...]
 (small_text_features.bf16 is committed; the 6 MB page dump is not.)
 Writes <out_dir>/<name>_features.bf16 (raw little-endian bf16 [n_image, 1280]).
 """

@@ -1,0 +1,8 @@
+# Lint config for the standalone reference scripts under scripts/
+# (PEP 723 uv scripts; the repo has no Python package).
+target-version = "py311"
+line-length = 88
+
+[lint]
+# The historical Ruff default surface (E4/E7/E9 + F).
+select = ["E4", "E7", "E9", "F"]

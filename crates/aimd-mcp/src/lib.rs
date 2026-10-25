@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 
 /// Docstring of the Python `process_input` tool (kept verbatim, including its
 /// indentation, because FastMCP publishes it as the tool description).
-const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). macOS MLX backends select the matching\n    mlx-community checkpoint (default 4bit when omitted). CUDA Transformers\n    backends only accept bf16 (requires CUDA bf16 support) and otherwise keep\n    automatic dtype selection when precision is omitted.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n    ";
+const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    precision selects model quantization: 4bit, 6bit, or 8bit (dash\n    variants like 4-bit are accepted). The MLX backend selects the matching\n    mlx-community checkpoint (default 4bit when omitted); bf16 is not yet\n    supported natively. Remote backends own their precision.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n    ";
 
 /// A tool call failure; rendered as an `isError` tool result.
 #[derive(Debug)]

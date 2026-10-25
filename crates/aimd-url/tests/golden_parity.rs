@@ -1,7 +1,9 @@
 //! Golden parity against the Python URL plugin.
 //!
-//! Fixtures under `tests/golden/subtitles/` are produced by
-//! `scripts/export_url_subtitle_reference.py`; never hand-edit them.
+//! Fixtures under `tests/golden/subtitles/` are frozen: they were last
+//! generated from the Python implementation (`aimd.plugins.url`) at commit
+//! 3a6cc6d. The Python oracle and its exporter script have been removed, so
+//! the fixtures are now the source of truth; never hand-edit or regenerate them.
 
 use std::path::PathBuf;
 

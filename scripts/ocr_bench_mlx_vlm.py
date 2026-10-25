@@ -1,6 +1,14 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-vlm==0.7.0",
+#     "pillow==12.3.0",
+# ]
+# ///
 """Benchmark the mlx-vlm Unlimited-OCR reference (the native MLX port's target).
 
-Usage: uv run python scripts/ocr_bench_mlx_vlm.py [--rounds N] image.png [...]
+Usage: uv run scripts/ocr_bench_mlx_vlm.py [--rounds N] image.png [...]
 
 Prints per round: total wall time, vision time (``get_input_embeddings``,
 evaluated), and mlx-vlm's own prompt / generation tok/s from
@@ -19,7 +27,7 @@ from mlx_vlm import load, stream_generate
 from mlx_vlm.prompt_utils import apply_chat_template
 from PIL import Image
 
-from aimd.plugins.ocr.models.mlx import (
+from reference_unlimited_ocr import (
     UNLIMITED_OCR_MAX_TOKENS,
     UNLIMITED_OCR_NGRAM_SIZE,
     UNLIMITED_OCR_NGRAM_WINDOW,

@@ -195,9 +195,3 @@ fn process_pandoc_document(
 
 #[cfg(test)]
 mod tests;
-
-/// Exposed only for the tier-3 parity test (`tests/parity.rs`).
-#[doc(hidden)]
-pub fn __clean_markdown(text: &str) -> String {
-    clean::clean_markdown(text)
-}

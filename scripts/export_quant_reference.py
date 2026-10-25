@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "numpy==2.4.6",
+# ]
+# ///
 """Export MLX affine-quantization golden reference fixtures (WS-02).
 
 Deterministic exporter for `crates/aimd-weights/tests/golden/quant/`. Every case stores:
@@ -22,7 +29,7 @@ Cases:
 All metadata lands in ``manifest.json`` (bits, group_size, mode, shapes,
 dtypes, filenames, byte layouts, sha256). Run:
 
-    uv run python scripts/export_quant_reference.py
+    uv run scripts/export_quant_reference.py
 """
 
 from __future__ import annotations

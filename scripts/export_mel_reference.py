@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "numpy==2.4.6",
+#     "torch==2.14.0",
+#     "transformers==5.17.0",
+# ]
+# ///
 """Export golden mel-spectrogram fixtures for the native engine (WS-05).
 
 Runs the Hugging Face ``Qwen3ASRFeatureExtractor`` (checkpoint
@@ -46,7 +54,7 @@ meet (the Rust implementation follows the same f64-internal data flow).
 
 Usage::
 
-    uv run python scripts/export_mel_reference.py [--out crates/aimd-engine/tests/golden/mel]
+    uv run scripts/export_mel_reference.py [--out crates/aimd-engine/tests/golden/mel]
 
 Deterministic: fixed seeds, no wall-clock, no threading effects on values
 (torch CPU STFT is deterministic for a fixed build).

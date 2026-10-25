@@ -1,6 +1,14 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-vlm==0.7.0",
+#     "pillow==12.3.0",
+# ]
+# ///
 """Render OCR E2E fixtures and dump the mlx_vlm reference.
 
-Usage: uv run python scripts/ocr_e2e_reference.py crates/aimd-engine/tests/golden/ocr_e2e [--no-generate]
+Usage: uv run scripts/ocr_e2e_reference.py crates/aimd-engine/tests/golden/ocr_e2e [--no-generate]
 Writes <name>.png plus <name>.json (input_ids, image token positions,
 crop ratio, raw text, tokens, finish_reason, normalized markdown, timing).
 """
@@ -68,14 +76,14 @@ def main():
     from mlx_vlm import load, stream_generate
     from mlx_vlm.prompt_utils import apply_chat_template
 
-    from aimd.plugins.ocr.models.mlx import (
+    from reference_unlimited_ocr import (
         UNLIMITED_OCR_MAX_TOKENS,
         UNLIMITED_OCR_NGRAM_SIZE,
         UNLIMITED_OCR_NGRAM_WINDOW,
         UNLIMITED_OCR_SINGLE_PROMPT,
         SlidingWindowNoRepeatNgramProcessor,
+        normalize_unlimited_ocr_markdown,
     )
-    from aimd.plugins.ocr.models.unlimited import normalize_unlimited_ocr_markdown
 
     model, processor = load("mlx-community/Unlimited-OCR-4bit")
     prompt = apply_chat_template(

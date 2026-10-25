@@ -121,6 +121,7 @@ Not in scope:
 | 2026-10-25 | WS-15 runs before WS-13/WS-14 (user direction: move the interfaces to Rust first, then delete Python and rewrite the README). WS-15 becomes the umbrella/closeout row; the port splits into WS-16 (core + `aimd` CLI + local/remote ASR/OCR), WS-17 (doc), WS-18 (URL), WS-19 (HTTP API), WS-20 (MCP), WS-21 (Homebrew tap + release CI). Crates: `aimd-core` (models, errors, hooks, text shaping; no heavy deps), `aimd-doc` and `aimd-url` (depend only on `aimd-core`; URL audio fallback goes through a transcriber trait implemented by `aimd-process`), `aimd-process` (routing/orchestration over doc/url/engine), and one binary crate per interface (`aimd-cli` -> `aimd`, then `aimd-api`, `aimd-mcp`) | Removes the Python dependency before perf work; the core/doc/url split avoids crate cycles and lets WS-16/17/18 run in parallel | WS-13, WS-14, WS-15..WS-21 |
 | 2026-10-25 | Rust document/PDF tool mapping: Pandoc (>= 3.8, brew) reads docx/pptx/xlsx/odt/epub/html/rtf/etc., replacing MarkItDown built-ins; legacy binary `.doc`/`.ppt`/`.xls` are dropped (no Pandoc reader); `.txt`/`.md` pass through. Text-layer PDFs and the scanned/encoding-issue OCR probe use the `pdf-inspector` crate (the same library behind the Python binding); scanned-page rendering for OCR shells out to brew `mupdf` (`mutool draw`, replacing PyMuPDF). pdfium is dropped (no brew formula) | Keeps the formula on brew-distributed tools; pdf-inspector keeps routing identical to Python | WS-16, WS-17 |
 | 2026-10-26 | GLM-OCR option removed from the Rust crates entirely (user direction "直接移除 GLM-OCR 的选项"): `glm-ocr`, its aliases and HF ids follow the unknown-model error path; the frozen Python package keeps it until WS-15 deletes Python | Narrow model matrix; no dead option in help text | WS-16 |
+| 2026-10-26 | WS-15 closeout (user direction: "按你的默认方案做 WS-15 收尾" + "release-please 都可以去掉"): the Python package, pytest suite, `pyproject.toml`/`uv.lock` and `scripts/check_specs.py` are deleted; the spec validator is `cargo xtask check-specs` (byte-identical output); reference exporters stay as standalone PEP 723 `uv run` scripts with pinned deps (lint via root `ruff.toml`); release-please is removed: version lives in `[workspace.package]` starting at 1.0.0, a pushed `vX.Y.Z` tag drives `release.yml` (version check, build + smoke, `gh release create --generate-notes`, tap PR); `CHANGELOG.md` is frozen history | Single toolchain; no Python packaging or release bot to keep in sync | WS-15, WS-21 |
 | 2026-10-25 | MLX-only cleanup: `aimd-tensor` crate deleted; ANE spike artifacts (`golden/ane_spike`, `scripts/ane_spike`) deleted (report `docs/ane-spike-results.md` kept as history); `aimd_weights::dequantize_affine` kept as the test-only bit-exact oracle for `golden/quant`; `golden/asr_decoder/logits.f32` dropped (unread). MLX device = GPU unless `AIMD_MLX_DEVICE=cpu` or no GPU; hermetic CI runs on the CPU device and the checkpoint tier skips there; MLX's CPU `quantized_matmul` with bf16 inputs loses precision as K grows (vs float64: 1-2% of max|out| at K=128, 6.5-17% at K=4096; f16/dense/f32 <= 0.2%; Metal bf16 < 0.8%; reproduced in Python mlx 0.32.2), so CPU-device parity tests promote bf16 cases to f32 inputs and keep the Metal tolerance; the CPU device must never run real bf16-scale checkpoints | Hosted macOS runners may lack Metal; keep CI hermetic and inside the TEST RULES budget (CPU 4 s, Metal 12 s) | WS-02, WS-03, WS-12 |
 
 ## Workstreams
@@ -148,13 +149,13 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Done | None | 35 unit + 35 pipeline + 2 golden-parity tests green; real YouTube Markdown identical to Python; dom_smoothie vs defuddle F1 0.88-0.999 on articles (0.32 on an index page) |
 | WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | agent-api | Done | WS-16 | `cargo test -p aimd-api` 49 green (all four test_api*.py suites ported); release `/v1/process` on page_text.png byte-identical to `uv run aimd-api`; jobs/SSE/shutdown smoke green |
 | WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | agent-mcp | Done | WS-16 | `cargo test -p aimd-mcp` 11 green; tools/list schemas, healthz and the OCR result identical to `uv run aimd-mcp`; error text keeps the domain message (intentional deviation) |
-| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | agent-tap | In progress | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 | Full-Rust interface layer + Homebrew release: CLI (hand-written arg parse), doc pipeline (brew pandoc + hand-written zip/OPF + pdfium), URL pipeline (brew yt-dlp with stderr-signature hint to `brew upgrade yt-dlp` + `dom_smoothie` readability with defuddle fixture validation), HTTP API (axum, SSE, jobs), MCP (rmcp); tap formula + bottle CI (macOS arm64, Linux from WS-09) + Rust release automation replacing release-please's Python flow; final PyPI release pointing to brew, then Python package removal. Per the dependency policy: hand-write the simple parts, third-party for complex domains | Unassigned | Pending | WS-14 | Behavior parity vs the Python interfaces on the ported pytest scenarios; readability output similarity vs defuddle on a fixture corpus; `brew install shuuul/tap/aimd` from bottles works on macOS arm64 (and Linux once WS-09 lands) |
+| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | agent-tap | In progress | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 |
 | WS-12 | ANE feasibility spike: Core ML routes (stateful LLM on ANE, encoder-on-ANE), fp16/weight-size constraints, mlx-or-torch conversion source, Rust integration path, expected gains vs Metal on M2 Pro; go/no-go recommendation in `docs/ane-feasibility.md` | agent-ane + agent-ane-spike + shuuul | Done | None | Report reviewed; NO-GO recorded (commit 8fc1650): gates passed technically, ~4-5% end-to-end gain does not justify the artifact/maintenance cost |
 
 ## Verification
 
-- Spec lifecycle: `uv run python scripts/check_specs.py` and
-  `uv run pytest -q tests/test_check_specs.py` after any spec change.
+- Spec lifecycle: `cargo xtask check-specs` and `cargo test -p xtask`
+  after any spec change (ported from the deleted Python validator).
 - Workspace: `cargo test --workspace` and
   `cargo clippy --workspace --all-targets` must stay green after every
   integration pass.
@@ -868,6 +869,21 @@ Append entries rather than rewriting another worker's record.
   cleaner differential corpus). fmt + clippy `-D warnings` clean.
 - Blockers: none. Needs from WS-16: call `convert_document` only after the
   scanned/encoding-issue OCR probe; `.pdf` is in `DOCUMENT_EXTENSIONS`.
+
+### 2026-10-26 — shuuul/WS-15 closeout — WS-15, WS-21
+
+- Changed: `src/aimd`, `tests/`, `pyproject.toml`, `uv.lock`,
+  `.python-version`, `scripts/check_specs.py`,
+  `scripts/export_url_subtitle_reference.py` deleted; `minimal.epub` moved
+  to `crates/aimd-doc/tests/fixtures/`; Python-parity tests removed
+  (`aimd-doc/tests/parity.rs`) or made Rust-only (`aimd-url` YouTube smoke);
+  `crates/xtask` (`cargo xtask check-specs`, 18 tests); release-please
+  config/manifest and the Python CI/release workflows deleted, `rust.yml` ->
+  `ci.yml`, `rust-release.yml` -> `release.yml` (tag `v*`); version 1.0.0;
+  README/AGENTS/docs rewritten for the Rust + Homebrew product.
+- Next: push the branch, final PyPI release from `main` pointing to brew,
+  `HOMEBREW_TAP_TOKEN` secret, tag `v1.0.0` -> first bottle (closes WS-21,
+  then WS-15).
 
 ## Completion summary
 

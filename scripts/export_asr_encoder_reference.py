@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "mlx==0.32.2",
+#     "mlx-audio==0.5.3",
+#     "numpy==2.4.6",
+#     "transformers==5.17.0",
+#     "torch==2.14.0",
+# ]
+# ///
 """Export golden audio-tower (encoder) fixtures for the native engine (WS-06a).
 
 Runs the real ``mlx_audio`` Qwen3-ASR audio tower
@@ -48,7 +58,7 @@ the float32 mel input), so stages are dumped as f32.
 
 Usage::
 
-    uv run python scripts/export_asr_encoder_reference.py \
+    uv run scripts/export_asr_encoder_reference.py \
         [--out crates/aimd-engine/tests/golden/asr_encoder]
 
 Deterministic: fixed recipes, no wall-clock; sha256s are byte-stable across

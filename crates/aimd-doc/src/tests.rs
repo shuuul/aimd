@@ -520,8 +520,7 @@ fn real_pandoc_converts_rst_and_epub_fixture() {
     assert_eq!(out.title.as_deref(), Some("Title"));
     assert!(out.markdown.contains("Body text."));
 
-    let epub =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/test_files/minimal.epub");
+    let epub = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimal.epub");
     if epub.exists() {
         let od = t.path().join("epub_out");
         let out = convert_document(&epub, Some(&od), None, &NoHooks).unwrap();

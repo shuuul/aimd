@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-api"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-core",
  "aimd-process",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-core",
  "aimd-process",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-doc"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-core",
  "miniz_oxide 0.9.1",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-engine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-mlx",
  "aimd-weights",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-mcp"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-core",
  "aimd-process",
@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-mlx"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-weights",
  "cc",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-process"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-core",
  "aimd-doc",
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-url"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aimd-core",
  "dom_smoothie",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-weights"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "half",
  "memmap2",
@@ -3406,6 +3406,10 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "xtask"
+version = "1.0.0"
 
 [[package]]
 name = "y4m"

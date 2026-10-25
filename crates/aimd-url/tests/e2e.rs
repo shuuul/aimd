@@ -1,9 +1,9 @@
 //! Tier 3 (`AIMD_E2E=1`): real network and external tools.
 //!
 //! - `youtube_subtitle_smoke`: real yt-dlp on a short public YouTube video
-//!   with manual subtitles, compared with `uv run aimd <url>` (Python). The
-//!   view-count line is masked since it changes between fetches. Override
-//!   the URL with `AIMD_E2E_URL`.
+//!   with manual subtitles (subtitle path only; parity with the deleted
+//!   Python implementation was verified at commit 3a6cc6d). Override the URL
+//!   with `AIMD_E2E_URL`.
 //! - `readable_similarity_vs_defuddle`: dom_smoothie vs `npx defuddle parse`
 //!   word-multiset F1 on `tests/fixtures/readable/*.html` plus any `*.html`
 //!   in `AIMD_READABLE_CORPUS`.
@@ -23,10 +23,6 @@ fn e2e() -> bool {
     std::env::var("AIMD_E2E").is_ok_and(|v| v == "1")
 }
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
 struct NoAsr;
 
 impl AudioTranscriber for NoAsr {
@@ -38,70 +34,35 @@ impl AudioTranscriber for NoAsr {
 struct NoHooks;
 impl ProcessHooks for NoHooks {}
 
-fn mask_volatile(markdown: &str) -> String {
-    markdown
-        .lines()
-        .map(|l| {
-            if l.starts_with("**View Count:**") {
-                "**View Count:** <masked>"
-            } else {
-                l
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim_end()
-        .to_string()
-}
-
 #[test]
 fn youtube_subtitle_smoke() {
     if !e2e() {
         return;
     }
-    let url = std::env::var("AIMD_E2E_URL")
-        .unwrap_or_else(|_| "https://www.youtube.com/watch?v=jNQXAC9IVRw".to_string());
+    let default_url = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
+    let url = std::env::var("AIMD_E2E_URL").unwrap_or_else(|_| default_url.to_string());
     let input = ProcessInput {
         input_source: url.clone(),
         ..ProcessInput::default()
     };
-    let rust = convert_url_with(&input, &UrlConfig::from_env(), &NoAsr, &NoHooks)
-        .expect("rust URL conversion");
-    assert!(rust.markdown.contains("## Content"), "{}", rust.markdown);
-
-    let out_dir = std::env::temp_dir().join(format!("aimd-url-e2e-{}", std::process::id()));
-    std::fs::create_dir_all(&out_dir).unwrap();
-    let py_path = out_dir.join("python.md");
-    let status = Command::new("uv")
-        .current_dir(repo_root())
-        .args(["run", "aimd", &url, "-o"])
-        .arg(&py_path)
-        .status()
-        .expect("uv run aimd");
-    assert!(status.success(), "python aimd failed");
-    let python = std::fs::read_to_string(&py_path).unwrap();
-    std::fs::write(out_dir.join("rust.md"), &rust.markdown).unwrap();
-
-    let (r, p) = (mask_volatile(&rust.markdown), mask_volatile(&python));
-    if r != p {
-        let rl: Vec<&str> = r.lines().collect();
-        let pl: Vec<&str> = p.lines().collect();
-        for i in 0..rl.len().max(pl.len()) {
-            let (a, b) = (rl.get(i), pl.get(i));
-            if a != b {
-                eprintln!("line {}: rust={a:?} python={b:?}", i + 1);
-            }
-        }
-        panic!(
-            "Rust and Python markdown differ; outputs in {}",
-            out_dir.display()
-        );
-    }
-    eprintln!(
-        "youtube smoke: Rust == Python ({} bytes)",
-        rust.markdown.len()
+    let out =
+        convert_url_with(&input, &UrlConfig::from_env(), &NoAsr, &NoHooks).expect("URL conversion");
+    let content = out
+        .markdown
+        .split_once("## Content")
+        .map(|(_, body)| body.trim())
+        .unwrap_or_default();
+    assert!(
+        !content.is_empty(),
+        "no transcript content:\n{}",
+        out.markdown
     );
-    let _ = std::fs::remove_dir_all(&out_dir);
+    assert_eq!(out.platform, "youtube");
+    if url == default_url {
+        // "Me at the zoo": the subtitle track mentions the elephants.
+        assert!(content.to_lowercase().contains("elephant"), "{content}");
+    }
+    eprintln!("youtube smoke: {} bytes", out.markdown.len());
 }
 
 fn words(text: &str) -> HashMap<String, usize> {
