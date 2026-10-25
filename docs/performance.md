@@ -91,8 +91,15 @@ WS-13 findings: in the pipelined ASR loop the host builds a step's graph in
 buys little there. A whole-step `compile` does not fit because the KV cache
 grows every step, so a shape-keyed compile would retrace each token and a
 shapeless one cannot express the slice bounds (mlx-lm doesn't compile the
-step either). Remaining decode headroom is tracked as WS-14 (speculative
-decoding) and WS-08 (custom Metal kernels inside the MLX graph).
+step either).
+
+WS-14 findings (prompt-lookup speculative decoding, not shipped): an
+m-token Unlimited-OCR verify forward costs 4.3 / 6.5 / 11.0 / 19.4 / 24.6 ms
+for m = 1 / 2 / 4 / 8 / 16, nearly linear because every routed token reads
+its own 6 of 64 experts. On six real OCR pages, n-gram drafts were accepted
+for only 1.01-1.15 tokens per verify, so simulated decode came out
+0.63-1.01x. Remaining decode headroom is WS-08 (custom Metal kernels inside
+the MLX graph).
 
 ## Smoke-test record (Python era)
 
