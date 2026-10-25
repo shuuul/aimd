@@ -179,8 +179,15 @@ Candidates ranked by expected saving per token:
    (+5.5%), markdown byte-identical on 7 images. A mirrored one-row-per-
    threadgroup gemv saved only 0.8 µs more (dispatch-floor bound), not kept.
    A single-threadgroup gemv + softmax + top-k ran 70 µs (one core).
-5. Small-op fusion (rms_norm + rope + KV row write): ~10 µs per layer, both
-   models.
+5. Small-op fusion (measured 2026-10-26, not kept): a bit-identical
+   residual add + RMSNorm kernel (mirrors `rms_single_row`) saves only
+   ~0.5 µs per fusion in a chain (6.4 -> 5.9 µs at d 2048). Wired into
+   both decoders (OCR -1, ASR -2 dispatches per layer) it was within noise
+   end to end: OCR decode ~276 tok/s either way, the 5-minute ASR clip
+   21.94 -> 21.82 s but the 1-minute clip 2.58 -> 2.60 s. Fusing rope for
+   q and k saves one such dispatch; a custom kernel cannot write the KV
+   row in place (`metal_kernel` outputs are fresh buffers), so the
+   remaining small ops are below the measurable floor.
 
 Caveat: the chain serializes every op, so it overstates ops that run
 concurrently in the decoder (q/k/v, gate/up, shared vs routed experts).

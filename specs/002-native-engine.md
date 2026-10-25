@@ -1043,6 +1043,16 @@ Append entries rather than rewriting another worker's record.
   decoder layer: ~0.7% of OCR decode.
 - Next action: residual add + rms_norm, rope + KV write (~0.7% each).
 
+### 2026-10-26 — shuuul/WS-08 small-op fusion (not kept) — WS-08
+
+- Measured, not kept: a bit-identical residual add + RMSNorm kernel saved
+  ~0.5 µs per fusion in isolation and was within noise end to end (OCR
+  decode ~276 tok/s either way; ASR 5-minute clip -0.6%, 1-minute clip
+  +0.5%). Rope q+k fusion saves one such dispatch, and `metal_kernel`
+  cannot write the KV row in place, so decode small-op fusion is closed.
+- Next action: none on decode dispatch count; decode is ~80% of the
+  practical bandwidth roofline.
+
 ## Completion summary
 
 (to complete before archiving)
