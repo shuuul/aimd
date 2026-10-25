@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.4](https://github.com/shuuul/aimd/compare/v0.23.3...v0.23.4) (2026-10-25)
+
+
+### Bug Fixes
+
+* **cli:** point users to the Homebrew build in the final PyPI release ([fc77d18](https://github.com/shuuul/aimd/commit/fc77d186e365f6559478ac6f40916a656127bdf0))
+* **cli:** point users to the Homebrew build in the final PyPI release ([06ffa33](https://github.com/shuuul/aimd/commit/06ffa33e0e316beccee4ab90e81e53604f2ed9a4))
+
 ## [0.23.3](https://github.com/shuuul/aimd/compare/v0.23.2...v0.23.3) (2026-09-13)
 
 
