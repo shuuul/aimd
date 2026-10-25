@@ -1021,6 +1021,16 @@ Append entries rather than rewriting another worker's record.
   prefetch were no better.
 - Next action: small-op fusion (residual add + rms_norm, rope + KV write).
 
+### 2026-10-26 — shuuul/WS-08 addends in the expert down kernel — WS-08
+
+- Changed: `moe_swiglu_4bit` takes up to two `[D]` addends, added in order
+  after the weighted expert sum with T rounding. MoE layers fold the
+  shared-expert output and the residual into the routed down kernel; the
+  dense layer folds its residual. Parity test checks the addend path.
+- Evidence: OCR markdown byte-identical on 7 images; decode ~267 -> ~274
+  tok/s median (base = 04ccb0e).
+- Next action: residual add + rms_norm, rope + KV write.
+
 ## Completion summary
 
 (to complete before archiving)

@@ -477,6 +477,7 @@ fn main() {
                 [&u.w, &u.s, &u.b],
                 [&dn.w, &dn.s, &dn.b],
                 GROUP as i32,
+                &[],
             )
             .unwrap()
         }),

@@ -155,7 +155,10 @@ Candidates ranked by expected saving per token:
    The shared-expert and layer-0 dense MLPs run through the same kernel as
    one expert with score 1 (bit-identical to the `quantized_matmul` MLP:
    M=1 takes `qmv_impl` for K=1280/1792/6848): OCR decode ~259 -> ~262
-   tok/s (+1.5%), markdown byte-identical on 7 images.
+   tok/s (+1.5%), markdown byte-identical on 7 images. The down kernel
+   also takes up to two `[D]` addends (shared-expert output, then the
+   residual), each rounded like mlx `add`, removing two dispatches per
+   layer: OCR decode ~267 -> ~274 tok/s (+2.7%), byte-identical.
 3. Decode attention (shipped 2026-10-26): mlx already splits long KV
    (`sdpa_vector_2pass` for kv >= 1024 on M2 Pro, 64 blocks for 1 query
    head per KV head); `MLX_SDPA_BLOCKS` 32-512 did not help.

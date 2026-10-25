@@ -346,6 +346,8 @@ mod ffi {
             down_s: *mut AimdMlxArray,
             down_b: *mut AimdMlxArray,
             group_size: i32,
+            addends: *mut *mut AimdMlxArray,
+            n_add: i32,
         ) -> *mut AimdMlxArray;
         pub fn mlx_moe_router(
             x: *mut AimdMlxArray,
@@ -1150,7 +1152,9 @@ impl MlxArray {
     /// inds[k]`, in two custom Metal kernels. `self` is `[D]`, `inds` `[K]`
     /// u32, `scores` `[K]`; each projection is `(weight, scales, biases)`
     /// with `[E, out, in/8]` u32 weights. Returns `[D]`. Tracks the
-    /// `gather_qmm` + SwiGLU + weighted-sum graph to bf16 rounding.
+    /// `gather_qmm` + SwiGLU + weighted-sum graph to bf16 rounding; up to two
+    /// `[D]` `addends` are then added in order (each rounds like `add`).
+    #[allow(clippy::too_many_arguments)]
     pub fn moe_swiglu_4bit(
         &self,
         inds: &Self,
@@ -1159,7 +1163,10 @@ impl MlxArray {
         up: [&Self; 3],
         down: [&Self; 3],
         group_size: i32,
+        addends: &[&Self],
     ) -> Result<Self, MlxError> {
+        let mut adds: Vec<*mut ffi::AimdMlxArray> =
+            addends.iter().map(|a| a.ptr.as_ptr()).collect();
         let ptr = unsafe {
             ffi::mlx_moe_swiglu_4bit(
                 self.ptr.as_ptr(),
@@ -1175,6 +1182,8 @@ impl MlxArray {
                 down[1].ptr.as_ptr(),
                 down[2].ptr.as_ptr(),
                 group_size,
+                adds.as_mut_ptr(),
+                adds.len() as i32,
             )
         };
         Self::from_handle(ptr, "mlx_moe_swiglu_4bit")

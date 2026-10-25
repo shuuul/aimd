@@ -172,7 +172,8 @@ impl DenseMlp {
         })
     }
 
-    fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+    /// `down(swiglu(gate(x), up(x)))`, then each of `add` in order.
+    fn forward(&self, x: &MlxArray, add: &[&MlxArray]) -> Result<MlxArray, MlxError> {
         if let Some(one) = &self.one {
             let s = x.shape()?;
             if s[0] * s[1] == 1 {
@@ -186,13 +187,18 @@ impl DenseMlp {
                         [&w[3], &w[4], &w[5]],
                         [&w[6], &w[7], &w[8]],
                         self.gate.group_size,
+                        add,
                     )?
                     .reshape(&s);
             }
         }
         let g = self.gate.linear(x)?;
         let u = self.up.linear(x)?;
-        self.down.linear(&g.swiglu(&u)?)
+        let mut y = self.down.linear(&g.swiglu(&u)?)?;
+        for a in add {
+            y = y.add(a)?;
+        }
+        Ok(y)
     }
 }
 
@@ -259,13 +265,15 @@ impl Moe {
         y.reshape(&[b, l, k, d])
     }
 
-    fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+    /// MoE output plus the shared experts, then `residual`.
+    fn forward(&self, x: &MlxArray, residual: &MlxArray) -> Result<MlxArray, MlxError> {
         let s = x.shape()?;
         let (b, l, d) = (s[0], s[1], s[2]);
+        let shared = self.shared.forward(x, &[])?;
         if self.fused && b * l == 1 {
             let x1 = x.reshape(&[d])?;
             let (inds, scores) = x1.moe_router(&self.gate_w, self.top_k as i32)?;
-            let y = x1
+            return x1
                 .moe_swiglu_4bit(
                     &inds,
                     &scores,
@@ -273,16 +281,16 @@ impl Moe {
                     self.sw_up.packed(),
                     self.sw_down.packed(),
                     self.sw_gate.group_size,
+                    &[&shared, residual],
                 )?
-                .reshape(&[b, l, d])?;
-            return y.add(&self.shared.forward(x)?);
+                .reshape(&[b, l, d]);
         }
         let (inds, scores) = self.route(x)?;
         let y = self.switch_glu(x, &inds)?;
         let y = y
             .multiply(&scores.reshape(&[b, l, self.top_k, 1])?)?
             .sum_axis(-2, false)?;
-        y.add(&self.shared.forward(x)?)
+        y.add(&shared)?.add(residual)
     }
 }
 
@@ -485,11 +493,10 @@ impl OcrDecoder {
                 .forward(&h.rms_norm(Some(&layer.input_ln), self.eps)?, cache)?;
             let hh = h.add(&r)?;
             let xn = hh.rms_norm(Some(&layer.post_ln), self.eps)?;
-            let r = match &layer.mlp {
-                Mlp::Dense(m) => m.forward(&xn)?,
-                Mlp::Moe(m) => m.forward(&xn)?,
+            h = match &layer.mlp {
+                Mlp::Dense(m) => m.forward(&xn, &[&hh])?,
+                Mlp::Moe(m) => m.forward(&xn, &hh)?,
             };
-            h = hh.add(&r)?;
         }
         h.rms_norm(Some(&self.norm), self.eps)
     }

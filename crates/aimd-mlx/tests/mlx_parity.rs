@@ -855,9 +855,27 @@ fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
                 [&up.0, &up.1, &up.2],
                 [&down.0, &down.1, &down.2],
                 gs as i32,
+                &[],
             )
             .unwrap();
         assert_eq!(got.shape().unwrap(), vec![d]);
+        // The shared-expert output and residual folded into the down kernel.
+        let addv: Vec<bf16> = (0..2 * d)
+            .map(|_| bf16::from_f32((next() % 2000) as f32 / 100.0 - 10.0))
+            .collect();
+        let a0 = MlxArray::from_bf16(&[d], &addv[..d]).unwrap();
+        let a1 = MlxArray::from_bf16(&[1, 1, d], &addv[d..]).unwrap();
+        let got_add = x
+            .moe_swiglu_4bit(
+                &inds,
+                &scores,
+                [&gate.0, &gate.1, &gate.2],
+                [&up.0, &up.1, &up.2],
+                [&down.0, &down.1, &down.2],
+                gs as i32,
+                &[&a0, &a1],
+            )
+            .unwrap();
 
         // Reference: the decoder's unfused SwitchGLU graph.
         let idx = inds.reshape(&[1, 1, k]).unwrap();
@@ -913,6 +931,16 @@ fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
             got.to_bf16_vec().unwrap(),
             want.to_bf16_vec().unwrap(),
             "d={d} inter={inter}"
+        );
+        let want_add = want
+            .add(&a0)
+            .unwrap()
+            .add(&a1.reshape(&[d]).unwrap())
+            .unwrap();
+        assert_eq!(
+            got_add.to_bf16_vec().unwrap(),
+            want_add.to_bf16_vec().unwrap(),
+            "d={d} inter={inter} with addends"
         );
     }
 }

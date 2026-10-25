@@ -1165,7 +1165,9 @@ AimdMlxArray* mlx_gather_qmm(
 /// rounding (`qmv_impl`, `Sigmoid`, the T-typed sum), so the result is
 /// bit-identical to the unfused graph. `x` is `[D]`,
 /// `inds` `[K]` u32 (in range; not bounds-checked on device), `scores`
-/// `[K]`; returns `[D]`.
+/// `[K]`; returns `[D]`. Up to two `[D]` `addends` (may be NULL when
+/// `n_add` is 0) are then added in order, each rounding to T like mlx `add`
+/// (the shared-expert output, then the residual).
 AimdMlxArray* mlx_moe_swiglu_4bit(
     AimdMlxArray* x,
     AimdMlxArray* inds,
@@ -1179,7 +1181,9 @@ AimdMlxArray* mlx_moe_swiglu_4bit(
     AimdMlxArray* down_w,
     AimdMlxArray* down_s,
     AimdMlxArray* down_b,
-    int32_t group_size) {
+    int32_t group_size,
+    AimdMlxArray** addends,
+    int32_t n_add) {
   return guarded([&]() -> AimdMlxArray* {
     require(
         {x, inds, scores, gate_w, gate_s, gate_b, up_w, up_s, up_b, down_w,
@@ -1276,7 +1280,7 @@ inline void qdot_rows(const device T* x, const device uint32_t* const (&w)[M],
     // per-expert results meet in threadgroup memory for the score sum.
     static const auto down = fast::metal_kernel(
         "aimd_moe_down_4bit",
-        {"h", "inds", "scores", "dw", "ds", "db"},
+        {"h", "inds", "scores", "dw", "ds", "db", "a0", "a1"},
         {"y"},
         R"(
   constexpr int RS = 4;
@@ -1305,6 +1309,8 @@ inline void qdot_rows(const device T* x, const device uint32_t* const (&w)[M],
     for (int j = 0; j < K; ++j) {
       acc2 = T(float(acc2) + part[j][lane]);
     }
+    if (NADD > 0) acc2 = T(float(acc2) + float(a0[row0 + lane]));
+    if (NADD > 1) acc2 = T(float(acc2) + float(a1[row0 + lane]));
     y[row0 + lane] = acc2;
   }
 )",
@@ -1329,18 +1335,34 @@ inline void qdot_rows(const device T* x, const device uint32_t* const (&w)[M],
         d % 4 != 0 || k < 1 || k > 32) {
       throw std::invalid_argument("[aimd_mlx] moe: bad 4-bit expert shapes");
     }
+    if (n_add < 0 || n_add > 2 || (n_add > 0 && addends == nullptr)) {
+      throw std::invalid_argument("[aimd_mlx] moe: at most two addends");
+    }
+    std::vector<array> adds;
+    for (int i = 0; i < n_add; ++i) {
+      require({addends[i]});
+      const array& a = as_array(addends[i]);
+      if (a.size() != static_cast<size_t>(d) || a.dtype() != xa.dtype()) {
+        throw std::invalid_argument("[aimd_mlx] moe: addend must be [D] of x dtype");
+      }
+      adds.push_back(mlx::core::reshape(a, {d}));
+    }
+    // Unused addend slots get any [D] array of x dtype.
+    while (adds.size() < 2) {
+      adds.push_back(xa);
+    }
     const Dtype t = xa.dtype();
     const Dtype s = as_array(gate_s).dtype();
     std::vector<std::pair<std::string, fast::TemplateArg>> tmpl = {
         {"D", d}, {"I", inter}, {"K", k}, {"GS", static_cast<int>(group_size)},
-        {"T", t}, {"S", s}};
+        {"NADD", static_cast<int>(n_add)}, {"T", t}, {"S", s}};
     const array h = gate_up(
         {xa, ia, gw, as_array(gate_s), as_array(gate_b), as_array(up_w),
          as_array(up_s), as_array(up_b)},
         {{k, inter}}, {t}, {64, inter / 8, k}, {64, 1, 1}, tmpl, std::nullopt,
         false, {})[0];
     return wrap(down(
-        {h, ia, sa, dw, as_array(down_s), as_array(down_b)},
+        {h, ia, sa, dw, as_array(down_s), as_array(down_b), adds[0], adds[1]},
         {{d}}, {t}, {32 * k, d / 4, 1}, {32 * k, 1, 1}, tmpl, std::nullopt,
         false, {})[0]);
   });
