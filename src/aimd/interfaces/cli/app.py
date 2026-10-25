@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 import re
+import sys
 from typing import cast, Optional
 
 import typer
@@ -318,6 +319,11 @@ def process(
 
 def main() -> None:
     """Entry point for CLI app."""
+    print(
+        "aimd-tool (PyPI) is no longer maintained; install the native build with "
+        "`brew install shuuul/tap/aimd`.",
+        file=sys.stderr,
+    )
     app()
 
 

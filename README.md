@@ -21,6 +21,19 @@
   </a>
 </div>
 
+> [!IMPORTANT]
+> **aimd has moved to a native Rust build distributed through Homebrew.**
+> This is the last release of the `aimd-tool` Python package; it will not
+> receive further updates. Install the new version with:
+>
+> ```bash
+> brew install shuuul/tap/aimd
+> ```
+>
+> The `aimd`, `aimd-api`, and `aimd-mcp` commands keep the same flags and
+> wire format. GLM-OCR and the Linux Transformers/CUDA backends are not
+> carried over (see the GitHub releases for details).
+
 # aimd
 
 Prepare LLM-ready context from URLs, audio/video, and documents.
