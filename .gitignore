@@ -218,3 +218,7 @@ cookies.txt
 
 # examples
 examples/
+
+# Rust native engine build artifacts
+native/target*/
+.mimosa/

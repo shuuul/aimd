@@ -1,0 +1,17 @@
+[package]
+name = "aimd-weights"
+description = "Safetensors mmap loading and MLX affine 4-bit/8-bit unpack + dequantization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+half = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+memmap2 = { workspace = true }
+safetensors = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }

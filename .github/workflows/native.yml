@@ -1,0 +1,41 @@
+name: native
+
+on:
+  push:
+    branches: [main, feat/reimplementation]
+  pull_request:
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: cargo ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # Golden fixtures are committed (native/golden/**), so parity tests run
+      # hermetically; checkpoint-dependent tests skip without the HF cache.
+      - name: test
+        run: cargo test --workspace

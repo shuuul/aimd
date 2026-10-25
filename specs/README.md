@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [002-native-engine.md](002-native-engine.md) | Active | Hand-written Rust inference engine (CPU/Metal/CUDA) for Qwen3-ASR-1.7B + Unlimited-OCR behind the retained Python interfaces |
 
 ## Archived specs
 
