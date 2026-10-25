@@ -534,6 +534,46 @@ fn main() {
         0,
         roof,
     );
+    let wg = bf16_array(&mut rng, &[experts, d]);
+    let wg_t = wg.transpose(&[1, 0]).unwrap();
+    let x1r = bf16_array(&mut rng, &[d]);
+    row(
+        "router unfused: matmul + softmax + top-6 + take (+add)",
+        chain(500, &x1r, |_, x| {
+            let p = x
+                .reshape(&[1, 1, d])
+                .unwrap()
+                .matmul(&wg_t, None)
+                .unwrap()
+                .softmax_precise(-1, true)
+                .unwrap();
+            let top = p
+                .argpartition((experts - topk) as i32, -1)
+                .unwrap()
+                .slice(&[0, 0, experts - topk], &[1, 1, experts], &[1, 1, 1])
+                .unwrap();
+            x.add(
+                &p.take_along_axis(&top, -1)
+                    .unwrap()
+                    .sum_axis(-1, false)
+                    .unwrap()
+                    .reshape(&[1])
+                    .unwrap(),
+            )
+            .unwrap()
+        }),
+        experts * d * 2,
+        roof,
+    );
+    row(
+        "router fused kernel (+add)",
+        chain(500, &x1r, |_, x| {
+            let (_, sc) = x.moe_router(&wg, topk as i32).unwrap();
+            x.add(&sc.sum_axis(-1, true).unwrap()).unwrap()
+        }),
+        experts * d * 2,
+        roof,
+    );
     row(
         "  of which sum + add alone",
         chain(1000, &scores0, |_, s| {

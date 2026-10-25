@@ -1345,6 +1345,92 @@ inline void qdot_rows(const device T* x, const device uint32_t* const (&w)[M],
   });
 }
 
+/// Decode-step MoE router for one token, `MoEGate` (softmax, greedy): gate
+/// logits from mlx's own matmul (`x @ W_g.T`, one gemv), then a single
+/// simdgroup kernel for `softmax(precise=True)` and top-k that replaces the
+/// softmax, `argpartition` (a stable ascending sort on Metal) and
+/// `take_along_axis` dispatches. It mirrors `softmax_single_row` (4 logits
+/// per lane, f32, `fast::exp`) and takes the last k positions of the stable
+/// order, so results are bit-identical. `x` is `[D]`, `gate_w` the
+/// row-major `[E, D]` gate weight. Writes `inds` `[k]` u32 and `scores`
+/// `[k]` (x dtype). 0 on success.
+int32_t mlx_moe_router(
+    AimdMlxArray* x,
+    AimdMlxArray* gate_w,
+    int32_t k,
+    AimdMlxArray** out_inds,
+    AimdMlxArray** out_scores) {
+  return guarded([&]() -> int32_t {
+    require({x, gate_w, out_inds, out_scores});
+    namespace fast = mlx::core::fast;
+    static const auto topk = fast::metal_kernel(
+        "aimd_moe_softmax_topk",
+        {"logits"},
+        {"inds", "scores"},
+        R"(
+  threadgroup float probs[E];
+  uint lane = thread_index_in_simdgroup;
+  float ld[4];
+  for (int i = 0; i < 4; ++i) {
+    int c = int(lane) * 4 + i;
+    ld[i] = c < E ? float(logits[c]) : -INFINITY;
+  }
+  float maxval = -FLT_MAX;
+  for (int i = 0; i < 4; ++i) maxval = (maxval < ld[i]) ? ld[i] : maxval;
+  maxval = simd_max(maxval);
+  float normalizer = 0.0f;
+  for (int i = 0; i < 4; ++i) {
+    float e = metal::fast::exp(ld[i] - maxval);
+    ld[i] = e;
+    normalizer += e;
+  }
+  normalizer = simd_sum(normalizer);
+  normalizer = 1 / normalizer;
+  for (int i = 0; i < 4; ++i) {
+    int c = int(lane) * 4 + i;
+    if (c < E) probs[c] = float(T(ld[i] * normalizer));
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // argpartition == stable ascending sort: keep positions E-K .. E-1.
+  for (int t = int(lane); t < E; t += 32) {
+    float p = probs[t];
+    int pos = 0;
+    for (int j = 0; j < E; ++j) {
+      float q = probs[j];
+      pos += (q < p || (q == p && j < t)) ? 1 : 0;
+    }
+    if (pos >= E - K) {
+      inds[pos - (E - K)] = uint32_t(t);
+      scores[pos - (E - K)] = T(p);
+    }
+  }
+)");
+    const array& xa = as_array(x);
+    const array& wa = as_array(gate_w);
+    if (xa.ndim() != 1 || wa.ndim() != 2 || wa.shape(1) != xa.shape(0)) {
+      throw std::invalid_argument("[aimd_mlx] moe router: bad shapes");
+    }
+    const int d = xa.shape(0);
+    const int e = wa.shape(0);
+    // One simdgroup of softmax_single_row covers E <= 128.
+    if (e > 128 || k < 1 || k > e) {
+      throw std::invalid_argument("[aimd_mlx] moe router: unsupported shape");
+    }
+    const Dtype t = xa.dtype();
+    const array logits = mlx::core::reshape(
+        mlx::core::matmul(
+            mlx::core::reshape(xa, {1, d}), mlx::core::transpose(wa, {1, 0})),
+        {e});
+    auto outs = topk(
+        {logits}, {{k}, {k}}, {mlx::core::uint32, t}, {32, 1, 1}, {32, 1, 1},
+        {{"E", e}, {"K", static_cast<int>(k)}, {"T", t}}, std::nullopt, false,
+        {});
+    *out_inds = wrap(outs[0]);
+    *out_scores = wrap(outs[1]);
+    return 0;
+  });
+}
+
 /// Schedules evaluation of `n` arrays without blocking (`mx.async_eval`,
 /// transforms.h:12). 0 on success, -1 on error.
 int32_t mlx_async_eval(AimdMlxArray** arrays, int32_t n) {

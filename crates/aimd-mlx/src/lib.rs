@@ -347,6 +347,13 @@ mod ffi {
             down_b: *mut AimdMlxArray,
             group_size: i32,
         ) -> *mut AimdMlxArray;
+        pub fn mlx_moe_router(
+            x: *mut AimdMlxArray,
+            gate_w: *mut AimdMlxArray,
+            k: i32,
+            out_inds: *mut *mut AimdMlxArray,
+            out_scores: *mut *mut AimdMlxArray,
+        ) -> i32;
         pub fn mlx_async_eval(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_eval_many(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_device_is_cpu() -> i32;
@@ -1165,6 +1172,31 @@ impl MlxArray {
             )
         };
         Self::from_handle(ptr, "mlx_moe_swiglu_4bit")
+    }
+
+    /// Fused single-token MoE router (`MoEGate`, softmax + greedy top-k):
+    /// `self` is `[D]`, `gate_w` the row-major `[E, D]` gate weight. Returns
+    /// `(inds [k] u32, scores [k])`, bit-identical to `x @ gate_w.T`,
+    /// `softmax(precise)`, `argpartition` and `take_along_axis`.
+    pub fn moe_router(&self, gate_w: &Self, k: i32) -> Result<(Self, Self), MlxError> {
+        let mut inds = std::ptr::null_mut();
+        let mut scores = std::ptr::null_mut();
+        let status = unsafe {
+            ffi::mlx_moe_router(
+                self.ptr.as_ptr(),
+                gate_w.ptr.as_ptr(),
+                k,
+                &mut inds,
+                &mut scores,
+            )
+        };
+        if status != 0 {
+            return Err(op_failed("mlx_moe_router"));
+        }
+        Ok((
+            Self::from_handle(inds, "mlx_moe_router")?,
+            Self::from_handle(scores, "mlx_moe_router")?,
+        ))
     }
 
     /// Schedules `arrays` for evaluation without blocking (`mx.async_eval`).

@@ -881,3 +881,66 @@ fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
         );
     }
 }
+
+#[test]
+fn mlx_moe_router_matches_mlx_ops() {
+    if aimd_mlx::device_is_cpu().expect("device query") {
+        return;
+    }
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    // The Unlimited-OCR gate (64 experts over 1280, top-6) and a smaller
+    // one; `dup` repeats weight rows so equal logits exercise tie order.
+    for (d, e, k, dup) in [
+        (1280usize, 64usize, 6usize, false),
+        (1280, 64, 6, true),
+        (512, 16, 3, true),
+    ] {
+        for trial in 0..8 {
+            let rows: Vec<Vec<bf16>> = (0..e)
+                .map(|_| {
+                    (0..d)
+                        .map(|_| bf16::from_f32(((next() % 2001) as f32 - 1000.0) * 4e-5))
+                        .collect()
+                })
+                .collect();
+            let wv: Vec<bf16> = (0..e)
+                .flat_map(|r| rows[if dup { r / 2 * 2 } else { r }].clone())
+                .collect();
+            let xv: Vec<bf16> = (0..d)
+                .map(|_| bf16::from_f32((next() % 2000) as f32 / 1000.0 - 1.0))
+                .collect();
+            let w = MlxArray::from_bf16(&[e, d], &wv).unwrap();
+            let x = MlxArray::from_bf16(&[d], &xv).unwrap();
+            let (inds, scores) = x.moe_router(&w, k as i32).unwrap();
+
+            let x3 = x.reshape(&[1, 1, d]).unwrap();
+            let probs = x3
+                .matmul(&w.transpose(&[1, 0]).unwrap(), None)
+                .unwrap()
+                .softmax_precise(-1, true)
+                .unwrap();
+            let want_inds = probs
+                .argpartition((e - k) as i32, -1)
+                .unwrap()
+                .slice(&[0, 0, e - k], &[1, 1, e], &[1, 1, 1])
+                .unwrap();
+            let want_scores = probs.take_along_axis(&want_inds, -1).unwrap();
+            assert_eq!(
+                inds.to_u32_vec().unwrap(),
+                want_inds.to_u32_vec().unwrap(),
+                "d={d} e={e} dup={dup} trial {trial}"
+            );
+            assert_eq!(
+                scores.to_bf16_vec().unwrap(),
+                want_scores.to_bf16_vec().unwrap(),
+                "d={d} e={e} dup={dup} trial {trial}"
+            );
+        }
+    }
+}

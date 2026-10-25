@@ -20,8 +20,9 @@
 //!   `SwitchGLU` over 4-bit experts through `gather_qmm` (sorted path when
 //!   `indices.size >= 64`), weighted sum over the selected experts, plus
 //!   the 2-expert shared MLP (intermediate 1792). Single-token steps on the
-//!   GPU run the routed experts as one fused kernel pair
-//!   (`MlxArray::moe_swiglu_4bit`), bit-identical to that graph.
+//!   GPU run the router (`MlxArray::moe_router`) and the routed experts
+//!   (`MlxArray::moe_swiglu_4bit`) as custom kernels, bit-identical to that
+//!   graph.
 //! - Final RMSNorm and the untied 4-bit `lm_head`.
 //! - Embeddings are `nn.QuantizedEmbedding` (row gather + dequantize).
 //!
@@ -127,7 +128,8 @@ impl DenseMlp {
 }
 
 struct Moe {
-    /// `gate.weight.T` (bf16 `[hidden, n_experts]` view).
+    /// `gate.weight` (bf16 `[n_experts, hidden]`) and its `.T` view.
+    gate_w: MlxArray,
     gate_wt: MlxArray,
     n_experts: usize,
     top_k: usize,
@@ -135,9 +137,10 @@ struct Moe {
     sw_up: QWeights,
     sw_down: QWeights,
     shared: DenseMlp,
-    /// Single-token steps use the fused expert kernel
-    /// ([`MlxArray::moe_swiglu_4bit`], bit-identical to `switch_glu`):
-    /// 4-bit experts on the GPU device only.
+    /// Single-token steps use the fused router and expert kernels
+    /// ([`MlxArray::moe_router`], [`MlxArray::moe_swiglu_4bit`]),
+    /// bit-identical to `route` + `switch_glu`: 4-bit experts on the GPU
+    /// device only.
     fused: bool,
 }
 
@@ -190,14 +193,13 @@ impl Moe {
     fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
         let s = x.shape()?;
         let (b, l, d) = (s[0], s[1], s[2]);
-        let (inds, scores) = self.route(x)?;
         if self.fused && b * l == 1 {
-            let k = self.top_k;
-            let y = x
-                .reshape(&[d])?
+            let x1 = x.reshape(&[d])?;
+            let (inds, scores) = x1.moe_router(&self.gate_w, self.top_k as i32)?;
+            let y = x1
                 .moe_swiglu_4bit(
-                    &inds.reshape(&[k])?,
-                    &scores.reshape(&[k])?,
+                    &inds,
+                    &scores,
                     self.sw_gate.packed(),
                     self.sw_up.packed(),
                     self.sw_down.packed(),
@@ -206,6 +208,7 @@ impl Moe {
                 .reshape(&[b, l, d])?;
             return y.add(&self.shared.forward(x)?);
         }
+        let (inds, scores) = self.route(x)?;
         let y = self.switch_glu(x, &inds)?;
         let y = y
             .multiply(&scores.reshape(&[b, l, self.top_k, 1])?)?
@@ -301,6 +304,7 @@ impl OcrDecoder {
                 )?;
                 Mlp::Moe(Box::new(Moe {
                     gate_wt: gate_w.transpose(&[1, 0])?,
+                    gate_w,
                     n_experts: cfg.n_routed_experts,
                     top_k: cfg.num_experts_per_tok,
                     sw_gate: QWeights::load(

@@ -975,6 +975,23 @@ Append entries rather than rewriting another worker's record.
 - Next action: fused router (gate gemv + softmax + top-6) and split-K
   decode attention, same bit-identical bar.
 
+### 2026-10-26 — shuuul/WS-08 fused MoE router — WS-08
+
+- Changed: `mlx_moe_router` in the shim: mlx's gate gemv, then one
+  simdgroup `metal_kernel` for softmax(precise) + top-6 (mirrors
+  `softmax_single_row`; `argpartition` is a stable ascending sort on Metal,
+  so the kernel ranks by (score, index) and keeps the last k positions).
+  The OCR fused decode path routes through it. Parity test
+  `mlx_moe_router_matches_mlx_ops` (GPU only) covers the OCR gate, a small
+  gate, and duplicated weight rows for tie order.
+- Evidence: router chain 30 -> 15 µs per MoE layer. OCR markdown
+  byte-identical on 7 images; OCR decode ~245 -> ~259 tok/s median (4
+  interleaved runs x 4 rounds, base = 6ae4494). Not kept: a
+  single-threadgroup gemv+softmax+top-k (70 µs, one core) and a mirrored
+  row-per-threadgroup gemv (-0.8 µs only).
+- Next action: shared-expert MLP through the expert kernel (E=1), then
+  decode attention.
+
 ## Completion summary
 
 (to complete before archiving)

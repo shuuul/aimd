@@ -124,6 +124,8 @@ ASR ~8.9 ms vs ~8.5 ms. Dispatch floor is 2.3 µs per kernel.
 | OCR gather_qmm up + down, 6 of 64 experts, + sum | 82.4 | 7.74 MB | 57% |
 | OCR routed experts unfused (gate\|up + swiglu + down + score sum) | 105 | 11.6 MB | 70% |
 | OCR routed experts, fused kernel pair (shipped) | 75 | 11.6 MB | ~95% |
+| OCR router unfused (gemv + softmax + top-6 + take) | 30 | 0.16 MB | dispatch-bound |
+| OCR router, gemv + fused softmax/top-6 (shipped) | 15 | 0.16 MB | dispatch-bound |
 | OCR router: gate matmul (W_g.T view) + softmax + top-6 | ~8.5 + 2.6 + ~12 | — | dispatch-bound |
 | OCR sdpa 10 heads, kv 2455 (prefill + ring) | 102.2 | 12.6 MB | 74% |
 | OCR lm_head 1280->129280 (per token) | 561 | 93 MB | ~100% |
@@ -151,8 +153,14 @@ Candidates ranked by expected saving per token:
    (registers or threadgroup memory) lost occupancy and ran 100-173 µs.
 3. Split-K decode attention for long KV (flash-decoding style): OCR
    102 -> ~80 µs per layer (~0.25 ms), ASR ~0.3 ms on long clips.
-4. Fused router (gemv + softmax + top-6 in one kernel): ~23 -> ~4 µs per
-   layer, OCR ~0.2 ms.
+4. Fused router (shipped 2026-10-26): `mlx_moe_router` keeps mlx's gate
+   gemv and replaces softmax + `argpartition` + `take_along_axis` with one
+   simdgroup kernel (mirrors `softmax_single_row`; `argpartition` is a stable
+   sort on Metal, so top-6 come out in ascending (score, index) order).
+   Router chain 30 -> 15 µs per layer; OCR decode ~245 -> ~259 tok/s
+   (+5.5%), markdown byte-identical on 7 images. A mirrored one-row-per-
+   threadgroup gemv saved only 0.8 µs more (dispatch-floor bound), not kept.
+   A single-threadgroup gemv + softmax + top-k ran 70 µs (one core).
 5. Small-op fusion (rms_norm + rope + KV row write): ~10 µs per layer, both
    models.
 
