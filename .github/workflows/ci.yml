@@ -6,21 +6,27 @@ name: CI
 # mlx-free crate (aimd-weights) is already exercised by the macOS
 # `cargo test --workspace`, so a Linux runner would add cost, not signal.
 # WS-09 (mlx-cuda on Linux) adds the Linux job; see the TODO below.
+#
+# Cost notes (macOS minutes bill at 10x): PR branches run only via
+# `pull_request` (no duplicate `push` run), drafts skip the macOS job,
+# superseded runs are cancelled, and cheap checks (specs, fmt, ruff) run on
+# ubuntu so they fail before a macOS runner starts.
 on:
   push:
-    branches: [main, feat/reimplementation]
-    paths-ignore:
+    branches: [main]
+    paths-ignore: &ignored
       - "**/*.md"
       - "docs/**"
       - "assets/**"
+      - ".agents/**"
+      - "LICENSE"
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "assets/**"
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: *ignored
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -39,12 +45,19 @@ env:
 
 jobs:
   lint:
-    name: specs + scripts lint
+    name: specs + fmt + scripts lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      # rustfmt needs no build (and no mlx), so it runs here, not on macOS.
+      - name: fmt
+        run: cargo fmt --all -- --check
 
       # xtask has no mlx dependency, so it builds on Linux.
       - name: Check tracked specs
@@ -62,7 +75,10 @@ jobs:
 
   test:
     name: cargo macos-14
+    needs: lint
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-14
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
@@ -92,18 +108,16 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
           shared-key: rust-macos14
           cache-on-failure: true
-          # Only main / the integration branch write the cache; PRs restore.
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/reimplementation') }}
-
-      - name: fmt
-        run: cargo fmt --all -- --check
+          # main writes the cache every PR can restore; a PR also saves its
+          # own (PR-scoped) cache so follow-up pushes skip the cold build.
+          save-if: ${{ github.event_name != 'workflow_dispatch' }}
 
       # clippy only emits metadata (no codegen), so it does not duplicate the
       # test build; all three steps share one profile and target dir, and
