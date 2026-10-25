@@ -286,7 +286,7 @@ fn main() {
         0,
         roof,
     );
-    for len in [256usize, 1024] {
+    for len in [256usize, 1024, 3000] {
         let ks = bf16_pool(&mut rng, &[1, 8, len, 128]);
         let vs = bf16_pool(&mut rng, &[1, 8, len, 128]);
         let us = chain(500, &qh, |i, q| {
@@ -304,6 +304,18 @@ fn main() {
             2 * 8 * len * 128 * 2,
             roof,
         );
+        if len >= 1024 {
+            let us = chain(500, &qh, |i, q| {
+                q.sdpa_decode(&ks[i % ks.len()], &vs[i % vs.len()], 0.088)
+                    .unwrap()
+            });
+            row(
+                &format!("sdpa_decode GQA 16q/8kv, kv_len {len}"),
+                us,
+                2 * 8 * len * 128 * 2,
+                roof,
+            );
+        }
     }
     let buf = bf16_array(&mut rng, &[1, 8, 1024, 128]);
     let kr = bf16_array(&mut rng, &[1, 8, 1, 128]);
@@ -606,6 +618,15 @@ fn main() {
                 SdpaMask::None,
             )
             .unwrap()
+        }),
+        2 * 10 * len * 128 * 2,
+        roof,
+    );
+    row(
+        "sdpa_decode MHA 10 heads, kv_len 2455",
+        chain(300, &qo, |i, q| {
+            q.sdpa_decode(&ks[i % ks.len()], &vs[i % vs.len()], 0.088)
+                .unwrap()
         }),
         2 * 10 * len * 128 * 2,
         roof,

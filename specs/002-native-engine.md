@@ -1004,6 +1004,23 @@ Append entries rather than rewriting another worker's record.
   ~262 tok/s median (4 interleaved runs x 4 rounds, base = f6f4642).
 - Next action: decode attention, then small-op fusion.
 
+### 2026-10-26 — shuuul/WS-08 decode attention kernel — WS-08
+
+- Changed: `mlx_sdpa_decode` in the shim: mlx's `sdpa_vector_2pass_1` /
+  `_2` as `metal_kernel`s with the same block count (mirrors mlx's
+  architecture rule) but one key per step instead of the 4-key register
+  prefetch; strided KV-cache views are read in place. Falls back to mlx
+  sdpa outside the plain 2-pass case. OCR and ASR single-token steps use it
+  on the GPU. Parity test `mlx_sdpa_decode_matches_fast_sdpa` (GPU only)
+  covers OCR MHA through a cache view, ASR-style GQA, and a short-KV
+  fallback.
+- Evidence: kv 2455 MHA 89 -> 80 µs, GQA kv 3000 89 -> 78 µs. OCR markdown
+  byte-identical on 7 images, decode ~263 -> ~271 tok/s (base = a653c56).
+  ASR text identical on 3 clips; 5-minute clip 22.85 -> 22.17 s.
+  `MLX_SDPA_BLOCKS` 32-512, 2-16 blocks per threadgroup, and 2/8-key
+  prefetch were no better.
+- Next action: small-op fusion (residual add + rms_norm, rope + KV write).
+
 ## Completion summary
 
 (to complete before archiving)

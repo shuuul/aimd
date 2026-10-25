@@ -354,6 +354,12 @@ mod ffi {
             out_inds: *mut *mut AimdMlxArray,
             out_scores: *mut *mut AimdMlxArray,
         ) -> i32;
+        pub fn mlx_sdpa_decode(
+            q: *mut AimdMlxArray,
+            k: *mut AimdMlxArray,
+            v: *mut AimdMlxArray,
+            scale: f32,
+        ) -> *mut AimdMlxArray;
         pub fn mlx_async_eval(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_eval_many(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_device_is_cpu() -> i32;
@@ -1172,6 +1178,22 @@ impl MlxArray {
             )
         };
         Self::from_handle(ptr, "mlx_moe_swiglu_4bit")
+    }
+
+    /// Single-token decode attention (`self` is `[1, H, 1, D]`, keys/values
+    /// `[1, Hkv, N, D]`, no mask): mlx's 2-pass long-KV kernel without the
+    /// 4-key prefetch, bit-identical to [`Self::scaled_dot_product_attention`]
+    /// (which it falls back to wherever mlx would not take that kernel).
+    pub fn sdpa_decode(&self, keys: &Self, values: &Self, scale: f32) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_sdpa_decode(
+                self.ptr.as_ptr(),
+                keys.ptr.as_ptr(),
+                values.ptr.as_ptr(),
+                scale,
+            )
+        };
+        Self::from_handle(ptr, "mlx_sdpa_decode")
     }
 
     /// Fused single-token MoE router (`MoEGate`, softmax + greedy top-k):

@@ -979,3 +979,53 @@ fn mlx_moe_router_matches_mlx_ops() {
         }
     }
 }
+
+#[test]
+fn mlx_sdpa_decode_matches_fast_sdpa() {
+    if aimd_mlx::device_is_cpu().expect("device query") {
+        return;
+    }
+    let mut state = 0x853c_49e6_748f_ea9bu64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut rand = |shape: &[usize]| {
+        let n: usize = shape.iter().product();
+        let v: Vec<bf16> = (0..n)
+            .map(|_| bf16::from_f32((next() % 4000) as f32 / 1000.0 - 2.0))
+            .collect();
+        MlxArray::from_bf16(shape, &v).unwrap()
+    };
+    // (q heads, kv heads, kv len, backing rows): the Unlimited-OCR decode
+    // shape read through a step-256 KV-cache view, a GQA long-KV shape, and a
+    // short KV that falls back to mlx's single-pass kernel.
+    for (h, hkv, n, cap) in [
+        (10usize, 10usize, 2455usize, 2560usize),
+        (16, 8, 1500, 1536),
+        (10, 10, 900, 1024),
+    ] {
+        let d = 128;
+        let q = rand(&[1, h, 1, d]);
+        let kb = rand(&[1, hkv, cap, d]);
+        let vb = rand(&[1, hkv, cap, d]);
+        let k = kb
+            .slice(&[0, 0, 0, 0], &[1, hkv, n, d], &[1, 1, 1, 1])
+            .unwrap();
+        let v = vb
+            .slice(&[0, 0, 0, 0], &[1, hkv, n, d], &[1, 1, 1, 1])
+            .unwrap();
+        let want = q
+            .scaled_dot_product_attention(&k, &v, 0.088, aimd_mlx::SdpaMask::None)
+            .unwrap();
+        let got = q.sdpa_decode(&k, &v, 0.088).unwrap();
+        assert_eq!(got.shape().unwrap(), vec![1, h, 1, d]);
+        assert_eq!(
+            got.to_bf16_vec().unwrap(),
+            want.to_bf16_vec().unwrap(),
+            "h={h} hkv={hkv} n={n}"
+        );
+    }
+}

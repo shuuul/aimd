@@ -64,6 +64,8 @@ struct Attention {
     kv_heads: usize,
     head_dim: usize,
     rope_base: f64,
+    /// Single-token steps use [`MlxArray::sdpa_decode`] (GPU device only).
+    sdpa_decode: bool,
 }
 
 impl Attention {
@@ -96,8 +98,12 @@ impl Attention {
             SdpaMask::None
         };
         let scale = (hd as f32).powf(-0.5);
-        let o = q
-            .scaled_dot_product_attention(&keys, &values, scale, mask)?
+        let o = if self.sdpa_decode && l == 1 {
+            q.sdpa_decode(&keys, &values, scale)?
+        } else {
+            q.scaled_dot_product_attention(&keys, &values, scale, mask)?
+        };
+        let o = o
             .transpose(&[0, 2, 1, 3])?
             .reshape(&[b, l, self.heads * hd])?;
         self.o.linear(&o)
@@ -343,8 +349,9 @@ impl OcrDecoder {
             ));
         }
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
-        // Custom Metal kernels need the GPU; the CPU device keeps gather_qmm.
-        let fused_moe = bits == 4 && !aimd_mlx::device_is_cpu().unwrap_or(true);
+        // Custom Metal kernels need the GPU; the CPU device keeps mlx ops.
+        let gpu = !aimd_mlx::device_is_cpu().unwrap_or(true);
+        let fused_moe = bits == 4 && gpu;
         let p = "language_model.model";
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for i in 0..cfg.num_hidden_layers {
@@ -358,6 +365,7 @@ impl OcrDecoder {
                 kv_heads: cfg.num_key_value_heads,
                 head_dim,
                 rope_base: cfg.rope_theta,
+                sdpa_decode: gpu,
             };
             let mlp = if i >= cfg.first_k_dense_replace && cfg.n_routed_experts > 0 {
                 let gate_w = dense(

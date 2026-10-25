@@ -562,6 +562,9 @@ struct MlxDecoder {
     embed: MlxQuantWeights,
     layers: Vec<MlxDecoderLayer>,
     final_norm: MlxArray,
+    /// Single-token steps use [`MlxArray::sdpa_decode`] (a custom Metal
+    /// kernel, bit-identical to mlx sdpa): GPU device only.
+    sdpa_decode: bool,
 }
 
 impl MlxDecoder {
@@ -598,6 +601,7 @@ impl MlxDecoder {
             embed,
             layers,
             final_norm: mlx_raw_vector(store, "model.norm.weight", hidden)?,
+            sdpa_decode: !aimd_mlx::device_is_cpu().unwrap_or(true),
         })
     }
 
@@ -723,7 +727,11 @@ impl MlxDecoder {
         let q = q.rope(head_dim, cfg.rope_theta, 1.0, offset)?;
         let k = k.rope(head_dim, cfg.rope_theta, 1.0, offset)?;
         let (k_cached, v_cached) = cache[index].update_and_fetch(&k, &v)?;
-        let attn = q.scaled_dot_product_attention(&k_cached, &v_cached, scale, pass.mask())?;
+        let attn = if self.sdpa_decode && seq == 1 {
+            q.sdpa_decode(&k_cached, &v_cached, scale)?
+        } else {
+            q.scaled_dot_product_attention(&k_cached, &v_cached, scale, pass.mask())?
+        };
         let attn = attn
             .transpose(&[0, 2, 1, 3])?
             .reshape(&[1, seq, q_heads * head_dim])?;

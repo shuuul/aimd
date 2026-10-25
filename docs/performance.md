@@ -128,6 +128,7 @@ ASR ~8.9 ms vs ~8.5 ms. Dispatch floor is 2.3 µs per kernel.
 | OCR router, gemv + fused softmax/top-6 (shipped) | 15 | 0.16 MB | dispatch-bound |
 | OCR router: gate matmul (W_g.T view) + softmax + top-6 | ~8.5 + 2.6 + ~12 | — | dispatch-bound |
 | OCR sdpa 10 heads, kv 2455 (prefill + ring) | 102.2 | 12.6 MB | 74% |
+| OCR `sdpa_decode`, kv 2455 (shipped) | 80 | 12.6 MB | ~95% |
 | OCR lm_head 1280->129280 (per token) | 561 | 93 MB | ~100% |
 
 Where an OCR token's ~5.1 ms goes: attention over the kept 2327-token prefill
@@ -155,8 +156,18 @@ Candidates ranked by expected saving per token:
    one expert with score 1 (bit-identical to the `quantized_matmul` MLP:
    M=1 takes `qmv_impl` for K=1280/1792/6848): OCR decode ~259 -> ~262
    tok/s (+1.5%), markdown byte-identical on 7 images.
-3. Split-K decode attention for long KV (flash-decoding style): OCR
-   102 -> ~80 µs per layer (~0.25 ms), ASR ~0.3 ms on long clips.
+3. Decode attention (shipped 2026-10-26): mlx already splits long KV
+   (`sdpa_vector_2pass` for kv >= 1024 on M2 Pro, 64 blocks for 1 query
+   head per KV head); `MLX_SDPA_BLOCKS` 32-512 did not help.
+   `mlx_sdpa_decode` is the same two kernels without pass 1's 4-key
+   register prefetch: one key per step keeps more simdgroups resident.
+   Same blocks, token order and float ops, so bit-identical; it falls back
+   to mlx sdpa wherever mlx would not take the plain 2-pass kernel.
+   89 -> 80 µs (OCR kv 2455), 39 -> 35 µs and 89 -> 78 µs (ASR GQA kv
+   1024 / 3000). OCR decode ~263 -> ~271 tok/s (+3%), markdown
+   byte-identical on 7 images; a 5-minute ASR clip 22.85 -> 22.17 s, text
+   identical (short clips stay under 1024 KV and are unchanged). Packing
+   2-16 blocks per threadgroup and 2/8-key prefetch were no better.
 4. Fused router (shipped 2026-10-26): `mlx_moe_router` keeps mlx's gate
    gemv and replaces softmax + `argpartition` + `take_along_axis` with one
    simdgroup kernel (mirrors `softmax_single_row`; `argpartition` is a stable
