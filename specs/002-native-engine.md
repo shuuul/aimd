@@ -409,6 +409,49 @@ Append entries rather than rewriting another worker's record.
 - Next action: integrate both agents' results; record ANE go/no-go once
   the spike reports.
 
+### 2026-10-25 — shuuul/commit 8de3841 — WS-03
+
+- Changed: CPU casual-optimization pack closed and committed as `8de3841`
+  (user-side terminal; bit-trick NEON conversion + exhaustive 65536
+  pattern test + benchmark row). Cumulative CPU result: 1.75-1.9x over
+  naive (zh 62->33.4 s, en 43->24.6 s), outputs token-identical to MLX.
+- Evidence: git log 8de3841; docs/performance.md rows.
+- Remaining: WS-11b (MLX backend) and WS-12b (ANE spike) in flight
+  (working tree shows their in-progress files: aimd-mlx/, ane_spike/).
+- Blockers: none.
+- Next action: integrate both on completion.
+
+### 2026-10-25 — shuuul/WS-12 closed: ANE NO-GO — WS-12
+
+- Changed: WS-12b spike delivered (docs/ane-spike-results.md, 219 lines,
+  full reproduction commands); ANE decision recorded as NO-GO and WS-12
+  closed. scripts/ane_spike/** + native/golden/ane_spike/** +
+  examples/bench_tower.rs staged for commit.
+- Evidence vs the pre-agreed gates: dispatch 100% (1027/1027 executable
+  ops on ANE) — PASS; encoder latency 63.9-65.3 ms vs MLX Metal
+  127.6-139.4 ms on the 30 s mel fixture = 2.00-2.14x — straddles the 2x
+  gate; parity SNR 21.4 dB vs MLX (ANE fp16-accumulation profile,
+  conversion itself lossless at 52.6 dB on GPU) — below the §5.7-level
+  gate; compile cache stable only via pre-compiled .mlmodelc. Deciding
+  product math: the encoder is ~8% of the MLX 18x end-to-end baseline, so
+  even a perfect ANE encoder saves ~4-5% end-to-end (measured), against a
+  0.62 GB fp16 artifact + conversion-shim maintenance + Apple's Core AI
+  toolchain churn. NO-GO per the combined criteria; skip-ANE
+  recommendation from docs/ane-feasibility.md stands.
+- By-product data point: the Rust CPU AudioTower needs 35.5 s for the
+  30 s fixture (0.8x realtime) vs MLX 128 ms — on the CPU fallback path,
+  LONG audio is tower-dominated; acceptable for a fallback, worth
+  remembering if CPU ever needs a tower pass.
+- Also fixed: root .gitignore's bare `examples/` rule was ignoring
+  native/crates/*/examples/** — bench_asr.rs (referenced by commits
+  2cc53a9/8de3841) had never actually been committed; rule scoped to
+  `/examples/` and the examples staged.
+- Cleanup note: coremltools 9.0 was installed into .venv spike-only
+  (`uv pip install`); remove with `uv sync --dev --upgrade`.
+- Remaining: WS-11b (MLX backend) still in flight.
+- Blockers: none.
+- Next action: WS-11b integration on completion.
+
 ## Completion summary
 
 (to complete before archiving)

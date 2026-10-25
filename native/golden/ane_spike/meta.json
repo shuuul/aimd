@@ -1,0 +1,47 @@
+{
+  "generator": "scripts/ane_spike/make_fixture.py",
+  "feature_extractor": "Qwen/Qwen3-ASR-1.7B-hf",
+  "generated_with": {
+    "transformers": "5.17.0",
+    "numpy": "2.5.3"
+  },
+  "audio_recipe": {
+    "type": "multi_tone_30s",
+    "freqs_hz": [
+      220.0,
+      440.0,
+      1000.0,
+      3500.0,
+      7800.0
+    ],
+    "amplitudes": [
+      0.45,
+      0.3,
+      0.4,
+      0.25,
+      0.15
+    ],
+    "am_mod_hz": 0.37,
+    "am_depth": 0.2,
+    "noise_std": 0.01,
+    "rng_seed": 20261025,
+    "duration_s": 30.0
+  },
+  "samples": 480000,
+  "sample_rate": 16000,
+  "mel_npy_shape": [
+    1,
+    128,
+    3000
+  ],
+  "mel_tm_f32_shape": [
+    3000,
+    128
+  ],
+  "mel_layout": "mel.npy: [1,128,3000] frequency-major f32; mel_tm.f32: [3000,128] row-major f32 (time-major)",
+  "true_frames": 3000,
+  "sha256": {
+    "mel.npy": "e581f90fafbbd5bcb8c8b3010a8f4ee33d50de8295891ef4b0bc0cb665583909",
+    "mel_tm.f32": "4a0ede0f4c4429a8189eb774f14e3428f44af5fd8dfcb22bdee43a3ee7d0eed9"
+  }
+}
