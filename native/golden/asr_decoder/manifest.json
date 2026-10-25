@@ -52,14 +52,6 @@
     8453,
     151704
   ],
-  "dump_positions": [
-    0,
-    1,
-    2,
-    3,
-    37
-  ],
-  "logits_rows": 5,
   "eos_ids": [
     151643,
     151645
@@ -122,7 +114,7 @@
   ],
   "mlx_version": "0.32.2",
   "mlx_audio_version": "0.5.3",
-  "notes": "features.f32/logits.f32 are exact widenings of bf16 reference values; the Rust port computes in f16 weights with f32 accumulation, so logits parity holds within a bf16-vs-f16 drift bound while greedy argmax tokens must match exactly. greedy_tokens is the forced 16-step argmax stream (EOS tokens kept in-stream and flagged) because the production eos-aware loop emits EOS at step 0 on this synthetic noise input.",
+  "notes": "features.f32 is the exact widening of the bf16 reference input; greedy argmax tokens must match exactly (both sides run the same quantized bf16 MLX graph). greedy_tokens is the forced 16-step argmax stream (EOS tokens kept in-stream and flagged) because the production eos-aware loop emits EOS at step 0 on this synthetic noise input.",
   "files": {
     "features.f32": {
       "shape": [
@@ -131,14 +123,6 @@
       ],
       "dtype": "<f4",
       "sha256": "1a96dc3e8dca1b9639ac82555dffe8877a96711facd616900b766f016e60ecbb"
-    },
-    "logits.f32": {
-      "shape": [
-        5,
-        151936
-      ],
-      "dtype": "<f4",
-      "sha256": "a17892409f1a152fd2fd6ccf34fc4b80077bb98ed46c639e30c07c0806c0d6a8"
     }
   }
 }

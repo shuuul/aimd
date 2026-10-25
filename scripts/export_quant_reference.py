@@ -288,9 +288,7 @@ def main() -> int:
     (OUT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     total = sum(
-        (OUT_DIR / f).stat().st_size
-        for c in cases
-        for f in c["files"].values()
+        (OUT_DIR / f).stat().st_size for c in cases for f in c["files"].values()
     )
     print(f"manifest: {OUT_DIR / 'manifest.json'}")
     print(f"cases: {len(cases)}, fixture bytes: {total} ({total / 1e6:.2f} MB)")

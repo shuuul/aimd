@@ -323,6 +323,19 @@ mod tests {
     const ASR_REPO: &str = "models--Qwen--Qwen3-ASR-1.7B-hf";
     const OCR_REPO: &str = "models--mlx-community--Unlimited-OCR-4bit";
 
+    /// The `-hf` ASR tokenizer.json, parsed once per test binary.
+    fn asr_tokenizer() -> Option<&'static Tokenizer> {
+        static TOK: std::sync::OnceLock<Option<Tokenizer>> = std::sync::OnceLock::new();
+        TOK.get_or_init(|| {
+            let Some(dir) = checkpoint_dir(ASR_REPO) else {
+                eprintln!("skipping: {ASR_REPO} not in HF cache");
+                return None;
+            };
+            Some(Tokenizer::from_checkpoint(&dir).expect("load tokenizer"))
+        })
+        .as_ref()
+    }
+
     fn load_asr_case(name: &str) -> AsrCase {
         let path = golden_root().join("cases").join(format!("{name}.json"));
         let raw = std::fs::read(path).expect("golden fixture present");
@@ -377,11 +390,9 @@ mod tests {
 
     #[test]
     fn tokenizer_asr_prompt_ids_match_golden() {
-        let Some(dir) = checkpoint_dir(ASR_REPO) else {
-            eprintln!("skipping: {ASR_REPO} not in HF cache");
+        let Some(tok) = asr_tokenizer() else {
             return;
         };
-        let tok = Tokenizer::from_checkpoint(&dir).expect("load tokenizer");
         for case in [
             "asr_no_context_no_language",
             "asr_no_context_language_chinese",
@@ -423,15 +434,13 @@ mod tests {
     fn tokenizer_vocab_merges_equivalence() {
         // The MLX 4-bit repo ships vocab.json+merges.txt; the -hf repo ships
         // tokenizer.json. Both must encode identically.
-        let Some(hf_dir) = checkpoint_dir(ASR_REPO) else {
-            eprintln!("skipping: {ASR_REPO} not in HF cache");
+        let Some(json_tok) = asr_tokenizer() else {
             return;
         };
         let Some(mlx_dir) = checkpoint_dir("models--mlx-community--Qwen3-ASR-1.7B-4bit") else {
             eprintln!("skipping: Qwen3-ASR-1.7B-4bit not in HF cache");
             return;
         };
-        let json_tok = Tokenizer::from_checkpoint(&hf_dir).expect("tokenizer.json path");
         let vm_tok = Tokenizer::from_checkpoint(&mlx_dir).expect("vocab+merges path");
         for sample in [
             "<|im_start|>system\n你好，世界！这是上下文工程的一小步。<|im_end|>\n",
@@ -450,11 +459,9 @@ mod tests {
 
     #[test]
     fn tokenizer_roundtrip_cjk() {
-        let Some(dir) = checkpoint_dir(ASR_REPO) else {
-            eprintln!("skipping: {ASR_REPO} not in HF cache");
+        let Some(tok) = asr_tokenizer() else {
             return;
         };
-        let tok = Tokenizer::from_checkpoint(&dir).expect("load tokenizer");
         for sample in [
             "你好，世界！这是上下文工程的一小步。",
             "bluesky、ZCode；话题：上下文工程",

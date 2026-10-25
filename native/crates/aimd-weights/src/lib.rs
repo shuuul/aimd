@@ -17,7 +17,11 @@
 //!   exported via `scripts/export_quant_reference.py`.
 //! - [`dequantize_affine`] must be bit-exact against those fixtures (same
 //!   f16/bf16 values, same layout). Bit-exactness is the gate: any tolerance
-//!   means the packing is wrong, not "close enough".
+//!   means the packing is wrong, not "close enough". It is the reference
+//!   oracle that locks the documented packing layout and the loader's
+//!   `QuantizedTensor` triple against `mx.dequantize`; the runtime never
+//!   calls it (the engine hands the packed triple to MLX, which dequantizes
+//!   on device), and `aimd-mlx` tests use it as the `mx.dequantize` reference.
 //! - 8-bit affine (ASR repetition retry) shares the same path with `bits=8`.
 //! - Errors: I/O and parse failures are typed ([`WeightsError`]); no panics
 //!   on malformed input.

@@ -9,13 +9,8 @@ writes into ``native/golden/asr_decoder/``:
                     row-major ``[n_audio, hidden=2048]``. Values are exact
                     widenings of the bf16 array actually fed to the model, so
                     the Rust f16 conversion is lossless.
-- ``logits.f32``    decoder logits through the tied-embedding head
-                    (``embed_tokens.as_linear``), little-endian float32,
-                    row-major ``[len(dump_positions), vocab=151936]`` at the
-                    prompt positions listed in ``dump_positions``.
 - ``manifest.json`` prompt ids (locked to the tokenizer golden fixture
-                    ``asr_no_context_language_chinese``), dump positions,
-                    the forced 16-step greedy argmax stream (EOS tokens kept
+                    ``asr_no_context_language_chinese``), the forced 16-step greedy argmax stream (EOS tokens kept
                     in-stream and flagged, see notes), per-token top-2 logit
                     gaps, eos ids, shapes, seed, versions, and sha256s.
 
@@ -58,13 +53,17 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "native" / "golden" / "asr_decoder"
 TOKENIZER_CASE = (
-    REPO_ROOT / "native" / "golden" / "tokenizer" / "cases" / "asr_no_context_language_chinese.json"
+    REPO_ROOT
+    / "native"
+    / "golden"
+    / "tokenizer"
+    / "cases"
+    / "asr_no_context_language_chinese.json"
 )
 DEFAULT_REPO_DIRNAME = "models--mlx-community--Qwen3-ASR-1.7B-4bit"
 
 AUDIO_SEED = 20261025
-DUMP_HEAD_POSITIONS = 4  # logits dumped for prompt positions 0..3 ...
-MAX_GREEDY_TOKENS = 16  # ... and greedy tokens capped at 16
+MAX_GREEDY_TOKENS = 16  # greedy tokens capped at 16
 
 
 def resolve_checkpoint(explicit: str | None) -> Path:
@@ -81,7 +80,9 @@ def resolve_checkpoint(explicit: str | None) -> Path:
             f"{DEFAULT_REPO_DIRNAME} not found under {hub}; pass --checkpoint"
         )
     for entry in sorted(snapshots.iterdir()):
-        if (entry / "config.json").is_file() and (entry / "model.safetensors").is_file():
+        if (entry / "config.json").is_file() and (
+            entry / "model.safetensors"
+        ).is_file():
             return entry
     raise SystemExit(f"no snapshot with weights under {snapshots}; pass --checkpoint")
 
@@ -113,7 +114,9 @@ def main() -> None:
     hidden = int(text_cfg.hidden_size)
     audio_token_id = int(model.config.audio_token_id)
     eos_ids = sorted(model._eos_token_ids())
-    print(f"vocab={vocab} hidden={hidden} audio_token_id={audio_token_id} eos={eos_ids}")
+    print(
+        f"vocab={vocab} hidden={hidden} audio_token_id={audio_token_id} eos={eos_ids}"
+    )
 
     # Prompt: the exact chat string build_asr_prompt renders, re-encoded by
     # the checkpoint tokenizer and asserted equal to the committed fixture.
@@ -126,7 +129,9 @@ def main() -> None:
     )
     encoded = model._tokenizer.encode(prompt_text, add_special_tokens=False)
     if encoded != list(case["prompt_ids"]):
-        raise SystemExit("re-encoded prompt ids diverge from the tokenizer golden fixture")
+        raise SystemExit(
+            "re-encoded prompt ids diverge from the tokenizer golden fixture"
+        )
     prompt_ids = [int(i) for i in case["prompt_ids"]]
     prompt_len = len(prompt_ids)
     print(f"prompt_len={prompt_len} (audio pads: {audio_pad_count})")
@@ -151,17 +156,14 @@ def main() -> None:
     mx.eval(hidden_states)
     assert hidden_states.shape == (1, prompt_len, hidden)
 
-    # 3) logits at the dumped positions (tied-embedding head)
-    dump_positions = list(range(DUMP_HEAD_POSITIONS)) + [prompt_len - 1]
-    last_logits = model.model.embed_tokens.as_linear(hidden_states[0][prompt_len - 1 : prompt_len])
+    # 3) last-position logits through the tied-embedding head. Full logit
+    # dumps (3 MB) are deliberately not committed: the forced greedy stream
+    # plus per-step top-2 gaps below are the gate.
+    last_logits = model.model.embed_tokens.as_linear(
+        hidden_states[0][prompt_len - 1 : prompt_len]
+    )
     assert last_logits.shape == (1, vocab)
     mx.eval(last_logits)
-    logits_dump = np.asarray(
-        model.model.embed_tokens.as_linear(hidden_states[0][dump_positions]).astype(mx.float32),
-        dtype="<f4",
-    )
-    assert logits_dump.shape == (len(dump_positions), vocab)
-    assert np.isfinite(logits_dump).all()
 
     # 4) forced 16-step greedy argmax stream. The production loop stops at
     # EOS; on this synthetic (noise) input the model emits EOS immediately
@@ -192,15 +194,15 @@ def main() -> None:
         t2 = np.sort(np.asarray(step_logits.astype(mx.float32))[0])
         gaps.append(float(t2[-1] - t2[-2]))
         y = mx.argmax(step_logits, axis=-1)
-    print(f"forced greedy stream ({len(tokens)} tokens, first eos step={first_eos_step}): {tokens}")
+    print(
+        f"forced greedy stream ({len(tokens)} tokens, first eos step={first_eos_step}): {tokens}"
+    )
     print(f"min top-2 logit gap: {min(gaps):.6f}")
 
     # write fixtures
     args.out.mkdir(parents=True, exist_ok=True)
     features_path = args.out / "features.f32"
-    logits_path = args.out / "logits.f32"
     features_path.write_bytes(features_dump.tobytes())
-    logits_path.write_bytes(logits_dump.tobytes())
 
     manifest = {
         "kind": "asr_decoder",
@@ -217,8 +219,6 @@ def main() -> None:
         "vocab": vocab,
         "prompt_len": prompt_len,
         "prompt_ids": prompt_ids,
-        "dump_positions": dump_positions,
-        "logits_rows": len(dump_positions),
         "eos_ids": eos_ids,
         "max_greedy_tokens": MAX_GREEDY_TOKENS,
         "greedy_tokens": tokens,
@@ -228,10 +228,9 @@ def main() -> None:
         "mlx_version": __import__("importlib").metadata.version("mlx"),
         "mlx_audio_version": __import__("importlib").metadata.version("mlx-audio"),
         "notes": (
-            "features.f32/logits.f32 are exact widenings of bf16 reference "
-            "values; the Rust port computes in f16 weights with f32 "
-            "accumulation, so logits parity holds within a bf16-vs-f16 drift "
-            "bound while greedy argmax tokens must match exactly. "
+            "features.f32 is the exact widening of the bf16 reference input; "
+            "greedy argmax tokens must match exactly (both sides run the same "
+            "quantized bf16 MLX graph). "
             "greedy_tokens is the forced 16-step argmax stream (EOS tokens "
             "kept in-stream and flagged) because the production eos-aware "
             "loop emits EOS at step 0 on this synthetic noise input."
@@ -242,17 +241,11 @@ def main() -> None:
                 "dtype": "<f4",
                 "sha256": sha256_file(features_path),
             },
-            "logits.f32": {
-                "shape": [len(dump_positions), vocab],
-                "dtype": "<f4",
-                "sha256": sha256_file(logits_path),
-            },
         },
     }
     manifest_path = args.out / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"wrote {features_path} ({features_path.stat().st_size} bytes)")
-    print(f"wrote {logits_path} ({logits_path.stat().st_size} bytes)")
     print(f"wrote {manifest_path}")
 
 

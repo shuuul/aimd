@@ -105,9 +105,16 @@ def gen_sine_sweep(sr: int = 16000, duration: float = 2.0) -> tuple[np.ndarray, 
     n = int(sr * duration)
     t = np.arange(n, dtype=np.float64) / sr
     k = f1 / f0
-    phase = 2.0 * np.pi * f0 * (duration / np.log(k)) * (np.power(k, t / duration) - 1.0)
+    phase = (
+        2.0 * np.pi * f0 * (duration / np.log(k)) * (np.power(k, t / duration) - 1.0)
+    )
     wav = amp * np.sin(phase)
-    return wav, {"type": "exponential_chirp", "f0_hz": f0, "f1_hz": f1, "amplitude": amp}
+    return wav, {
+        "type": "exponential_chirp",
+        "f0_hz": f0,
+        "f1_hz": f1,
+        "amplitude": amp,
+    }
 
 
 def gen_multi_tone(sr: int = 16000, duration: float = 1.5) -> tuple[np.ndarray, dict]:
@@ -152,7 +159,9 @@ def gen_silence(sr: int = 16000, duration: float = 0.5) -> tuple[np.ndarray, dic
     return np.zeros(n), {"type": "silence"}
 
 
-def gen_speech_am_burst(sr: int = 16000, duration: float = 1.8) -> tuple[np.ndarray, dict]:
+def gen_speech_am_burst(
+    sr: int = 16000, duration: float = 1.8
+) -> tuple[np.ndarray, dict]:
     """Formant-ish tone stack, 3 Hz AM, burst gating, faint breath noise."""
     freqs = [300.0, 700.0, 1220.0, 2600.0]
     amps = [0.45, 0.25, 0.2, 0.15]
@@ -176,13 +185,20 @@ def gen_speech_am_burst(sr: int = 16000, duration: float = 1.8) -> tuple[np.ndar
     }
 
 
-def gen_short_clip_nonmultiple(sr: int = 16000, duration: float = 0.61) -> tuple[np.ndarray, dict]:
+def gen_short_clip_nonmultiple(
+    sr: int = 16000, duration: float = 0.61
+) -> tuple[np.ndarray, dict]:
     """Sample count not a multiple of hop_length: locks floor(N/hop) frames."""
     freq, amp = 640.0, 0.5
     n = int(sr * duration)
     t = np.arange(n, dtype=np.float64) / sr
     wav = amp * np.sin(2.0 * np.pi * freq * t)
-    return wav, {"type": "tone", "freq_hz": freq, "amplitude": amp, "nonmultiple_of_hop": True}
+    return wav, {
+        "type": "tone",
+        "freq_hz": freq,
+        "amplitude": amp,
+        "nonmultiple_of_hop": True,
+    }
 
 
 CASES = [
@@ -209,16 +225,22 @@ def build_filterbank_mirror(
     def hz_to_mel(freq: np.ndarray) -> np.ndarray:
         out = 3.0 * freq / 200.0
         log_region = freq >= 1000.0
-        out[log_region] = 15.0 + np.log(freq[log_region] / 1000.0) * (27.0 / np.log(6.4))
+        out[log_region] = 15.0 + np.log(freq[log_region] / 1000.0) * (
+            27.0 / np.log(6.4)
+        )
         return out
 
     def mel_to_hz(mels: np.ndarray) -> np.ndarray:
         out = 200.0 * mels / 3.0
         log_region = mels >= 15.0
-        out[log_region] = 1000.0 * np.exp((np.log(6.4) / 27.0) * (mels[log_region] - 15.0))
+        out[log_region] = 1000.0 * np.exp(
+            (np.log(6.4) / 27.0) * (mels[log_region] - 15.0)
+        )
         return out
 
-    mel_pts = np.linspace(hz_to_mel(np.array([f_min]))[0], hz_to_mel(np.array([f_max]))[0], n_mels + 2)
+    mel_pts = np.linspace(
+        hz_to_mel(np.array([f_min]))[0], hz_to_mel(np.array([f_max]))[0], n_mels + 2
+    )
     filter_freqs = mel_to_hz(mel_pts)
     fft_freqs = np.linspace(0.0, float(sr // 2), n_freq_bins)
 
@@ -245,12 +267,16 @@ def mirror_mel(wav_f32: np.ndarray, config: dict, filterbank: np.ndarray) -> np.
     pad = n_fft // 2
     x = wav_f32.astype(np.float64)
 
-    window = 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(n_fft, dtype=np.float64) / n_fft)
+    window = 0.5 - 0.5 * np.cos(
+        2.0 * np.pi * np.arange(n_fft, dtype=np.float64) / n_fft
+    )
     window = window.astype(np.float32).astype(np.float64)
 
     padded = np.pad(x, (pad, pad), mode="reflect")
     total_frames = 1 + len(x) // hop
-    frames = np.lib.stride_tricks.sliding_window_view(padded, n_fft)[::hop][:total_frames]
+    frames = np.lib.stride_tricks.sliding_window_view(padded, n_fft)[::hop][
+        :total_frames
+    ]
     frames = (frames * window[None, :]).astype(np.float32).astype(np.float64)
 
     spec = np.fft.rfft(frames, n=n_fft, axis=-1)
@@ -342,7 +368,9 @@ def main() -> int:
     }
     for key, value in live.items():
         if MEL_CONFIG[key] != value:
-            print(f"FATAL: extractor param {key}={value} != fixture config {MEL_CONFIG[key]}")
+            print(
+                f"FATAL: extractor param {key}={value} != fixture config {MEL_CONFIG[key]}"
+            )
             return 1
 
     # 2) Filterbank parity: independent slaney construction vs HF numpy.
@@ -365,12 +393,18 @@ def main() -> int:
         reference = torch_reference(wav32, fe)
         mirror = mirror_mel(wav32, MEL_CONFIG, fe.mel_filters)
         if mirror.shape != reference.shape:
-            print(f"FATAL {name}: mirror shape {mirror.shape} != reference {reference.shape}")
+            print(
+                f"FATAL {name}: mirror shape {mirror.shape} != reference {reference.shape}"
+            )
             return 1
-        diff = float(np.abs(mirror.astype(np.float64) - reference.astype(np.float64)).max())
+        diff = float(
+            np.abs(mirror.astype(np.float64) - reference.astype(np.float64)).max()
+        )
         mirror_diffs[name] = diff
         if diff > MIRROR_TOLERANCE:
-            print(f"FATAL {name}: mirror vs torch diff {diff:.3e} > {MIRROR_TOLERANCE:.0e}")
+            print(
+                f"FATAL {name}: mirror vs torch diff {diff:.3e} > {MIRROR_TOLERANCE:.0e}"
+            )
             return 1
 
         case_dir = cases_dir / name
@@ -464,13 +498,17 @@ def main() -> int:
     if not args.skip_crosscheck:
         wav64, _ = gen_multi_tone()
         crosscheck = full_call_crosscheck(wav64.astype(np.float32), fe)
-        print(f"full __call__ cross-check (interior frames): max abs diff {crosscheck:.3e}")
+        print(
+            f"full __call__ cross-check (interior frames): max abs diff {crosscheck:.3e}"
+        )
         if crosscheck > 1e-5:
             print("FATAL: core chain disagrees with the full padded extractor path")
             return 1
 
     print(f"\nwrote {len(manifest_cases)} cases + filterbank to {out_dir}")
-    print(f"fixture bytes (inputs+outputs+filters): {total_bytes} ({total_bytes / 1e6:.2f} MB)")
+    print(
+        f"fixture bytes (inputs+outputs+filters): {total_bytes} ({total_bytes / 1e6:.2f} MB)"
+    )
     return 0
 
 

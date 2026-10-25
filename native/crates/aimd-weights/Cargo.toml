@@ -1,6 +1,6 @@
 [package]
 name = "aimd-weights"
-description = "Safetensors mmap loading and MLX affine 4-bit/8-bit unpack + dequantization"
+description = "Safetensors mmap loading, MLX affine 4/8-bit tensor unpack, and the bit-exact dequantization reference for the golden quant fixtures"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,3 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 memmap2 = { workspace = true }
 safetensors = { workspace = true }
-
-[dev-dependencies]
-anyhow = { workspace = true }

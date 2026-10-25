@@ -1,21 +1,20 @@
-//! Greedy generation loop, repetition-loop detection, and output parsing
-//! (WS-06b).
+//! Backend-agnostic generation helpers: settings/outcome types, EOS
+//! resolution, repetition-loop detection, and output parsing (WS-06b).
 //!
-//! Ports of the Python behavior contracts:
+//! The greedy loop itself lives in [`super::pipeline`] (MLX); this module
+//! holds the pieces the Python behavior contracts define independent of the
+//! compute backend:
 //!
-//! - Greedy decoding mirrors mlx-audio `generate_step` + `stream_generate`
-//!   (`.venv/.../mlx_audio/lm/generate.py` and
-//!   `.../qwen3_asr/qwen3_asr.py`): prefill over the merged prompt embeds
-//!   fills the KV cache, the first token is the argmax at the last prompt
+//! - Greedy decoding semantics mirror mlx-audio `generate_step` +
+//!   `stream_generate`: the first token is the argmax at the last prompt
 //!   position, each next token is the argmax of the previous token's logits,
-//!   positions continue sequentially, and an EOS token terminates generation
-//!   WITHOUT being added to the output. `max_new_tokens` defaults to 4096
-//!   (the transformers.py `max_new_tokens=4096` behavior contract).
+//!   and an EOS token terminates generation WITHOUT being added to the
+//!   output. `max_new_tokens` defaults to 4096 (the transformers.py
+//!   `max_new_tokens=4096` behavior contract).
 //! - [`detect_repetition_loop`] is a regex-free port of
 //!   `src/aimd/plugins/asr/audio_utils.py::detect_repetition_loop`, applied
 //!   to the decoded text; the pipeline uses it to retry with the 8-bit
-//!   checkpoint (any checkpoint dir loads through
-//!   [`Qwen3Decoder::load`], so 4-bit/8-bit is just a different input).
+//!   checkpoint (4-bit/8-bit is just a different checkpoint directory).
 //! - [`parse_qwen_output`] ports
 //!   `src/aimd/plugins/asr/models/transformers.py::parse_qwen_output`
 //!   (strip everything before the first `<asr_text>` marker, falling back to
@@ -24,28 +23,12 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use aimd_tensor::{KvCache, Tensor, TensorError};
-
-use super::decoder::{DecoderError, Qwen3Decoder};
-use crate::tokenizer::{Tokenizer, TokenizerError};
+use crate::tokenizer::Tokenizer;
 
 /// Default generation budget (`max_new_tokens` in the Python backends).
 pub const DEFAULT_MAX_NEW_TOKENS: usize = 4096;
 
-/// Errors surfaced by the generation loop.
-#[derive(Debug, thiserror::Error)]
-pub enum GenerateError {
-    #[error(transparent)]
-    Decoder(#[from] DecoderError),
-    #[error(transparent)]
-    Tokenizer(#[from] TokenizerError),
-    #[error("tensor op: {0}")]
-    Tensor(#[from] TensorError),
-    #[error("prompt token ids are empty")]
-    EmptyPrompt,
-}
-
-/// Knobs for [`greedy_generate`].
+/// Knobs for the greedy generation loop of [`super::pipeline`].
 #[derive(Clone, Copy, Debug)]
 pub struct GenerationSettings {
     /// Hard stop on generated (non-EOS) tokens. Default 4096.
@@ -116,126 +99,6 @@ pub struct TokenStream {
     /// Generated token ids (EOS excluded, matching mlx `stream_generate`).
     pub tokens: Vec<u32>,
     pub finish_reason: FinishReason,
-}
-
-/// Greedy transcription generation over merged prompt + audio embeds.
-///
-/// `prompt_ids` comes from `tokenizer::build_asr_prompt` (encoded), and
-/// `audio_features` is the encoder output `[n_audio, hidden]` — every
-/// `<|audio_pad|>` prompt position is replaced with a feature row (see
-/// [`Qwen3Decoder::build_input_embeds`]). EOS ids resolve from the
-/// tokenizer via [`resolve_eos_ids`].
-pub fn greedy_generate(
-    decoder: &Qwen3Decoder,
-    tokenizer: &Tokenizer,
-    prompt_ids: &[u32],
-    audio_features: &Tensor,
-    audio_token_id: u32,
-    settings: GenerationSettings,
-) -> Result<GenerationOutcome, GenerateError> {
-    let eos_ids = resolve_eos_ids(tokenizer);
-    let stream = greedy_token_stream(
-        decoder,
-        prompt_ids,
-        audio_features,
-        audio_token_id,
-        &eos_ids,
-        settings,
-    )?;
-    let text = tokenizer.decode(&stream.tokens, true)?;
-    let loop_detected = detect_repetition_loop(&text);
-    Ok(GenerationOutcome {
-        tokens: stream.tokens,
-        text,
-        finish_reason: stream.finish_reason,
-        loop_detected,
-    })
-}
-
-/// [`greedy_generate`] without the tokenizer: explicit EOS set, returns the
-/// token stream only (the pipeline retries with an 8-bit checkpoint based on
-/// the decoded text; tests inject custom EOS sets or force full budgets).
-pub fn greedy_token_stream(
-    decoder: &Qwen3Decoder,
-    prompt_ids: &[u32],
-    audio_features: &Tensor,
-    audio_token_id: u32,
-    eos_ids: &BTreeSet<u32>,
-    settings: GenerationSettings,
-) -> Result<TokenStream, GenerateError> {
-    if prompt_ids.is_empty() {
-        return Err(GenerateError::EmptyPrompt);
-    }
-    let cfg = decoder.config();
-    let mut cache = KvCache::new(
-        cfg.num_hidden_layers,
-        cfg.num_key_value_heads,
-        cfg.head_dim,
-        prompt_ids.len() + settings.max_new_tokens,
-    )?;
-
-    let embeds = decoder.build_input_embeds(prompt_ids, audio_features, audio_token_id)?;
-    let hidden = decoder.prefill(&embeds, &mut cache)?;
-    let prompt_len = prompt_ids.len();
-
-    // First token: argmax at the last prompt position.
-    let logits = decoder.logits(&last_row(&hidden, cfg.hidden_size)?)?;
-    let mut y = argmax(logits.as_f32()?);
-
-    let mut tokens = Vec::with_capacity(settings.max_new_tokens.min(1024));
-    let mut finish_reason = FinishReason::MaxNewTokens;
-    loop {
-        if eos_ids.contains(&y) {
-            finish_reason = FinishReason::Eos;
-            break;
-        }
-        if tokens.len() >= settings.max_new_tokens {
-            break;
-        }
-        tokens.push(y);
-        let emb = decoder.embed_tokens(&[y])?;
-        let position = (prompt_len + tokens.len() - 1) as u32;
-        let step_hidden = decoder.step(&emb, position, &mut cache)?;
-        let logits = decoder.logits(&step_hidden)?;
-        y = argmax(logits.as_f32()?);
-    }
-
-    Ok(TokenStream {
-        tokens,
-        finish_reason,
-    })
-}
-
-/// Last row of a rank-2 `F16 [seq, hidden]` tensor as `[1, hidden]`.
-fn last_row(hidden: &Tensor, hidden_size: usize) -> Result<Tensor, DecoderError> {
-    let dims = hidden.shape().dims();
-    if dims.len() != 2 || dims[1] != hidden_size {
-        return Err(DecoderError::Layout(format!(
-            "hidden states must be rank-2 [seq, {hidden_size}], got {dims:?}"
-        )));
-    }
-    let seq = dims[0];
-    if seq == 0 {
-        return Err(DecoderError::Layout("empty hidden states".to_string()));
-    }
-    let src = hidden.as_f16()?;
-    Ok(Tensor::from_f16_vec(
-        aimd_tensor::Shape::from_dims(&[1, hidden_size]),
-        &src[(seq - 1) * hidden_size..seq * hidden_size],
-    )?)
-}
-
-/// First-index argmax of an `f32` row (matches `np.argmax` tie behavior).
-fn argmax(values: &[f32]) -> u32 {
-    let mut best = 0usize;
-    let mut best_v = f32::NEG_INFINITY;
-    for (i, &v) in values.iter().enumerate() {
-        if v > best_v {
-            best_v = v;
-            best = i;
-        }
-    }
-    best as u32
 }
 
 /// Detects repetition loops in generated text.
@@ -368,8 +231,7 @@ pub fn parse_qwen_output(output: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
+    use std::path::PathBuf;
 
     const ASR_HF_REPO: &str = "models--Qwen--Qwen3-ASR-1.7B-hf";
 
@@ -479,281 +341,5 @@ mod tests {
             ids.iter().copied().collect::<Vec<_>>(),
             vec![151643, 151645]
         );
-    }
-
-    /// Golden fixture bundle shared by the generate tests.
-    struct Golden {
-        prompt_ids: Vec<u32>,
-        audio_token_id: u32,
-        eos_ids: Vec<u32>,
-        greedy_tokens: Vec<u32>,
-        greedy_is_eos: Vec<bool>,
-        first_eos_step: Option<usize>,
-        greedy_top2_gap: Vec<f64>,
-        features: Tensor,
-    }
-
-    fn load_golden() -> Option<Golden> {
-        let manifest = golden_manifest()?;
-        let parse_ids = |key: &str| -> Vec<u32> {
-            manifest[key]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_u64().unwrap() as u32)
-                .collect()
-        };
-        let n_audio = manifest["n_audio"].as_u64().unwrap() as usize;
-        let hidden = manifest["hidden"].as_u64().unwrap() as usize;
-        let feats_raw = read_f32_le(&golden_dir().join("features.f32")).expect("features fixture");
-        assert_eq!(feats_raw.len(), n_audio * hidden);
-        Some(Golden {
-            prompt_ids: parse_ids("prompt_ids"),
-            audio_token_id: manifest["audio_token_id"].as_u64().unwrap() as u32,
-            eos_ids: parse_ids("eos_ids"),
-            greedy_tokens: parse_ids("greedy_tokens"),
-            greedy_is_eos: manifest["greedy_is_eos"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_bool().unwrap())
-                .collect(),
-            first_eos_step: manifest["first_eos_step"].as_u64().map(|v| v as usize),
-            greedy_top2_gap: manifest["greedy_top2_gap"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_f64().unwrap())
-                .collect(),
-            features: Tensor::from_f32_vec(
-                aimd_tensor::Shape::from_dims(&[n_audio, hidden]),
-                &feats_raw,
-            )
-            .unwrap(),
-        })
-    }
-
-    /// End-to-end decoder parity over the forced 16-step greedy argmax
-    /// stream (see the golden manifest notes: the production eos-aware loop
-    /// emits EOS at step 0 on this synthetic input, so the fixture locks the
-    /// raw argmax stream instead). Argmax picks must match MLX exactly.
-    #[test]
-    fn generate_forced_argmax_stream_matches_golden() {
-        let Some(decoder) = shared_decoder() else {
-            return;
-        };
-        let Some(g) = load_golden() else {
-            eprintln!("skipping: golden decoder fixture absent");
-            return;
-        };
-        let cfg = decoder.config();
-        let embeds = decoder
-            .build_input_embeds(&g.prompt_ids, &g.features, g.audio_token_id)
-            .unwrap();
-        let prompt_len = g.prompt_ids.len();
-        let max_tokens = g.greedy_tokens.len();
-        let mut cache = KvCache::new(
-            cfg.num_hidden_layers,
-            cfg.num_key_value_heads,
-            cfg.head_dim,
-            prompt_len + max_tokens,
-        )
-        .unwrap();
-        let hidden = decoder.prefill(&embeds, &mut cache).unwrap();
-        let logits = decoder
-            .logits(&last_row(&hidden, cfg.hidden_size).unwrap())
-            .unwrap();
-        let mut y = argmax(logits.as_f32().unwrap());
-
-        let mut tokens: Vec<u32> = Vec::with_capacity(max_tokens);
-        for step in 0..max_tokens {
-            tokens.push(y);
-            if tokens.len() >= max_tokens {
-                break;
-            }
-            let emb = decoder.embed_tokens(&[y]).unwrap();
-            let step_hidden = decoder
-                .step(&emb, (prompt_len + step) as u32, &mut cache)
-                .unwrap();
-            let logits = decoder.logits(&step_hidden).unwrap();
-            y = argmax(logits.as_f32().unwrap());
-        }
-        assert_eq!(
-            tokens, g.greedy_tokens,
-            "forced argmax stream must match MLX"
-        );
-        // EOS flags must line up with the golden stream too.
-        for (i, &t) in tokens.iter().enumerate() {
-            assert_eq!(
-                g.eos_ids.contains(&t),
-                g.greedy_is_eos[i],
-                "eos flag mismatch at step {i}"
-            );
-        }
-        // The minimum top-2 logit gap MLX saw before each pick: any argmax
-        // flip here would mean a near-tie diverged under f16 drift.
-        if let Some(min_gap) = g.greedy_top2_gap.iter().copied().reduce(f64::min) {
-            eprintln!("golden min top-2 logit gap: {min_gap:.6}");
-            assert!(
-                min_gap > 0.1,
-                "golden stream has a near-tie; parity inconclusive"
-            );
-        }
-    }
-
-    /// Production semantics on the golden input: the eos-aware loop must
-    /// stop exactly where MLX did (EOS dropped from the token list).
-    #[test]
-    fn generate_stops_at_golden_eos() {
-        let Some(decoder) = shared_decoder() else {
-            return;
-        };
-        let Some(g) = load_golden() else { return };
-        let eos: BTreeSet<u32> = g.eos_ids.iter().copied().collect();
-        let stream = greedy_token_stream(
-            decoder,
-            &g.prompt_ids,
-            &g.features,
-            g.audio_token_id,
-            &eos,
-            GenerationSettings {
-                max_new_tokens: 4096,
-            },
-        )
-        .expect("greedy token stream");
-        match g.first_eos_step {
-            Some(0) => {
-                assert!(
-                    stream.tokens.is_empty(),
-                    "EOS at step 0 must yield no tokens"
-                );
-                assert_eq!(stream.finish_reason, FinishReason::Eos);
-            }
-            Some(step) => {
-                assert_eq!(stream.tokens.len(), step);
-                assert_eq!(stream.finish_reason, FinishReason::Eos);
-            }
-            None => {
-                assert_eq!(stream.tokens, g.greedy_tokens);
-                assert_eq!(stream.finish_reason, FinishReason::MaxNewTokens);
-            }
-        }
-    }
-
-    /// The full `greedy_generate` wrapper: tokenizer decode + loop detector
-    /// run over the production outcome.
-    #[test]
-    fn generate_greedy_outcome_decodes_text_and_detects_loops() {
-        let Some(decoder) = shared_decoder() else {
-            return;
-        };
-        let Some(g) = load_golden() else { return };
-        let Some(tok_dir) = tokenizer_dir() else {
-            eprintln!("skipping: {ASR_HF_REPO} not in HF cache");
-            return;
-        };
-        let tok = Tokenizer::from_checkpoint(&tok_dir).expect("load tokenizer");
-        let outcome = greedy_generate(
-            decoder,
-            &tok,
-            &g.prompt_ids,
-            &g.features,
-            g.audio_token_id,
-            GenerationSettings { max_new_tokens: 16 },
-        )
-        .expect("greedy generate");
-        match g.first_eos_step {
-            Some(0) => {
-                assert!(outcome.tokens.is_empty());
-                assert_eq!(outcome.text, "");
-                assert_eq!(outcome.finish_reason, FinishReason::Eos);
-                assert!(!outcome.loop_detected);
-            }
-            _ => {
-                assert_eq!(outcome.finish_reason, FinishReason::MaxNewTokens);
-                assert!(!outcome.text.is_empty());
-                // The token stream must agree with the forced golden prefix.
-                let eos: BTreeSet<u32> = g.eos_ids.iter().copied().collect();
-                let prefix_len = outcome.tokens.len();
-                assert_eq!(outcome.tokens, &g.greedy_tokens[..prefix_len]);
-                assert!(
-                    !outcome.tokens.iter().any(|t| eos.contains(t)),
-                    "eos-aware outcome must not contain eos tokens"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn generate_stops_at_max_new_tokens() {
-        let Some(decoder) = shared_decoder() else {
-            return;
-        };
-        let Some(g) = load_golden() else { return };
-        assert!(
-            g.greedy_tokens.len() >= 3,
-            "golden stream must have >= 3 tokens"
-        );
-        // Empty EOS set: the budget is the only stop condition.
-        let eos: BTreeSet<u32> = BTreeSet::new();
-        let stream = greedy_token_stream(
-            decoder,
-            &g.prompt_ids,
-            &g.features,
-            g.audio_token_id,
-            &eos,
-            GenerationSettings { max_new_tokens: 3 },
-        )
-        .expect("greedy token stream");
-        assert_eq!(stream.tokens.len(), 3);
-        assert_eq!(stream.tokens, &g.greedy_tokens[..3]);
-        assert_eq!(stream.finish_reason, FinishReason::MaxNewTokens);
-    }
-
-    fn golden_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../golden/asr_decoder")
-    }
-
-    fn golden_manifest() -> Option<serde_json::Value> {
-        let raw = std::fs::read(golden_dir().join("manifest.json")).ok()?;
-        serde_json::from_slice(&raw).ok()
-    }
-
-    fn read_f32_le(path: &Path) -> Result<Vec<f32>, String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        Ok(bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|p| f32::from_le_bytes(*p))
-            .collect())
-    }
-
-    fn shared_decoder() -> Option<&'static Qwen3Decoder> {
-        static DECODER: OnceLock<Option<Qwen3Decoder>> = OnceLock::new();
-        DECODER
-            .get_or_init(|| {
-                let repo = "models--mlx-community--Qwen3-ASR-1.7B-4bit";
-                let snapshots = hf_cache().join(repo).join("snapshots");
-                let dir = std::fs::read_dir(snapshots)
-                    .ok()?
-                    .flatten()
-                    .map(|e| e.path())
-                    .find(|dir| {
-                        dir.join("config.json").is_file() && dir.join("model.safetensors").is_file()
-                    });
-                let Some(dir) = dir else {
-                    eprintln!("skipping: {repo} not in HF cache");
-                    return None;
-                };
-                match Qwen3Decoder::load(&dir) {
-                    Ok(decoder) => Some(decoder),
-                    Err(e) => {
-                        eprintln!("skipping: decoder load failed: {e}");
-                        None
-                    }
-                }
-            })
-            .as_ref()
     }
 }

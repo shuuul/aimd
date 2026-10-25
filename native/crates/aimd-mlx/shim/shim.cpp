@@ -15,6 +15,7 @@
 // raw-pointer array constructor (byte copy, never an element-wise numeric
 // conversion), and readback memcpies from `array::data<uintN_t>()`.
 
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -40,6 +41,8 @@
 #include "mlx/array.h"
 #include "mlx/ops.h"
 #include "mlx/fast.h"
+#include "mlx/memory.h"
+#include "mlx/transforms.h"
 
 #pragma clang diagnostic pop
 
@@ -115,14 +118,38 @@ void clear_last_error() {
 // assertion aborts on overlap — so the same mutex serializes every shim
 // call. Inference itself is sequential, so the lock is uncontended in
 // intended use and makes parallel callers safe.
+//
+// Device selection (once, before the first stream exists): the MLX CPU device
+// is used when `AIMD_MLX_DEVICE=cpu` or when no Metal/GPU device is available
+// (virtualized CI runners); `AIMD_MLX_DEVICE=gpu` forces the default GPU.
+// Anything else keeps mlx's default (GPU when available).
+const mlx::core::Device& selected_device() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    const char* env = std::getenv("AIMD_MLX_DEVICE");
+    std::string want = env ? env : "";
+    for (auto& c : want) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    bool use_cpu = want == "cpu";
+    if (want != "gpu" && !use_cpu) {
+      use_cpu = !mlx::core::is_available(mlx::core::Device::gpu);
+    }
+    if (use_cpu) {
+      mlx::core::set_default_device(mlx::core::Device::cpu);
+    }
+  });
+  return mlx::core::default_device();
+}
+
 mlx::core::Stream& shared_stream() {
   static mlx::core::Stream stream =
-      mlx::core::new_thread_unsafe_stream(mlx::core::default_device());
+      mlx::core::new_thread_unsafe_stream(selected_device());
   return stream;
 }
 
 void ensure_stream() {
-  auto current = mlx::core::peek_default_stream(mlx::core::default_device());
+  auto current = mlx::core::peek_default_stream(selected_device());
   if (!current || !(*current == shared_stream())) {
     mlx::core::set_default_stream(shared_stream());
   }
@@ -888,6 +915,279 @@ AimdMlxArray* mlx_rope(
         scale,
         offset);
     return reinterpret_cast<AimdMlxArray*>(new array(std::move(out)));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// WS-07 (Unlimited-OCR on MLX) additions.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void require(std::initializer_list<const void*> handles) {
+  for (const void* h : handles) {
+    if (h == nullptr) {
+      throw std::invalid_argument("[aimd_mlx] null array handle");
+    }
+  }
+}
+
+AimdMlxArray* wrap(array out) {
+  return reinterpret_cast<AimdMlxArray*>(new array(std::move(out)));
+}
+
+} // namespace
+
+/// `D = beta * C + alpha * (A @ B)` — the `nn.Linear` biased path
+/// (`mx.addmm(bias, x, W.T)`, include/mlx/ops.h:1713).
+AimdMlxArray* mlx_addmm(
+    AimdMlxArray* c,
+    AimdMlxArray* a,
+    AimdMlxArray* b,
+    float alpha,
+    float beta) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({c, a, b});
+    return wrap(mlx::core::addmm(as_array(c), as_array(a), as_array(b), alpha, beta));
+  });
+}
+
+/// Element-wise subtract (ops.h:1002).
+AimdMlxArray* mlx_subtract(AimdMlxArray* a, AimdMlxArray* b) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a, b});
+    return wrap(mlx::core::subtract(as_array(a), as_array(b)));
+  });
+}
+
+/// Element-wise floor divide (ops.h:1037); integer inputs stay integral.
+AimdMlxArray* mlx_floor_divide(AimdMlxArray* a, AimdMlxArray* b) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a, b});
+    return wrap(mlx::core::floor_divide(as_array(a), as_array(b)));
+  });
+}
+
+/// Softmax over `axis` with mlx's `precise` flag (f32 accumulation for
+/// half inputs; `mx.softmax(..., precise=True)`, ops.h:1396).
+AimdMlxArray* mlx_softmax_precise(AimdMlxArray* a, int32_t axis, int32_t precise) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(mlx::core::softmax(as_array(a), std::vector<int>{axis}, precise != 0));
+  });
+}
+
+/// logsumexp over `axis` (ops.h:951).
+AimdMlxArray* mlx_logsumexp(AimdMlxArray* a, int32_t axis, int32_t keepdims) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(mlx::core::logsumexp(as_array(a), axis, keepdims != 0));
+  });
+}
+
+/// Sum over `axis` (ops.h `sum(const array&, int axis, bool keepdims)`).
+AimdMlxArray* mlx_sum_axis(AimdMlxArray* a, int32_t axis, int32_t keepdims) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(mlx::core::sum(as_array(a), axis, keepdims != 0));
+  });
+}
+
+/// Stable argsort along `axis` (uint32 indices; ops.h:860).
+AimdMlxArray* mlx_argsort(AimdMlxArray* a, int32_t axis) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(mlx::core::argsort(as_array(a), axis));
+  });
+}
+
+/// argpartition along `axis` (uint32 indices; negative `kth` counts from
+/// the end like `mx.argpartition`).
+AimdMlxArray* mlx_argpartition(AimdMlxArray* a, int32_t kth, int32_t axis) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(mlx::core::argpartition(as_array(a), kth, axis));
+  });
+}
+
+/// take_along_axis (ops.h:1185).
+AimdMlxArray* mlx_take_along_axis(AimdMlxArray* a, AimdMlxArray* indices, int32_t axis) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a, indices});
+    return wrap(mlx::core::take_along_axis(as_array(a), as_array(indices), axis));
+  });
+}
+
+/// put_along_axis (ops.h:1192); `values` broadcasts against `indices`.
+AimdMlxArray* mlx_put_along_axis(
+    AimdMlxArray* a,
+    AimdMlxArray* indices,
+    AimdMlxArray* values,
+    int32_t axis) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a, indices, values});
+    return wrap(mlx::core::put_along_axis(
+        as_array(a), as_array(indices), as_array(values), axis));
+  });
+}
+
+/// Broadcast to `shape` (ops.h:430).
+AimdMlxArray* mlx_broadcast_to(AimdMlxArray* a, const int64_t* shape, int32_t ndim) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(mlx::core::broadcast_to(as_array(a), to_shape(shape, ndim)));
+  });
+}
+
+/// Constant zero padding: `low[i]`/`high[i]` per axis (`mx.pad(x,
+/// [(lo, hi), ...])` with the default constant 0, ops.h:407).
+AimdMlxArray* mlx_pad(
+    AimdMlxArray* a,
+    const int64_t* low,
+    const int64_t* high,
+    int32_t ndim) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    if (low == nullptr || high == nullptr) {
+      throw std::invalid_argument("[aimd_mlx] null pad width vector");
+    }
+    std::vector<std::pair<int, int>> widths;
+    widths.reserve(static_cast<size_t>(ndim));
+    for (int32_t i = 0; i < ndim; i++) {
+      widths.emplace_back(static_cast<int>(low[i]), static_cast<int>(high[i]));
+    }
+    return wrap(mlx::core::pad(as_array(a), widths));
+  });
+}
+
+/// Functional slice assignment `src[start:stop:strides] = update`
+/// (ops.h:229); mlx updates in place when `src`'s buffer is donated.
+AimdMlxArray* mlx_slice_update(
+    AimdMlxArray* src,
+    AimdMlxArray* update,
+    const int64_t* start,
+    const int64_t* stop,
+    const int64_t* strides,
+    int32_t ndim) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({src, update});
+    if (start == nullptr || stop == nullptr || strides == nullptr) {
+      throw std::invalid_argument("[aimd_mlx] null slice index vector");
+    }
+    return wrap(mlx::core::slice_update(
+        as_array(src),
+        as_array(update),
+        to_shape(start, ndim),
+        to_shape(stop, ndim),
+        to_shape(strides, ndim)));
+  });
+}
+
+/// Zero-filled array of `shape` / `dtype` (ops.h:100).
+AimdMlxArray* mlx_zeros(const int64_t* shape, int32_t ndim, int32_t dtype) {
+  return guarded([&]() -> AimdMlxArray* {
+    return wrap(mlx::core::zeros(to_shape(shape, ndim), to_mlx_dtype(dtype)));
+  });
+}
+
+/// Quantized matmul with matrix-level gather (`mx.gather_qmm`, ops.h:1659,
+/// the `QuantizedSwitchLinear` primitive). `lhs_indices` may be NULL;
+/// `rhs_indices` selects the expert per batch element.
+AimdMlxArray* mlx_gather_qmm(
+    AimdMlxArray* x,
+    AimdMlxArray* w,
+    AimdMlxArray* scales,
+    AimdMlxArray* biases,
+    AimdMlxArray* lhs_indices,
+    AimdMlxArray* rhs_indices,
+    uint8_t transpose_w,
+    int32_t group_size,
+    int32_t bits,
+    uint8_t sorted_indices) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({x, w, scales});
+    std::optional<array> biases_opt;
+    if (biases != nullptr) biases_opt = as_array(biases);
+    std::optional<array> lhs_opt;
+    if (lhs_indices != nullptr) lhs_opt = as_array(lhs_indices);
+    std::optional<array> rhs_opt;
+    if (rhs_indices != nullptr) rhs_opt = as_array(rhs_indices);
+    std::optional<int> gs;
+    if (group_size >= 0) gs = group_size;
+    std::optional<int> bt;
+    if (bits >= 0) bt = bits;
+    return wrap(mlx::core::gather_qmm(
+        as_array(x),
+        as_array(w),
+        as_array(scales),
+        biases_opt,
+        lhs_opt,
+        rhs_opt,
+        transpose_w != 0,
+        gs,
+        bt,
+        "affine",
+        std::nullopt,
+        sorted_indices != 0));
+  });
+}
+
+/// Schedules evaluation of `n` arrays without blocking (`mx.async_eval`,
+/// transforms.h:12). 0 on success, -1 on error.
+int32_t mlx_async_eval(AimdMlxArray** arrays, int32_t n) {
+  return guarded([&]() -> int32_t {
+    if (arrays == nullptr || n <= 0) {
+      throw std::invalid_argument("[aimd_mlx] empty async_eval list");
+    }
+    std::vector<array> list;
+    list.reserve(static_cast<size_t>(n));
+    for (int32_t i = 0; i < n; i++) {
+      require({arrays[i]});
+      list.push_back(as_array(arrays[i]));
+    }
+    mlx::core::async_eval(std::move(list));
+    return 0;
+  });
+}
+
+/// Evaluates `n` arrays together (`mx.eval([...])`). 0 on success.
+int32_t mlx_eval_many(AimdMlxArray** arrays, int32_t n) {
+  return guarded([&]() -> int32_t {
+    if (arrays == nullptr || n <= 0) {
+      throw std::invalid_argument("[aimd_mlx] empty eval list");
+    }
+    std::vector<array> list;
+    list.reserve(static_cast<size_t>(n));
+    for (int32_t i = 0; i < n; i++) {
+      require({arrays[i]});
+      list.push_back(as_array(arrays[i]));
+    }
+    mlx::core::eval(std::move(list));
+    return 0;
+  });
+}
+
+/// Shallow handle copy: a new refcounted reference to the same array
+/// (Python's `y = x`). NULL on error.
+AimdMlxArray* mlx_array_clone(AimdMlxArray* a) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    return wrap(as_array(a));
+  });
+}
+
+/// Releases mlx's buffer cache (`mx.clear_cache`, memory.h:77).
+// 1 when the shim computes on the MLX CPU device, 0 on the GPU (Metal).
+int32_t mlx_device_is_cpu(void) {
+  return guarded([&]() -> int32_t {
+    return selected_device().type == mlx::core::Device::DeviceType::cpu ? 1 : 0;
+  });
+}
+
+int32_t mlx_clear_cache(void) {
+  return guarded([&]() -> int32_t {
+    mlx::core::clear_cache();
+    return 0;
   });
 }
 

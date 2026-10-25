@@ -43,38 +43,35 @@ Operational policy from these measurements:
 - Passing `--model Qwen/Qwen3-ASR-0.6B-hf` or `--model Qwen/Qwen3-ASR-1.7B-hf` (legacy non-`-hf` IDs still work) explicitly opts into the native Transformers backend, including on MPS.
 - Dependency upgrades that affect Transformers should run the opt-in Qwen3-ASR integration smoke below before release.
 
-## Native Rust engine (WS-06, CPU baseline)
+## Native Rust engine (MLX backend)
 
-First measurements of the hand-written CPU engine (spec 002 WS-06) vs
-mlx-audio on the same machine (Apple M2 Pro, 19-core GPU, 32 GB). Native
-numbers are `cargo run --release` of `native/crates/aimd-engine/examples/bench_asr.rs`
-(2026-10-25; un-optimized scalar/blocked CPU kernels, no NEON yet).
+The native engine (spec 002) runs only on MLX through the `aimd-mlx` C-ABI
+shim (brew `mlx` 0.32.4). Numbers are from Apple M2 Pro (19-core GPU,
+32 GB), release builds of
+`native/crates/aimd-engine/examples/{bench_asr_mlx,bench_ocr}.rs`, rounds
+2-3 steady state, against the Python reference on the same machine.
 
-| Date | Backend | Input | Load (cold) | Warm latency | Realtime | Notes |
-|------|---------|-------|-------------|--------------|----------|-------|
-| 2026-10-25 | native CPU (release) | `mlx-community/Qwen3-ASR-1.7B-4bit` | 10.85 s (mmap + eager dequant to f16 caches; tokenizer 0.13 s) | zh 8.56 s TTS: ~61 s; en 3.75 s: ~43 s | ~0.1x | Text token-identical to MLX on both clips (incl. the same 上下文忠诚 mishearing). No first-run JIT penalty (flat across rounds). |
-| 2026-10-25 | mlx-audio (Metal) | same checkpoints/clips | 10.01 s | zh 8.56 s: 0.43 s; en 3.75 s: 0.25 s | 19.9x / 15x | First round carries Metal warm-up (1.19 s -> 0.43 s). |
+### Qwen3-ASR-1.7B-4bit
 
-Interpretation:
+| Date | Backend | Input | Load | Warm latency | Realtime | Notes |
+|------|---------|-------|------|--------------|----------|-------|
+| 2026-10-25 | mlx-audio (Metal) | zh 8.56 s / en 3.75 s TTS clips | 10.01 s | zh 0.43 s; en 0.25 s | 19.9x / 15x | Reference. |
+| 2026-10-25 | native MLX | same | 0.42-0.45 s warm / 3.81 s cold | zh 0.40-0.44 s; en 0.23-0.27 s | ~20x / ~15x | Token-identical text (incl. the same 上下文忠诚 mishearing); 4-bit triples go straight into `quantized_matmul` (no eager dequant), hence ~24x faster load. Unchanged after the CPU-path deletion (transcripts byte-identical). |
 
-- Startup is at parity with MLX (~11 s); the eager f16 dequant cache does
-  not regress cold start on this machine.
-- Warm CPU inference is ~0.1x realtime — far below the >= 5x CPU gate and
-  ~150x behind MLX's Metal path. This is the expected un-optimized
-  baseline (scalar f16 kernels, naive tied-embedding logits matmul over
-  the 152k vocab per step). Performance remains the job of the MLX shim
-  variant (WS-11) and the GPU phases per the v0.4 design; obvious CPU
-  headroom exists (NEON, blocked+rayon logits matmul) if we want the
-  default CPU wheel to be interactive.
-- Behavioral parity: identical transcription text (including identical
-  errors) vs MLX on both benchmark clips is the strongest end-to-end
-  fidelity signal so far.
+### Unlimited-OCR-4bit
 
-| 2026-10-25 | native CPU (release, SIMD pass) | same | 10.12 s | zh 8.56 s TTS: ~39 s (0.2x); en 3.75 s: ~30 s | 0.2x | "Obvious wins" pass: vocab-axis rayon for small-m matmul + transposed-B blocked logits + stable NEON f32x4 FMA kernels (fp16 vector loads are nightly-only) + AVX2/F16C/FMA on x86_64. 1.4-1.6x vs the naive pass; outputs still token-identical to MLX. Per v0.5 the CPU path stays the correctness baseline — further CPU tuning is not planned; perf rides the MLX/Metal variant. |
+| Date | Backend | Input | Load | Vision | Prefill | Decode | Total | Notes |
+|------|---------|-------|------|--------|---------|--------|-------|-------|
+| 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/small_text.png` (no crops) | 3.26 s | 0.35-0.37 s | in prompt | 199-206 tok/s | 0.87-0.88 s | Reference. |
+| 2026-10-25 | native MLX | same | 0.58 s | 0.36-0.37 s | 0.12 s (2300 tok/s) | 200-205 tok/s | 0.82-0.84 s | Markdown identical (similarity 1.0), finish=stop, 69/69 tokens. |
+| 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/page_text.png` (4x5 crops, 2327-token prompt) | — | 2.50-2.55 s | ~0.77 s | 170-177 tok/s | 4.51-4.65 s | Reference. |
+| 2026-10-25 | native MLX | same | — | 2.61-2.63 s | 0.79-0.82 s | 165-175 tok/s | 4.67-4.75 s | Markdown identical, finish=stop, 197/197 tokens. Vision + prefill are bit-exact vs mlx_vlm goldens; single-token decode drifts ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
 
-| 2026-10-25 | native CPU (release, bit-trick cvt) | same | 10.44 s | zh 8.56 s TTS: ~33 s (0.3x); en 3.75 s: ~25 s (0.2x) | 0.2-0.3x | f16->f32 conversion now fully vectorized on stable NEON via the integer bit algorithm (exhaustively bit-exact over all 65536 f16 patterns). 1.2x over the prior SIMD pass; cumulative 1.75-1.9x over naive. Conversion is no longer the dominant cost — further CPU gains need register-tiled microkernels (real kernel work, out of the casual pass; CPU stays the fallback path per v0.5). |
-
-| 2026-10-25 | native MLX backend (release, `--features mlx`) | same checkpoints/clips | **0.42 s warm / 3.81 s cold** | zh 8.56 s: 0.40 s (21.6x); en 3.75s: 0.23 s (16.6x) | 21.6x / 16.6x | WS-11b: full-MLX graph (tower conv2d + SDPA + fast::rope/layer_norm on Metal), 4-bit triples directly into quantized_matmul (no eager dequant — hence the 24x faster load vs mlx-audio), argmax in-mlx with 4-byte readback. **Slightly faster than mlx-audio** (0.92-0.93x of baseline latency) with token-identical outputs incl. the same mishearing; golden 16-token argmax stream token-exact, tower parity 2.0e-7 abs. |
+Retired: the hand-written CPU prototype reached 0.1-0.3x realtime on ASR
+and ~734 s per OCR page (vs 4.8 s on MLX); it was deleted under the
+MLX-only decision. Remaining MLX headroom is tracked as WS-13 (ring KV +
+`mlx::core::compile`), WS-14 (speculative decoding) and WS-08 (custom
+Metal kernels inside the MLX graph).
 
 ## Current smoke-test record
 

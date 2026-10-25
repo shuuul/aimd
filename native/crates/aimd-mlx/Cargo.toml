@@ -1,6 +1,6 @@
 [package]
 name = "aimd-mlx"
-description = "C-ABI shim over the MLX C++ core for the Metal compute backend"
+description = "C-ABI shim over the MLX C++ core (Metal compute backend, MLX CPU-device fallback)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,8 +14,6 @@ thiserror = { workspace = true }
 cc = { workspace = true }
 
 [dev-dependencies]
-anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-aimd-tensor = { workspace = true }
 aimd-weights = { workspace = true }

@@ -10,30 +10,32 @@ Qwen3-ASR-1.7B and Unlimited-OCR, consuming `mlx-community` 4-bit (and ASR
 
 ```text
 crates/
-├── aimd-tensor/    dtype/shape/CPU tensor + CPU ops (rmsnorm, softmax, rope, swiglu, attention)
-├── aimd-weights/   safetensors mmap + MLX affine 4/8-bit unpack/dequant (golden-parity gated)
-└── aimd-engine/    tokenizer, audio/mel front-end, model graphs, generation loops
+├── aimd-weights/   safetensors mmap + MLX affine 4/8-bit unpack; `dequantize_affine` is the
+│                   bit-exact reference gated by golden/quant (tests only, not on the runtime path)
+├── aimd-mlx/       C-ABI shim over MLX C++ (Metal; MLX CPU device when no GPU or AIMD_MLX_DEVICE=cpu)
+└── aimd-engine/    tokenizer, audio/mel front-end, MLX model graphs (Qwen3-ASR, Unlimited-OCR), generation loops
 ```
 
-`aimd-native` (PyO3 cdylib exposing `aimd._native`) is added at binding time
-(WS-10); GPU kernel crates (`aimd-metal`, `aimd-cuda`) land with their
-phases.
+MLX is the only compute backend (specs/002-native-engine.md, "MLX-ONLY
+engine"). Requires brew `mlx` (or `MLX_PREFIX`).
 
 ## Commands
 
 ```bash
 cd native
-cargo test --workspace
+cargo test --workspace                       # Metal when available
+AIMD_MLX_DEVICE=cpu cargo test --workspace   # MLX CPU device (CI / no-GPU hosts)
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
 
-Parallel agents build with a private target dir to avoid lock contention:
-`CARGO_TARGET_DIR=native/target-<agent> cargo test -p <crate>`.
+Use a private target dir to avoid lock contention between builds:
+`CARGO_TARGET_DIR=native/target-<name> cargo test -p <crate>`.
 
 ## Golden fixtures
 
-`scripts/export_quant_reference.py` and `scripts/export_mel_reference.py`
-(WS-02 / WS-05) write small reference tensors under `native/golden/`. The
+`scripts/export_*_reference.py` write small reference tensors under
+`native/golden/` (each file <= 1 MB; larger dumps are regenerated, not
+committed). The
 fixtures are committed so CI can run parity tests without multi-GB
 checkpoints; checkpoint-dependent tests skip when the HF cache is absent.

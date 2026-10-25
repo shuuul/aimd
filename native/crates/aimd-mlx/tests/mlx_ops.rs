@@ -3,7 +3,7 @@
 //! `mlx_take`, `mlx_dequantize`, `mlx_rope`, scalar arrays).
 //!
 //! Small hand-checked arrays; references are computed in `f64` in Rust.
-//! MLX runs on Metal, so comparisons carry small fp tolerances.
+//! MLX runs fp16/bf16 on Metal (or the MLX CPU device), so comparisons carry small fp tolerances.
 
 use aimd_mlx::{MlxArray, MlxDtype, SdpaMask};
 use aimd_weights::{QuantizedTensor, ScaleDtype, dequantize_affine};

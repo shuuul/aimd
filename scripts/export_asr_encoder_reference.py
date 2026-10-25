@@ -130,7 +130,9 @@ FRAMES_TO_PADS_FORMULA = (
 # ---------------------------------------------------------------------------
 
 
-def gen_sine(sr: int = 16000, duration: float = 1.5, freq: float = 440.0, amp: float = 0.5):
+def gen_sine(
+    sr: int = 16000, duration: float = 1.5, freq: float = 440.0, amp: float = 0.5
+):
     n = int(sr * duration)
     t = np.arange(n, dtype=np.float64) / sr
     return (amp * np.sin(2.0 * np.pi * freq * t)).astype(np.float32), {
@@ -182,8 +184,6 @@ def staged_audio_tower_forward(tower, input_features, feature_attention_mask):
     from mlx_audio.stt.models.qwen3_asr.qwen3_asr import (
         _get_feat_extract_output_lengths,
     )
-
-    cfg = tower.config
 
     if feature_attention_mask is not None:
         feature_lens = feature_attention_mask.sum(axis=-1).astype(mx.int32)
@@ -330,7 +330,11 @@ def sha256_file(path: Path) -> str:
 def find_snapshot() -> Path:
     hub = Path.home() / ".cache" / "huggingface" / "hub"
     pattern = "models--mlx-community--Qwen3-ASR-1.7B-4bit"
-    candidates = sorted((hub / pattern / "snapshots").glob("*")) if (hub / pattern).exists() else []
+    candidates = (
+        sorted((hub / pattern / "snapshots").glob("*"))
+        if (hub / pattern).exists()
+        else []
+    )
     for cand in candidates:
         if cand.is_dir() and list(cand.glob("*.safetensors")):
             return cand
@@ -361,7 +365,7 @@ def load_tower(snapshot: Path):
     for shard in sorted(snapshot.glob("*.safetensors")):
         all_weights.update(mx.load(str(shard)))
     tower_weights = {
-        k[len("audio_tower."):]: v
+        k[len("audio_tower.") :]: v
         for k, v in Qwen3ASRModel.sanitize(all_weights).items()
         if k.startswith("audio_tower.")
     }
@@ -389,10 +393,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args()
 
-    import mlx
     import mlx.core as mx
-    import mlx.nn as nn
-    import mlx_audio
     import transformers
     from transformers import AutoProcessor
 
@@ -434,7 +435,9 @@ def main() -> int:
             print(f"FATAL {name}: expected a single feature row")
             return 1
         if input_features.shape[1] != cfg.num_mel_bins:
-            print(f"FATAL {name}: mel bins {input_features.shape[1]} != {cfg.num_mel_bins}")
+            print(
+                f"FATAL {name}: mel bins {input_features.shape[1]} != {cfg.num_mel_bins}"
+            )
             return 1
 
         # The Rust tower consumes the true (mask-covered) frame region,
@@ -446,7 +449,9 @@ def main() -> int:
         )
 
         pads = int(captures["final_projection"].shape[0])
-        expected_pads = int(_get_feat_extract_output_lengths(mx.array([frames]))[0].item())
+        expected_pads = int(
+            _get_feat_extract_output_lengths(mx.array([frames]))[0].item()
+        )
         if pads != expected_pads:
             print(f"FATAL {name}: staged pads {pads} != formula {expected_pads}")
             return 1
@@ -459,7 +464,9 @@ def main() -> int:
         # tower output exactly (same ops, same order, same kernels).
         reference = tower(mx.array(input_features), mx.array(attention_mask))
         reference_np = np.array(reference)
-        diff = float(np.abs(reference_np - np.array(captures["final_projection"])).max())
+        diff = float(
+            np.abs(reference_np - np.array(captures["final_projection"])).max()
+        )
         if diff != 0.0:
             print(f"FATAL {name}: staged forward differs from real tower by {diff}")
             return 1
@@ -493,7 +500,8 @@ def main() -> int:
         (case_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
         sha = {
-            fname: sha256_file(case_dir / fname) for fname in ["mel.f32", "meta.json"] + [f"stage_{s}.f32" for s in STAGES]
+            fname: sha256_file(case_dir / fname)
+            for fname in ["mel.f32", "meta.json"] + [f"stage_{s}.f32" for s in STAGES]
         }
         manifest_cases.append(
             {

@@ -54,7 +54,6 @@ struct Shard {
     mmap: Mmap,
     /// Byte offset of the tensor data blob (8-byte length + JSON header).
     data_start: usize,
-    #[allow(dead_code)]
     metadata: Metadata,
 }
 

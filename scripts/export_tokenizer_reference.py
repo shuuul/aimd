@@ -126,7 +126,9 @@ LANGUAGE_CODE_TO_NAME = {
 
 # Context samples: free-form biasing text injected as the system turn.
 CTX_MIX = "高频词汇： bluesky、ZCode；话题：上下文工程"
-CTX_CJK = "会议记录：大家好，欢迎参加上下文工程研讨会。今天讨论分词器与聊天模板的逐位对齐。🎉"
+CTX_CJK = (
+    "会议记录：大家好，欢迎参加上下文工程研讨会。今天讨论分词器与聊天模板的逐位对齐。🎉"
+)
 
 # OCR user turns (text after the single <image> placeholder).
 OCR_DOCUMENT_PARSING = "document parsing."
@@ -147,7 +149,9 @@ def gen_sine_1_5s(sr: int = 16000) -> tuple[np.ndarray, dict]:
     n = int(sr * 1.5)
     t = np.arange(n, dtype=np.float64) / sr
     return (0.5 * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32), {
-        "type": "sine", "freq_hz": 440.0, "duration_s": 1.5,
+        "type": "sine",
+        "freq_hz": 440.0,
+        "duration_s": 1.5,
     }
 
 
@@ -162,7 +166,9 @@ def gen_am_burst_1_8s(sr: int = 16000) -> tuple[np.ndarray, dict]:
     gate = np.clip(np.sin(2.0 * np.pi * 1.2 * t) * 4.0 + 0.5, 0.0, 1.0)
     wav = np.clip(0.6 * am * gate * carrier, -1.0, 1.0)
     return wav.astype(np.float32), {
-        "type": "am_burst", "freqs_hz": freqs, "duration_s": 1.8,
+        "type": "am_burst",
+        "freqs_hz": freqs,
+        "duration_s": 1.8,
     }
 
 
@@ -171,7 +177,9 @@ def gen_tone_0_61s(sr: int = 16000) -> tuple[np.ndarray, dict]:
     n = int(sr * 0.61)
     t = np.arange(n, dtype=np.float64) / sr
     return (0.5 * np.sin(2.0 * np.pi * 640.0 * t)).astype(np.float32), {
-        "type": "sine", "freq_hz": 640.0, "duration_s": 0.61,
+        "type": "sine",
+        "freq_hz": 640.0,
+        "duration_s": 0.61,
     }
 
 
@@ -180,7 +188,9 @@ def gen_tone_4_0s(sr: int = 16000) -> tuple[np.ndarray, dict]:
     n = int(sr * 4.0)
     t = np.arange(n, dtype=np.float64) / sr
     return (0.5 * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32), {
-        "type": "sine", "freq_hz": 440.0, "duration_s": 4.0,
+        "type": "sine",
+        "freq_hz": 440.0,
+        "duration_s": 4.0,
     }
 
 
@@ -230,7 +240,17 @@ def asr_reference(
             [
                 [
                     {"role": "user", "content": [{"type": "audio", "audio": audio}]},
-                    {"role": "assistant", "content": [{"type": "text", "text": f"language {language}<asr_text>" if language is not None else ""}]},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"language {language}<asr_text>"
+                                if language is not None
+                                else "",
+                            }
+                        ],
+                    },
                 ]
             ],
             tokenize=False,
@@ -246,7 +266,9 @@ def asr_reference(
             messages.append(
                 {
                     "role": "assistant",
-                    "content": [{"type": "text", "text": f"language {language}<asr_text>"}],
+                    "content": [
+                        {"type": "text", "text": f"language {language}<asr_text>"}
+                    ],
                 }
             )
             chat_kwargs["continue_final_message"] = True
@@ -259,7 +281,9 @@ def asr_reference(
             for key, value in chat_kwargs.items()
             if key in ("continue_final_message", "add_generation_prompt")
         }
-        rendered = processor.apply_chat_template([messages], tokenize=False, **rendered_kwargs)[0]
+        rendered = processor.apply_chat_template(
+            [messages], tokenize=False, **rendered_kwargs
+        )[0]
 
     # The processor expands the single <|audio_pad|> into num_audio_tokens
     # copies before tokenizing; recover that count from the final ids.
@@ -285,7 +309,9 @@ def asr_reference(
 # ---------------------------------------------------------------------------
 
 
-def ocr_reference(processor, user_text: str, image_size: tuple[int, int]) -> tuple[str, list[int], int]:
+def ocr_reference(
+    processor, user_text: str, image_size: tuple[int, int]
+) -> tuple[str, list[int], int]:
     """Return (prompt_text, prompt_ids, image_pad_count) for one OCR case."""
     image_token_id = processor.image_token_id
     bos_id = processor.bos_id
@@ -314,17 +340,27 @@ def ocr_reference(processor, user_text: str, image_size: tuple[int, int]) -> tup
     segments = rendered.split(IMAGE_TOKEN)
     if len(segments) != 2:
         raise RuntimeError("expected exactly one <image> placeholder")
-    head = [int(x) for x in processor.tokenizer(segments[0], add_special_tokens=False)["input_ids"]]
-    tail = [int(x) for x in processor.tokenizer(segments[1], add_special_tokens=False)["input_ids"]]
+    head = [
+        int(x)
+        for x in processor.tokenizer(segments[0], add_special_tokens=False)["input_ids"]
+    ]
+    tail = [
+        int(x)
+        for x in processor.tokenizer(segments[1], add_special_tokens=False)["input_ids"]
+    ]
     image_pad_count = sum(1 for token_id in ids if token_id == image_token_id)
-    image_positions = [index for index, token_id in enumerate(ids) if token_id == image_token_id]
+    image_positions = [
+        index for index, token_id in enumerate(ids) if token_id == image_token_id
+    ]
     run_start = 1 + len(head)  # bos + head text ids
     if image_positions != list(range(run_start, run_start + image_pad_count)):
         raise RuntimeError("OCR image tokens are not a single contiguous run")
 
     reconstructed = [bos_id] + head + [image_token_id] * image_pad_count + tail
     if reconstructed != ids:
-        raise RuntimeError("OCR structure reconstruction does not match processor output")
+        raise RuntimeError(
+            "OCR structure reconstruction does not match processor output"
+        )
 
     return rendered, ids, image_pad_count
 
@@ -349,7 +385,9 @@ def resolve_checkpoint_dir(repo_id: str) -> Path:
         # while all model files are present); fall back to a direct cache scan.
         import os
 
-        cache = Path(os.environ.get("HF_HUB_CACHE", Path.home() / ".cache/huggingface/hub"))
+        cache = Path(
+            os.environ.get("HF_HUB_CACHE", Path.home() / ".cache/huggingface/hub")
+        )
         repo_dir = cache / ("models--" + repo_id.replace("/", "--"))
         snapshots = sorted(
             path
@@ -504,9 +542,9 @@ def main() -> int:
         tokenizer_copies_manifest.append(
             {
                 "file": str(target.relative_to(out_dir)),
-                "checkpoint": source.parent.parent.parent.name.replace("models--", "").replace(
-                    "--", "/"
-                ),
+                "checkpoint": source.parent.parent.parent.name.replace(
+                    "models--", ""
+                ).replace("--", "/"),
                 "source": str(source),
                 "sha256": sha256_file(target),
             }

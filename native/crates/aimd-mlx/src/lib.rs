@@ -1,4 +1,4 @@
-//! MLX C++ shim: the Metal compute backend (WS-11a).
+//! MLX C++ shim: the compute backend (Metal, MLX CPU device fallback) (WS-11a).
 //!
 //! # Contract (WS-11a)
 //!
@@ -31,11 +31,17 @@
 //! - a last-error string slot: every failed call records the C++ exception
 //!   message; the wrapper surfaces it as [`MlxError::Op`].
 //!
-//! Parity expectations: MLX runs fp16/bf16 on Metal — results match the
-//! CPU f32-accumulate reference within fp16 tolerance, NOT bit-exactly.
-//! Parity tests reuse the committed golden quant fixtures
-//! (`native/golden/quant/`): shim `quantized_matmul` vs
-//! `aimd-weights::dequantize_affine` + `aimd-tensor::matmul_f16_f32acc`.
+//! Parity expectations: MLX runs fp16/bf16 on Metal (or the MLX CPU device,
+//! see [`device_is_cpu`]) — results match an f32-accumulate reference within
+//! fp16 tolerance, NOT bit-exactly. Parity tests reuse the committed golden
+//! quant fixtures (`native/golden/quant/`): shim `quantized_matmul` vs
+//! `aimd-weights::dequantize_affine` + a naive f32-accumulate matmul.
+//!
+//! # Device selection
+//!
+//! The compute device is picked once per process: Metal by default, the MLX
+//! CPU device when `AIMD_MLX_DEVICE=cpu` or when no GPU is available
+//! (virtualized CI runners). `AIMD_MLX_DEVICE=gpu` forces the GPU.
 //!
 //! Import/export of f16/bf16/u32 data is bit-exact: construction uses mlx's
 //! raw-pointer array constructor (a byte copy, never a numeric conversion)
@@ -264,6 +270,72 @@ mod ffi {
             scale: f32,
             offset: i32,
         ) -> *mut AimdMlxArray;
+        pub fn mlx_addmm(
+            c: *mut AimdMlxArray,
+            a: *mut AimdMlxArray,
+            b: *mut AimdMlxArray,
+            alpha: f32,
+            beta: f32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_subtract(a: *mut AimdMlxArray, b: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_floor_divide(a: *mut AimdMlxArray, b: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_softmax_precise(
+            a: *mut AimdMlxArray,
+            axis: i32,
+            precise: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_logsumexp(a: *mut AimdMlxArray, axis: i32, keepdims: i32) -> *mut AimdMlxArray;
+        pub fn mlx_sum_axis(a: *mut AimdMlxArray, axis: i32, keepdims: i32) -> *mut AimdMlxArray;
+        pub fn mlx_argsort(a: *mut AimdMlxArray, axis: i32) -> *mut AimdMlxArray;
+        pub fn mlx_argpartition(a: *mut AimdMlxArray, kth: i32, axis: i32) -> *mut AimdMlxArray;
+        pub fn mlx_take_along_axis(
+            a: *mut AimdMlxArray,
+            indices: *mut AimdMlxArray,
+            axis: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_put_along_axis(
+            a: *mut AimdMlxArray,
+            indices: *mut AimdMlxArray,
+            values: *mut AimdMlxArray,
+            axis: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_broadcast_to(
+            a: *mut AimdMlxArray,
+            shape: *const i64,
+            ndim: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_pad(
+            a: *mut AimdMlxArray,
+            low: *const i64,
+            high: *const i64,
+            ndim: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_slice_update(
+            src: *mut AimdMlxArray,
+            update: *mut AimdMlxArray,
+            start: *const i64,
+            stop: *const i64,
+            strides: *const i64,
+            ndim: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_zeros(shape: *const i64, ndim: i32, dtype: i32) -> *mut AimdMlxArray;
+        pub fn mlx_gather_qmm(
+            x: *mut AimdMlxArray,
+            w: *mut AimdMlxArray,
+            scales: *mut AimdMlxArray,
+            biases: *mut AimdMlxArray,
+            lhs_indices: *mut AimdMlxArray,
+            rhs_indices: *mut AimdMlxArray,
+            transpose_w: u8,
+            group_size: i32,
+            bits: i32,
+            sorted_indices: u8,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_async_eval(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
+        pub fn mlx_eval_many(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
+        pub fn mlx_device_is_cpu() -> i32;
+        pub fn mlx_clear_cache() -> i32;
+        pub fn mlx_array_clone(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
     }
 }
 
@@ -847,6 +919,263 @@ impl MlxArray {
     pub fn rope(&self, dims: usize, base: f64, scale: f32, offset: i32) -> Result<Self, MlxError> {
         let ptr = unsafe { ffi::mlx_rope(self.ptr.as_ptr(), dims as i32, base, scale, offset) };
         Self::from_handle(ptr, "mlx_rope")
+    }
+
+    // ---------------------------------------------------------------------
+    // WS-07 (Unlimited-OCR) additions
+    // ---------------------------------------------------------------------
+
+    /// `beta * self + alpha * (a @ b)` (`mx.addmm`; `nn.Linear` with bias
+    /// is `addmm(bias, x, W.T)`).
+    pub fn addmm(&self, a: &Self, b: &Self, alpha: f32, beta: f32) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_addmm(
+                self.ptr.as_ptr(),
+                a.ptr.as_ptr(),
+                b.ptr.as_ptr(),
+                alpha,
+                beta,
+            )
+        };
+        Self::from_handle(ptr, "mlx_addmm")
+    }
+
+    /// Element-wise subtract.
+    pub fn subtract(&self, rhs: &Self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_subtract(self.ptr.as_ptr(), rhs.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_subtract")
+    }
+
+    /// Element-wise floor division (integral inputs stay integral).
+    pub fn floor_divide(&self, rhs: &Self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_floor_divide(self.ptr.as_ptr(), rhs.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_floor_divide")
+    }
+
+    /// Softmax over `axis` with mlx's `precise` flag (`mx.softmax(...,
+    /// precise=True)` accumulates half inputs in f32).
+    pub fn softmax_precise(&self, axis: i32, precise: bool) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_softmax_precise(self.ptr.as_ptr(), axis, i32::from(precise)) };
+        Self::from_handle(ptr, "mlx_softmax_precise")
+    }
+
+    /// `logsumexp` over `axis`.
+    pub fn logsumexp(&self, axis: i32, keepdims: bool) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_logsumexp(self.ptr.as_ptr(), axis, i32::from(keepdims)) };
+        Self::from_handle(ptr, "mlx_logsumexp")
+    }
+
+    /// Sum over `axis`.
+    pub fn sum_axis(&self, axis: i32, keepdims: bool) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_sum_axis(self.ptr.as_ptr(), axis, i32::from(keepdims)) };
+        Self::from_handle(ptr, "mlx_sum_axis")
+    }
+
+    /// Stable argsort along `axis` (`uint32` indices).
+    pub fn argsort(&self, axis: i32) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_argsort(self.ptr.as_ptr(), axis) };
+        Self::from_handle(ptr, "mlx_argsort")
+    }
+
+    /// `mx.argpartition(self, kth, axis)` (`uint32` indices; negative
+    /// `kth` counts from the end).
+    pub fn argpartition(&self, kth: i32, axis: i32) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_argpartition(self.ptr.as_ptr(), kth, axis) };
+        Self::from_handle(ptr, "mlx_argpartition")
+    }
+
+    /// `mx.take_along_axis`.
+    pub fn take_along_axis(&self, indices: &Self, axis: i32) -> Result<Self, MlxError> {
+        let ptr =
+            unsafe { ffi::mlx_take_along_axis(self.ptr.as_ptr(), indices.ptr.as_ptr(), axis) };
+        Self::from_handle(ptr, "mlx_take_along_axis")
+    }
+
+    /// `mx.put_along_axis` (`values` broadcasts against `indices`).
+    pub fn put_along_axis(
+        &self,
+        indices: &Self,
+        values: &Self,
+        axis: i32,
+    ) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_put_along_axis(
+                self.ptr.as_ptr(),
+                indices.ptr.as_ptr(),
+                values.ptr.as_ptr(),
+                axis,
+            )
+        };
+        Self::from_handle(ptr, "mlx_put_along_axis")
+    }
+
+    /// Broadcast to `shape`.
+    pub fn broadcast_to(&self, shape: &[usize]) -> Result<Self, MlxError> {
+        let shape_i64: Vec<i64> = shape.iter().map(|&d| d as i64).collect();
+        let ptr = unsafe {
+            ffi::mlx_broadcast_to(
+                self.ptr.as_ptr(),
+                shape_i64.as_ptr(),
+                shape_i64.len() as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_broadcast_to")
+    }
+
+    /// Constant-zero padding with per-axis `(low, high)` widths (`mx.pad`).
+    pub fn pad(&self, widths: &[(usize, usize)]) -> Result<Self, MlxError> {
+        let low: Vec<i64> = widths.iter().map(|w| w.0 as i64).collect();
+        let high: Vec<i64> = widths.iter().map(|w| w.1 as i64).collect();
+        let ptr = unsafe {
+            ffi::mlx_pad(
+                self.ptr.as_ptr(),
+                low.as_ptr(),
+                high.as_ptr(),
+                low.len() as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_pad")
+    }
+
+    /// Functional slice assignment `self[start:stop:strides] = update`
+    /// (mlx reuses the buffer in place when `self` is otherwise unreferenced).
+    pub fn slice_update(
+        &self,
+        update: &Self,
+        start: &[usize],
+        stop: &[usize],
+        strides: &[usize],
+    ) -> Result<Self, MlxError> {
+        if start.len() != stop.len() || start.len() != strides.len() {
+            return Err(MlxError::Op(
+                "slice_update index lengths differ".to_string(),
+            ));
+        }
+        let start_i: Vec<i64> = start.iter().map(|&v| v as i64).collect();
+        let stop_i: Vec<i64> = stop.iter().map(|&v| v as i64).collect();
+        let strides_i: Vec<i64> = strides.iter().map(|&v| v as i64).collect();
+        let ptr = unsafe {
+            ffi::mlx_slice_update(
+                self.ptr.as_ptr(),
+                update.ptr.as_ptr(),
+                start_i.as_ptr(),
+                stop_i.as_ptr(),
+                strides_i.as_ptr(),
+                start_i.len() as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_slice_update")
+    }
+
+    /// Zero-filled array.
+    pub fn zeros(shape: &[usize], dtype: MlxDtype) -> Result<Self, MlxError> {
+        let shape_i64: Vec<i64> = shape.iter().map(|&d| d as i64).collect();
+        let ptr =
+            unsafe { ffi::mlx_zeros(shape_i64.as_ptr(), shape_i64.len() as i32, dtype.code()) };
+        Self::from_handle(ptr, "mlx_zeros")
+    }
+
+    /// `mx.gather_qmm` (affine): quantized matmul whose weight matrix is
+    /// gathered per batch element by `rhs_indices` (the
+    /// `QuantizedSwitchLinear` primitive of mlx MoE layers).
+    #[allow(clippy::too_many_arguments)]
+    pub fn gather_qmm(
+        &self,
+        w: &Self,
+        scales: &Self,
+        biases: Option<&Self>,
+        lhs_indices: Option<&Self>,
+        rhs_indices: Option<&Self>,
+        transpose_w: bool,
+        group_size: Option<i32>,
+        bits: Option<i32>,
+        sorted_indices: bool,
+    ) -> Result<Self, MlxError> {
+        let opt = |a: Option<&Self>| a.map_or(std::ptr::null_mut(), |a| a.ptr.as_ptr());
+        let ptr = unsafe {
+            ffi::mlx_gather_qmm(
+                self.ptr.as_ptr(),
+                w.ptr.as_ptr(),
+                scales.ptr.as_ptr(),
+                opt(biases),
+                opt(lhs_indices),
+                opt(rhs_indices),
+                u8::from(transpose_w),
+                group_size.unwrap_or(-1),
+                bits.unwrap_or(-1),
+                u8::from(sorted_indices),
+            )
+        };
+        Self::from_handle(ptr, "mlx_gather_qmm")
+    }
+
+    /// Schedules `arrays` for evaluation without blocking (`mx.async_eval`).
+    pub fn async_eval(arrays: &[&Self]) -> Result<(), MlxError> {
+        Self::eval_list(arrays, ffi::mlx_async_eval, "mlx_async_eval")
+    }
+
+    /// Evaluates `arrays` together (`mx.eval([...])`).
+    pub fn eval_many(arrays: &[&Self]) -> Result<(), MlxError> {
+        Self::eval_list(arrays, ffi::mlx_eval_many, "mlx_eval_many")
+    }
+
+    fn eval_list(
+        arrays: &[&Self],
+        f: unsafe extern "C" fn(*mut *mut ffi::AimdMlxArray, i32) -> i32,
+        op: &str,
+    ) -> Result<(), MlxError> {
+        if arrays.is_empty() {
+            return Ok(());
+        }
+        let mut handles: Vec<*mut ffi::AimdMlxArray> =
+            arrays.iter().map(|a| a.ptr.as_ptr()).collect();
+        let status = unsafe { f(handles.as_mut_ptr(), handles.len() as i32) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(op_failed(op))
+        }
+    }
+
+    /// Scalar (0-d) array of one `bf16` value.
+    pub fn scalar_bf16(value: f32) -> Result<Self, MlxError> {
+        Self::from_bf16(&[], &[half::bf16::from_f32(value)])
+    }
+
+    /// Shallow copy: a second refcounted handle to the same (immutable)
+    /// array, like Python `y = x`. No data is copied.
+    pub fn try_clone(&self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_array_clone(self.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_array_clone")
+    }
+
+    /// Scalar (0-d) `u32` array.
+    pub fn scalar_u32(value: u32) -> Result<Self, MlxError> {
+        Self::from_u32(&[], &[value])
+    }
+}
+
+/// Whether the shim computes on the MLX CPU device instead of Metal.
+///
+/// The device is chosen once per process, before the first array is
+/// evaluated: `AIMD_MLX_DEVICE=cpu` forces the CPU device, `gpu` forces the
+/// GPU, and anything else (unset) uses Metal when a GPU device is available
+/// and falls back to the CPU device otherwise (e.g. virtualized CI runners).
+pub fn device_is_cpu() -> Result<bool, MlxError> {
+    match unsafe { ffi::mlx_device_is_cpu() } {
+        1 => Ok(true),
+        0 => Ok(false),
+        _ => Err(op_failed("mlx_device_is_cpu")),
+    }
+}
+
+/// Releases mlx's cached Metal buffers (`mx.clear_cache`).
+pub fn clear_cache() -> Result<(), MlxError> {
+    let status = unsafe { ffi::mlx_clear_cache() };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(op_failed("mlx_clear_cache"))
     }
 }
 

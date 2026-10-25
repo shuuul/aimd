@@ -1,12 +1,11 @@
 //! Qwen3-ASR native MLX/Metal benchmark: startup (load) + warm transcription.
 //!
-//! Usage: cargo run --release -p aimd-engine --features mlx --example bench_asr_mlx -- /path/to.wav [more.wav...]
+//! Usage: cargo run --release -p aimd-engine --example bench_asr_mlx -- /path/to.wav [more.wav...]
 
 use std::path::PathBuf;
 use std::time::Instant;
 
-use aimd_engine::models::qwen3_asr::mlx_backend::MlxAsrPipeline;
-use aimd_engine::models::qwen3_asr::pipeline::TranscriptionRequest;
+use aimd_engine::models::qwen3_asr::pipeline::{Qwen3AsrPipeline, TranscriptionRequest};
 use aimd_engine::tokenizer::Tokenizer;
 
 fn checkpoint_dir() -> Option<PathBuf> {
@@ -38,7 +37,7 @@ fn main() {
     );
 
     let t1 = Instant::now();
-    let pipe = MlxAsrPipeline::load(&dir).expect("pipeline");
+    let pipe = Qwen3AsrPipeline::load(&dir).expect("pipeline");
     let load_s = t1.elapsed().as_secs_f32();
     println!(
         "pipeline load (total): {:>8.2} s  (weights mmap + bit-exact MLX import, quantized matmul)",
