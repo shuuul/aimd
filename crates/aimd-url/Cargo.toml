@@ -7,3 +7,5 @@ license.workspace = true
 
 [dependencies]
 aimd-core = { workspace = true }
+serde_json = { workspace = true }
+dom_smoothie = "0.18"

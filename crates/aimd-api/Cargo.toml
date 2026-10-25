@@ -1,0 +1,29 @@
+[package]
+name = "aimd-api"
+description = "The `aimd-api` server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "aimd_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aimd-api"
+path = "src/main.rs"
+
+[dependencies]
+aimd-core = { workspace = true }
+aimd-process = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Async HTTP server (approved by the WS-15 dependency policy). SSE framing,
+# sidecar path checks, UUIDs, and timestamps are hand-written.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }
+http-body = "1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

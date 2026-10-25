@@ -110,40 +110,17 @@ Not in scope:
 | 2026-10-25 | CPU "obvious wins only" optimization pass, quality bar = unit tests + parity tolerances (no full gate): vocab-axis rayon parallelism for small-m matmul (decode steps were serial under row-panel parallelism), transposed-B blocked logits matmul (no 600 MB embedding transpose, F32 out for argmax faithfulness), SIMD inner kernels (stable NEON f32x4 FMA on aarch64 — fp16 load intrinsics are nightly-only; fully vectorized AVX2+F16C+FMA on x86_64; scalar fallback; runtime detection) | User direction: strengthen MLX/Metal as primary, but land the obvious CPU wins in passing; kernel reordering stays within existing golden tolerances (verified: decoder golden logits parity + 16-token argmax stream green) | WS-03 |
 | 2026-10-25 | Inference-perf roadmap for the MLX path (user-approved): (1) preallocated/ring KV cache replacing concatenate-grown caches (fixes hidden O(n^2)); (2) `mlx::core::compile` exposed through the shim and applied to the decoder layer/step functions (MLX's CUDA-Graphs analog: automatic kernel fusion + replay; C++ API verified in brew mlx 0.32.4 `mlx/compile.h`); (3) n-gram/prompt-lookup speculative decoding at the generation-loop level (model-free draft+verify, largest expected win on OCR's repetitive markdown); (4) hand-written MSL kernels remain the optional late phase (WS-08) | Post-WS-11b profiling logic: ~350 small kernel dispatches per decode token are launch-overhead bound; ordered by ROI; #1 is bug-class, #2 est 1.3-2x decode, #3 est 1.5-2.5x OCR decode, #4 highest ceiling but duplicates MLX value | WS-13, WS-14, WS-08 |
 | 2026-10-25 | Full-Rust interface layer (WS-15): flips the v0.4 "retain Python interfaces" decision — CLI/doc/URL/API/MCP all port to Rust; the PyPI package reduces to a compatibility shim (PyO3 `process()` + console scripts onto native binaries). Sequencing: CLI -> doc pipeline -> URL pipeline -> HTTP API -> MCP -> test/release cleanup (~2-3 months) | Engine side is now fully proven in Rust (ASR done on both backends); marginal cost of the port dropped; CLI cold start becomes ms-scale; default wheel loses the last Python deps | WS-15, WS-10 |
-| 2026-10-25 | yt-dlp becomes a managed CLI dependency with an auto-update interface: `yt-dlp --version` floor check, `aimd deps update` (runs `yt-dlp -U`, or `brew upgrade` when brew-installed), stale-detection (version age + known update-required stderr signatures) triggering one auto-update+retry, version surfaced in `aimd doctor` | yt-dlp requires frequent updates to keep working (site changes); the lib->CLI switch makes update management ours | WS-15 | Umbrella + closeout for the full-Rust port and Homebrew release: port the pytest behavior scenarios onto the Rust crates, final PyPI release pointing to brew, delete `src/aimd`/`tests/`/`pyproject.toml`/uv tooling, rewrite README/AGENTS/docs for Homebrew. Per the dependency policy: hand-write the simple parts, third-party for complex domains | shuuul | In progress | WS-16, WS-17, WS-18, WS-19, WS-20, WS-21 | Behavior parity vs the Python interfaces on the ported pytest scenarios; Python tree removed; README documents only the brew install |
-| WS-16 | `aimd-core` (text shaping, precision, remote config, extension tables) + `aimd-process` (routing incl. pdf-inspector OCR probe, local Qwen3-ASR over aimd-engine with ffmpeg decode/segmenting/start-end/context/8-bit retry, Unlimited-OCR for images and `mutool`-rendered PDFs, OpenAI-compatible remote ASR/OCR, model alias/precision -> HF checkpoint resolution + download) + `aimd` CLI (hand-written arg parse, frozen flag surface from the Typer CLI) | agent-core | Claimed | WS-07, WS-11 | Ported `test_cli`/`test_file_processing`/`test_capabilities`/`test_remote_backends`/`test_asr_*`/`test_ocr` scenarios pass; `aimd clip.wav` and `aimd scan.pdf` E2E match the Python output |
-| WS-17 | `aimd-doc`: Pandoc conversion, EPUB spine/cleanup/flat image extraction, text-layer PDF via pdf-inspector, txt/md passthrough | agent-doc | Claimed | None | Ported doc scenarios from `test_file_processing`/`test_markitdown_plugins`/`test_use_cases` pass; EPUB fixture Markdown identical to Python |
-| WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Claimed | None | Ported `test_url`/`test_asr_context` URL scenarios pass (mocked yt-dlp); subtitle cleanup golden identical to Python |
-| WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | Unassigned | Pending | WS-16 | Ported `test_api*` scenarios pass; JSON wire-compatible with the Python API |
-| WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | Unassigned | Pending | WS-16 | Ported `test_mcp_server` scenarios pass |
-| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | Unassigned | Pending | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 |
-| 2026-10-25 | SUPERSEDED same day by the managed-binary decision below (no install-method probing). | | WS-15 | Umbrella + closeout for the full-Rust port and Homebrew release: port the pytest behavior scenarios onto the Rust crates, final PyPI release pointing to brew, delete `src/aimd`/`tests/`/`pyproject.toml`/uv tooling, rewrite README/AGENTS/docs for Homebrew. Per the dependency policy: hand-write the simple parts, third-party for complex domains | shuuul | In progress | WS-16, WS-17, WS-18, WS-19, WS-20, WS-21 | Behavior parity vs the Python interfaces on the ported pytest scenarios; Python tree removed; README documents only the brew install |
-| WS-16 | `aimd-core` (text shaping, precision, remote config, extension tables) + `aimd-process` (routing incl. pdf-inspector OCR probe, local Qwen3-ASR over aimd-engine with ffmpeg decode/segmenting/start-end/context/8-bit retry, Unlimited-OCR for images and `mutool`-rendered PDFs, OpenAI-compatible remote ASR/OCR, model alias/precision -> HF checkpoint resolution + download) + `aimd` CLI (hand-written arg parse, frozen flag surface from the Typer CLI) | agent-core | Claimed | WS-07, WS-11 | Ported `test_cli`/`test_file_processing`/`test_capabilities`/`test_remote_backends`/`test_asr_*`/`test_ocr` scenarios pass; `aimd clip.wav` and `aimd scan.pdf` E2E match the Python output |
-| WS-17 | `aimd-doc`: Pandoc conversion, EPUB spine/cleanup/flat image extraction, text-layer PDF via pdf-inspector, txt/md passthrough | agent-doc | Claimed | None | Ported doc scenarios from `test_file_processing`/`test_markitdown_plugins`/`test_use_cases` pass; EPUB fixture Markdown identical to Python |
-| WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Claimed | None | Ported `test_url`/`test_asr_context` URL scenarios pass (mocked yt-dlp); subtitle cleanup golden identical to Python |
-| WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | Unassigned | Pending | WS-16 | Ported `test_api*` scenarios pass; JSON wire-compatible with the Python API |
-| WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | Unassigned | Pending | WS-16 | Ported `test_mcp_server` scenarios pass |
-| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | Unassigned | Pending | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 |
-| 2026-10-25 | SUPERSEDED by the Homebrew-distribution decision below for the tool-management half (brew `depends_on` replaces the manifest/downloader/`aimd deps`; the `dom_smoothie` readability choice still stands). Original: all subprocess tools become aimd-MANAGED BINARIES (user direction "just install the binaries"): a pinned tool manifest (url template + version + sha256) covers yt-dlp (official standalone), ffmpeg (static builds), pandoc (official single-file); on-demand download into ~/.cache/aimd/bin keeps the default wheel small; resolution order = per-tool env override > managed copy > system PATH; `aimd deps install/update/status` (update = GitHub latest-release check, confirmed pin bump, atomic replace); downloader hand-written with security gates (https-only, host allowlist github.com/api.github.com/objects.githubusercontent.com, resolve-then-reject loopback/private/reserved IPs, sha256 verify before atomic rename, no shell exec). yt-dlp self-heal = stderr signature -> `aimd deps update yt-dlp` -> one retry. Readability extraction uses the third-party crate `dom_smoothie` (readability.py lineage, actively maintained) — hand-writing was rejected as genuinely complex (user correction: too many details); `npx defuddle` stays as an env-var escape hatch during migration, validated against a fixture corpus; `defuddle-rs` (0.1.0, same algorithm as the current tool) is watched as the future exact-parity swap | Official standalone binaries are first-class distribution for these tools; no user-environment probing, controlled versions; bundling in-wheel would violate the small-wheel goal; readability is a genuinely complex domain (per the dependency policy -> third-party), unlike the hand-written items | WS-15 | Umbrella + closeout for the full-Rust port and Homebrew release: port the pytest behavior scenarios onto the Rust crates, final PyPI release pointing to brew, delete `src/aimd`/`tests/`/`pyproject.toml`/uv tooling, rewrite README/AGENTS/docs for Homebrew. Per the dependency policy: hand-write the simple parts, third-party for complex domains | shuuul | In progress | WS-16, WS-17, WS-18, WS-19, WS-20, WS-21 | Behavior parity vs the Python interfaces on the ported pytest scenarios; Python tree removed; README documents only the brew install |
-| WS-16 | `aimd-core` (text shaping, precision, remote config, extension tables) + `aimd-process` (routing incl. pdf-inspector OCR probe, local Qwen3-ASR over aimd-engine with ffmpeg decode/segmenting/start-end/context/8-bit retry, Unlimited-OCR for images and `mutool`-rendered PDFs, OpenAI-compatible remote ASR/OCR, model alias/precision -> HF checkpoint resolution + download) + `aimd` CLI (hand-written arg parse, frozen flag surface from the Typer CLI) | agent-core | Claimed | WS-07, WS-11 | Ported `test_cli`/`test_file_processing`/`test_capabilities`/`test_remote_backends`/`test_asr_*`/`test_ocr` scenarios pass; `aimd clip.wav` and `aimd scan.pdf` E2E match the Python output |
-| WS-17 | `aimd-doc`: Pandoc conversion, EPUB spine/cleanup/flat image extraction, text-layer PDF via pdf-inspector, txt/md passthrough | agent-doc | Claimed | None | Ported doc scenarios from `test_file_processing`/`test_markitdown_plugins`/`test_use_cases` pass; EPUB fixture Markdown identical to Python |
-| WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Claimed | None | Ported `test_url`/`test_asr_context` URL scenarios pass (mocked yt-dlp); subtitle cleanup golden identical to Python |
-| WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | Unassigned | Pending | WS-16 | Ported `test_api*` scenarios pass; JSON wire-compatible with the Python API |
-| WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | Unassigned | Pending | WS-16 | Ported `test_mcp_server` scenarios pass |
-| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | Unassigned | Pending | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 |
-| 2026-10-25 | Dependency policy for WS-15: third-party crates only for genuinely complex domains — keep axum+tokio (async HTTP/SSE), rmcp (approved), serde/serde_json, pdfium-render, image, rustls (remote-backend TLS), miniz_oxide (deflate). Hand-write instead: CLI arg parsing (~200 lines, frozen flag surface), zip directory reading (store + miniz inflate), OPF/spine XML walking, SSE framing, Netscape cookie parsing, sidecar path checks | User direction: simple dependencies are worse than writing it ourselves; each hand-written item is small, dependency-light, and fully testable | WS-15 | Umbrella + closeout for the full-Rust port and Homebrew release: port the pytest behavior scenarios onto the Rust crates, final PyPI release pointing to brew, delete `src/aimd`/`tests/`/`pyproject.toml`/uv tooling, rewrite README/AGENTS/docs for Homebrew. Per the dependency policy: hand-write the simple parts, third-party for complex domains | shuuul | In progress | WS-16, WS-17, WS-18, WS-19, WS-20, WS-21 | Behavior parity vs the Python interfaces on the ported pytest scenarios; Python tree removed; README documents only the brew install |
-| WS-16 | `aimd-core` (text shaping, precision, remote config, extension tables) + `aimd-process` (routing incl. pdf-inspector OCR probe, local Qwen3-ASR over aimd-engine with ffmpeg decode/segmenting/start-end/context/8-bit retry, Unlimited-OCR for images and `mutool`-rendered PDFs, OpenAI-compatible remote ASR/OCR, model alias/precision -> HF checkpoint resolution + download) + `aimd` CLI (hand-written arg parse, frozen flag surface from the Typer CLI) | agent-core | Claimed | WS-07, WS-11 | Ported `test_cli`/`test_file_processing`/`test_capabilities`/`test_remote_backends`/`test_asr_*`/`test_ocr` scenarios pass; `aimd clip.wav` and `aimd scan.pdf` E2E match the Python output |
-| WS-17 | `aimd-doc`: Pandoc conversion, EPUB spine/cleanup/flat image extraction, text-layer PDF via pdf-inspector, txt/md passthrough | agent-doc | Claimed | None | Ported doc scenarios from `test_file_processing`/`test_markitdown_plugins`/`test_use_cases` pass; EPUB fixture Markdown identical to Python |
-| WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Claimed | None | Ported `test_url`/`test_asr_context` URL scenarios pass (mocked yt-dlp); subtitle cleanup golden identical to Python |
-| WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | Unassigned | Pending | WS-16 | Ported `test_api*` scenarios pass; JSON wire-compatible with the Python API |
-| WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | Unassigned | Pending | WS-16 | Ported `test_mcp_server` scenarios pass |
-| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | Unassigned | Pending | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 |
+| 2026-10-25 | yt-dlp becomes a managed CLI dependency with an auto-update interface: `yt-dlp --version` floor check, `aimd deps update` (runs `yt-dlp -U`, or `brew upgrade` when brew-installed), stale-detection (version age + known update-required stderr signatures) triggering one auto-update+retry, version surfaced in `aimd doctor` | yt-dlp requires frequent updates to keep working (site changes); the lib->CLI switch makes update management ours | WS-15 |
+| 2026-10-25 | SUPERSEDED same day by the managed-binary decision below (no install-method probing). | | WS-15 |
+| 2026-10-25 | SUPERSEDED by the Homebrew-distribution decision below for the tool-management half (brew `depends_on` replaces the manifest/downloader/`aimd deps`; the `dom_smoothie` readability choice still stands). Original: all subprocess tools become aimd-MANAGED BINARIES (user direction "just install the binaries"): a pinned tool manifest (url template + version + sha256) covers yt-dlp (official standalone), ffmpeg (static builds), pandoc (official single-file); on-demand download into ~/.cache/aimd/bin keeps the default wheel small; resolution order = per-tool env override > managed copy > system PATH; `aimd deps install/update/status` (update = GitHub latest-release check, confirmed pin bump, atomic replace); downloader hand-written with security gates (https-only, host allowlist github.com/api.github.com/objects.githubusercontent.com, resolve-then-reject loopback/private/reserved IPs, sha256 verify before atomic rename, no shell exec). yt-dlp self-heal = stderr signature -> `aimd deps update yt-dlp` -> one retry. Readability extraction uses the third-party crate `dom_smoothie` (readability.py lineage, actively maintained) — hand-writing was rejected as genuinely complex (user correction: too many details); `npx defuddle` stays as an env-var escape hatch during migration, validated against a fixture corpus; `defuddle-rs` (0.1.0, same algorithm as the current tool) is watched as the future exact-parity swap | Official standalone binaries are first-class distribution for these tools; no user-environment probing, controlled versions; bundling in-wheel would violate the small-wheel goal; readability is a genuinely complex domain (per the dependency policy -> third-party), unlike the hand-written items | WS-15 |
+| 2026-10-25 | Dependency policy for WS-15: third-party crates only for genuinely complex domains — keep axum+tokio (async HTTP/SSE), rmcp (approved), serde/serde_json, pdfium-render, image, rustls (remote-backend TLS), miniz_oxide (deflate). Hand-write instead: CLI arg parsing (~200 lines, frozen flag surface), zip directory reading (store + miniz inflate), OPF/spine XML walking, SSE framing, Netscape cookie parsing, sidecar path checks | User direction: simple dependencies are worse than writing it ourselves; each hand-written item is small, dependency-light, and fully testable | WS-15 |
 | 2026-10-25 | Nested Qwen cleanup LLM for ASR post-processing: DEFERRED (user decision "先不做"). Research conclusion recorded for reopening: tokenizer + Qwen3 graph/MLX-backend infrastructure ARE reusable (any Qwen3 dense checkpoint plugs in), but embedding WEIGHT tables must not be shared across models (fine-tuned distribution drift); context biasing already covers external-knowledge corrections (never feed first-pass output back as context — it amplifies errors); a cleanup LLM fills the no-external-clue gap and needs conservative guardrails (copy-mode prompting + edit-distance-ratio rejection) | Revisit after WS-15 if corpus evidence shows a residual error gap | — |
 | 2026-10-25 | MLX-ONLY engine (user direction "只需要 MLX 版本，跟原来的 Python 版本对标"): supersedes the CPU-baseline, dual-wheel, and hand-written CUDA decisions; hand-written MSL (WS-08) stays as an active macOS optimization track, re-scoped to custom Metal kernels inside the MLX graph rather than a separate backend (user correction). The single compute backend is the `aimd-mlx` shim — Metal on macOS, `mlx` CUDA backend on Linux (metacube). All CPU compute paths (aimd-tensor ops, ASR CPU encoder/decoder, OCR CPU vision/decoder, CPU benches) are deleted; backend-agnostic pieces stay (weights loading, tokenizer, mel, gundam preprocessing, n-gram guard, markdown normalization, retry/parse logic). Correctness reference = the Python mlx-audio / mlx_vlm outputs (golden fixtures + E2E markdown/transcript identity), not a Rust CPU graph | Simplify the codebase; the CPU path was ~0.01x of MLX speed (OCR page 734 s vs 4.8 s) and only served as a parity baseline that the Python reference already provides | WS-03, WS-06, WS-07, WS-08, WS-09, WS-10, WS-11 |
 | 2026-10-25 | Pure Homebrew distribution (user decision): the repo stops being a Python package once WS-15 lands. `aimd` ships as a Homebrew formula in our own tap (`shuuul/homebrew-tap`, not homebrew-core yet) with CI-built bottles for macOS arm64 and Linux; runtime deps via `depends_on` (`yt-dlp`, `ffmpeg`, `pandoc`; mlx on macOS). Linux GPU: brew mlx is macOS-only-bottled and Homebrew has no CUDA toolchain, so the tap carries its own C++-only mlx formula built with the CUDA backend, bottled on metacube/dspark (to be proven in WS-09). WS-10 (PyO3/wheels/PyPI) is cancelled; until WS-15 completes the Python package stays as-is (no new features, no Python-version changes), then gets one final PyPI release pointing to brew. Model weights still download at runtime from HF into the cache; API/MCP servers can run under `brew services` | Removes PyO3, the wheel matrix, release-please's Python flow, and the hand-written tool downloader; brew already distributes every subprocess tool | WS-09, WS-10, WS-15 |
 | 2026-10-25 | Rust-style repo layout (user direction, replaces the queued `native/` -> `crates/` rename): the Cargo workspace root moves to the repo root (`Cargo.toml`/`Cargo.lock`), crates live in root `crates/` (`aimd-weights`, `aimd-mlx`, `aimd-engine`; WS-15 binaries join as `crates/aimd-cli` etc.), golden fixtures move from `native/golden/` into each owning crate's `tests/golden/` (located via `CARGO_MANIFEST_DIR`), `scripts/` exporters write there, `target/` at root is gitignored; the Python package (`src/aimd`, `pyproject.toml`, `tests/`) coexists until WS-15 removes it. Done with `git mv` in its own commit after the MLX-only cleanup lands | Standard Rust workspace shape for the brew-distributed binary; per-crate fixtures follow crate ownership | WS-13, WS-15 |
 | 2026-10-25 | WS-15 runs before WS-13/WS-14 (user direction: move the interfaces to Rust first, then delete Python and rewrite the README). WS-15 becomes the umbrella/closeout row; the port splits into WS-16 (core + `aimd` CLI + local/remote ASR/OCR), WS-17 (doc), WS-18 (URL), WS-19 (HTTP API), WS-20 (MCP), WS-21 (Homebrew tap + release CI). Crates: `aimd-core` (models, errors, hooks, text shaping; no heavy deps), `aimd-doc` and `aimd-url` (depend only on `aimd-core`; URL audio fallback goes through a transcriber trait implemented by `aimd-process`), `aimd-process` (routing/orchestration over doc/url/engine), and one binary crate per interface (`aimd-cli` -> `aimd`, then `aimd-api`, `aimd-mcp`) | Removes the Python dependency before perf work; the core/doc/url split avoids crate cycles and lets WS-16/17/18 run in parallel | WS-13, WS-14, WS-15..WS-21 |
 | 2026-10-25 | Rust document/PDF tool mapping: Pandoc (>= 3.8, brew) reads docx/pptx/xlsx/odt/epub/html/rtf/etc., replacing MarkItDown built-ins; legacy binary `.doc`/`.ppt`/`.xls` are dropped (no Pandoc reader); `.txt`/`.md` pass through. Text-layer PDFs and the scanned/encoding-issue OCR probe use the `pdf-inspector` crate (the same library behind the Python binding); scanned-page rendering for OCR shells out to brew `mupdf` (`mutool draw`, replacing PyMuPDF). pdfium is dropped (no brew formula) | Keeps the formula on brew-distributed tools; pdf-inspector keeps routing identical to Python | WS-16, WS-17 |
+| 2026-10-26 | GLM-OCR option removed from the Rust crates entirely (user direction "直接移除 GLM-OCR 的选项"): `glm-ocr`, its aliases and HF ids follow the unknown-model error path; the frozen Python package keeps it until WS-15 deletes Python | Narrow model matrix; no dead option in help text | WS-16 |
 | 2026-10-25 | MLX-only cleanup: `aimd-tensor` crate deleted; ANE spike artifacts (`golden/ane_spike`, `scripts/ane_spike`) deleted (report `docs/ane-spike-results.md` kept as history); `aimd_weights::dequantize_affine` kept as the test-only bit-exact oracle for `golden/quant`; `golden/asr_decoder/logits.f32` dropped (unread). MLX device = GPU unless `AIMD_MLX_DEVICE=cpu` or no GPU; hermetic CI runs on the CPU device and the checkpoint tier skips there; MLX's CPU `quantized_matmul` with bf16 inputs loses precision as K grows (vs float64: 1-2% of max|out| at K=128, 6.5-17% at K=4096; f16/dense/f32 <= 0.2%; Metal bf16 < 0.8%; reproduced in Python mlx 0.32.2), so CPU-device parity tests promote bf16 cases to f32 inputs and keep the Metal tolerance; the CPU device must never run real bf16-scale checkpoints | Hosted macOS runners may lack Metal; keep CI hermetic and inside the TEST RULES budget (CPU 4 s, Metal 12 s) | WS-02, WS-03, WS-12 |
 
 ## Workstreams
@@ -166,12 +143,12 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-13 | MLX perf pack: preallocated/ring KV cache (replace concatenate growth) + `mlx::core::compile` through the shim applied to decoder layer/step functions + A/B benchmarks recorded in docs/performance.md | Unassigned | Pending | WS-07 | Decode-latency improvement vs b96c031 baseline with outputs still text-identical; bench rows recorded |
 | WS-14 | Speculative decoding (n-gram/prompt-lookup draft + single-forward verify k tokens) in the greedy generation loops; enabled per-model after accuracy passes the golden-corpus gates | Unassigned | Pending | WS-13 | OCR decode >= 1.3x vs WS-13 with corpus similarity unchanged; ASR measured opportunistically |
 | WS-15 | Umbrella + closeout for the full-Rust port and Homebrew release: port the pytest behavior scenarios onto the Rust crates, final PyPI release pointing to brew, delete `src/aimd`/`tests/`/`pyproject.toml`/uv tooling, rewrite README/AGENTS/docs for Homebrew. Per the dependency policy: hand-write the simple parts, third-party for complex domains | shuuul | In progress | WS-16, WS-17, WS-18, WS-19, WS-20, WS-21 | Behavior parity vs the Python interfaces on the ported pytest scenarios; Python tree removed; README documents only the brew install |
-| WS-16 | `aimd-core` (text shaping, precision, remote config, extension tables) + `aimd-process` (routing incl. pdf-inspector OCR probe, local Qwen3-ASR over aimd-engine with ffmpeg decode/segmenting/start-end/context/8-bit retry, Unlimited-OCR for images and `mutool`-rendered PDFs, OpenAI-compatible remote ASR/OCR, model alias/precision -> HF checkpoint resolution + download) + `aimd` CLI (hand-written arg parse, frozen flag surface from the Typer CLI) | agent-core | Claimed | WS-07, WS-11 | Ported `test_cli`/`test_file_processing`/`test_capabilities`/`test_remote_backends`/`test_asr_*`/`test_ocr` scenarios pass; `aimd clip.wav` and `aimd scan.pdf` E2E match the Python output |
-| WS-17 | `aimd-doc`: Pandoc conversion, EPUB spine/cleanup/flat image extraction, text-layer PDF via pdf-inspector, txt/md passthrough | agent-doc | Claimed | None | Ported doc scenarios from `test_file_processing`/`test_markitdown_plugins`/`test_use_cases` pass; EPUB fixture Markdown identical to Python |
-| WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Claimed | None | Ported `test_url`/`test_asr_context` URL scenarios pass (mocked yt-dlp); subtitle cleanup golden identical to Python |
-| WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | Unassigned | Pending | WS-16 | Ported `test_api*` scenarios pass; JSON wire-compatible with the Python API |
-| WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | Unassigned | Pending | WS-16 | Ported `test_mcp_server` scenarios pass |
-| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | Unassigned | Pending | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 | Full-Rust interface layer + Homebrew release: CLI (hand-written arg parse), doc pipeline (brew pandoc + hand-written zip/OPF + pdfium), URL pipeline (brew yt-dlp with stderr-signature hint to `brew upgrade yt-dlp` + `dom_smoothie` readability with defuddle fixture validation), HTTP API (axum, SSE, jobs), MCP (rmcp); tap formula + bottle CI (macOS arm64, Linux from WS-09) + Rust release automation replacing release-please's Python flow; final PyPI release pointing to brew, then Python package removal. Per the dependency policy: hand-write the simple parts, third-party for complex domains | Unassigned | Pending | WS-14 | Behavior parity vs the Python interfaces on the ported pytest scenarios; readability output similarity vs defuddle on a fixture corpus; `brew install shuuul/tap/aimd` from bottles works on macOS arm64 (and Linux once WS-09 lands) |
+| WS-16 | `aimd-core` (text shaping, precision, remote config, extension tables) + `aimd-process` (routing incl. pdf-inspector OCR probe, local Qwen3-ASR over aimd-engine with ffmpeg decode/segmenting/start-end/context/8-bit retry, Unlimited-OCR for images and `mutool`-rendered PDFs, OpenAI-compatible remote ASR/OCR, model alias/precision -> HF checkpoint resolution + download) + `aimd` CLI (hand-written arg parse, frozen flag surface from the Typer CLI) | agent-core | Done | WS-07, WS-11 | Hermetic core 31 / process 31 / cli 11 green on GPU and CPU device; Rust `aimd` output byte-identical to `uv run aimd` on a wav, a png, a scanned PDF (mutool) and a YouTube subtitle URL. Open: URL audio fallback only mocked; 6bit/0.6B/HF download not exercised (no cache) |
+| WS-17 | `aimd-doc`: Pandoc conversion, EPUB spine/cleanup/flat image extraction, text-layer PDF via pdf-inspector, txt/md passthrough | agent-doc | Done | None | `cargo test -p aimd-doc` 16 green; AIMD_E2E parity vs the Python converter identical (rich + minimal EPUB Markdown/chapters/images, rst, 15-case cleaner corpus). Open: xlsx not exercised on real Pandoc; Zip64/encrypted EPUB unsupported |
+| WS-18 | `aimd-url`: URL detection/platform, yt-dlp subtitles (raw/plain), metadata + ASR metadata context, Netscape/browser cookies with automatic probing, audio download handed to a transcriber trait, `dom_smoothie` readable HTML, `brew upgrade yt-dlp` hint on stale-extractor stderr | agent-url | Done | None | 35 unit + 35 pipeline + 2 golden-parity tests green; real YouTube Markdown identical to Python; dom_smoothie vs defuddle F1 0.88-0.999 on articles (0.32 on an index page) |
+| WS-19 | `aimd-api` (axum): `/healthz`, `/readyz`, `/v1/process`, `/v1/jobs` lifecycle + SSE, blobs, sidecar auth/loopback/`AIMD_ALLOWED_ROOTS` | agent-api | Done | WS-16 | `cargo test -p aimd-api` 49 green (all four test_api*.py suites ported); release `/v1/process` on page_text.png byte-identical to `uv run aimd-api`; jobs/SSE/shutdown smoke green |
+| WS-20 | `aimd-mcp` (rmcp stdio): `healthz`, `process_input` | agent-mcp | Done | WS-16 | `cargo test -p aimd-mcp` 11 green; tools/list schemas, healthz and the OCR result identical to `uv run aimd-mcp`; error text keeps the domain message (intentional deviation) |
+| WS-21 | Homebrew tap formula (`shuuul/homebrew-tap`, `depends_on` mlx/pandoc/yt-dlp/ffmpeg/mupdf) + bottle CI (macOS arm64; Linux after WS-09) + Rust release automation replacing release-please Python flow | agent-tap | In progress | WS-16, WS-17, WS-18, WS-19, WS-20 | `brew install shuuul/tap/aimd` from a bottle works on macOS arm64 | Full-Rust interface layer + Homebrew release: CLI (hand-written arg parse), doc pipeline (brew pandoc + hand-written zip/OPF + pdfium), URL pipeline (brew yt-dlp with stderr-signature hint to `brew upgrade yt-dlp` + `dom_smoothie` readability with defuddle fixture validation), HTTP API (axum, SSE, jobs), MCP (rmcp); tap formula + bottle CI (macOS arm64, Linux from WS-09) + Rust release automation replacing release-please's Python flow; final PyPI release pointing to brew, then Python package removal. Per the dependency policy: hand-write the simple parts, third-party for complex domains | Unassigned | Pending | WS-14 | Behavior parity vs the Python interfaces on the ported pytest scenarios; readability output similarity vs defuddle on a fixture corpus; `brew install shuuul/tap/aimd` from bottles works on macOS arm64 (and Linux once WS-09 lands) |
 | WS-12 | ANE feasibility spike: Core ML routes (stateful LLM on ANE, encoder-on-ANE), fp16/weight-size constraints, mlx-or-torch conversion source, Rust integration path, expected gains vs Metal on M2 Pro; go/no-go recommendation in `docs/ane-feasibility.md` | agent-ane + agent-ane-spike + shuuul | Done | None | Report reviewed; NO-GO recorded (commit 8fc1650): gates passed technically, ~4-5% end-to-end gain does not justify the artifact/maintenance cost |
 
 ## Verification
@@ -653,9 +630,212 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: gate -> commit; then WS-13.
 
-## Completion summary
+### 2026-10-25 — agent-core/WS-16 ready for review — WS-16
 
-(to complete before archiving)
+- Changed: `crates/aimd-core` gained `text` (exact port of title
+  extraction + header/paragraph chunking, `MAX_CHUNK_SIZE`), `precision`,
+  `remote` (`AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix), `ext`
+  (extension tables), `output` (persistence + help texts), `url`, `log`
+  (stderr logger + `log_*!` macros + thread-local `capture`), `pyfmt`.
+  Contract change: `ProcessInput.start/end` are now `Option<i64>` (negative
+  values reach the Python validation messages); `TaskType::parse` added.
+  `crates/aimd-process`: `process_input(&ProcessInput, &dyn ProcessHooks)`
+  over a `Runtime` seam (`NativeRuntime` = real system); routing identical
+  to `get_input_route`/`ensure_supported_input` with the pdf-inspector OCR
+  probe; doc dispatch calls `aimd_doc::convert_document`; URL dispatch is a
+  `Runtime::url_transcript` stub returning `BackendUnavailable` until WS-18
+  lands (`asr::transcribe_with_options` + `AsrOptions` is the transcriber
+  entry point for the URL audio fallback). Local Qwen3-ASR (ffmpeg decode to
+  16 kHz mono unless the wav already loads natively, >600 s segmenting,
+  context, language, lazy 4-bit -> 8-bit repetition retry), local
+  Unlimited-OCR for images and `mutool draw -r 144 -c rgb` PDFs, remote
+  OpenAI-compatible ASR/OCR (ureq + rustls), alias/precision -> mlx-community
+  id resolution, HF cache lookup + HTTPS snapshot download, one pipeline load
+  per model per process. `crates/aimd-cli`: binary `aimd`, hand-written
+  parser over the Typer flag surface, Python output-path/messages/exit codes.
+- Evidence: `cargo test -p aimd-core -p aimd-process -p aimd-cli` = 31 + 29 +
+  11 pass on the default device and with `AIMD_MLX_DEVICE=cpu`; fmt and
+  clippy `-D warnings` clean on the three crates. `AIMD_E2E=1 cargo test -p
+  aimd-process --test e2e` passes (OCR png + ASR wav). Parity:
+  `aimd clip.wav -o clip_rust.md --language en` vs `uv run aimd clip.wav -o
+  clip_py.md --language en` (`say` 16 kHz clip) and `aimd page_text.png` vs
+  `uv run aimd page_text.png` (`ocr_e2e/page_text.png`): `diff` empty for
+  both.
+- Deviations: GLM-OCR, Transformers model ids, and bf16 checkpoints return
+  `BackendUnavailable`; local inference on the MLX CPU device returns
+  `BackendUnavailable`; missing ffmpeg is `BackendUnavailable`; model
+  resolution fails fast before PDF rendering; OCR progress is reported per
+  page and cancellation is also checked between PDF pages; remote ASR never
+  retries with 8-bit; `.env` is read from the cwd only; plain-text help and
+  usage errors (no rich boxes, no completion flags).
+- Blockers: none. Open: wire WS-18 into `Runtime::url_transcript`; `mutool`
+  is not installed on this machine, so scanned-PDF E2E is unverified (mocked
+  hermetically); 6-bit and 0.6B checkpoints untested (none cached).
+
+### 2026-10-25 — agent-url/WS-18 complete — WS-18
+
+- Changed: `crates/aimd-url` ported from `aimd.plugins.url` (yt-dlp CLI, no
+  Python). API: `convert_url(&ProcessInput, &dyn AudioTranscriber, &dyn
+  ProcessHooks) -> Result<UrlOutput{markdown, title, platform}>` (tools from
+  `AIMD_YT_DLP`/`AIMD_READABLE_BACKEND`/`AIMD_NPX`/`AIMD_CURL`) and
+  `convert_url_with(.., &UrlConfig, ..)`; `trait AudioTranscriber {
+  transcribe(&Path, &TranscribeRequest, hooks) }` where `TranscribeRequest`
+  mirrors `aimd_process::asr::AsrOptions` plus the merged `context`;
+  `is_url`, `detect_platform`, `merge_asr_context`, `convert_readable_html`
+  + `readable_html_requested` (same opt-in trigger) over `dom_smoothie`
+  (`AIMD_READABLE_BACKEND=defuddle` escape hatch). Metadata via
+  `--dump-single-json` with the same cookie probe order; subtitles via
+  `--load-info-json` + `--write-(auto-)subs --sub-langs --sub-format` per
+  candidate language/format (Python selection logic, json3/srv1/srv3 -> SRT,
+  bilibili inline `data`); audio via the same format strategies; hand-written
+  Netscape cookie parser, TTML/srv XML parser, subtitle cleanup and Python
+  `str` semantics. Output gets MarkItDown's post-normalization (line
+  `rstrip`, `\n{3,}` -> `\n\n`). Golden exporter:
+  `scripts/export_url_subtitle_reference.py`.
+- Evidence: `cargo test -p aimd-url` = 35 unit + 2 golden parity (25
+  subtitle inputs incl. a real YouTube track in 6 formats; language
+  preference/detection, metadata context, `format_content`, cookie specs,
+  URL detection, linear transcript) + 35 hermetic pipeline tests (fake
+  `sh` yt-dlp, mock transcriber; ports of the `test_url.py` and
+  `test_asr_context.py` URL scenarios), ~1 s; also green with
+  `AIMD_MLX_DEVICE=cpu`. fmt + clippy `-D warnings` clean. `AIMD_E2E=1`:
+  `jNQXAC9IVRw` and `dQw4w9WgXcQ` Rust Markdown == `uv run aimd <url>`
+  (view count masked); one earlier `dQw4w9WgXcQ` run failed transiently
+  and passed on 3 reruns. Readable F1 (word multiset) dom_smoothie vs defuddle:
+  fixtures blog 0.978, docs 0.989, news 0.991; saved real pages:
+  paulgraham greatwork 0.999, docs.python.org re 0.950, Wikipedia Markdown
+  0.876, github.blog/engineering (index page) 0.321.
+- Deviations: explicit cookie options yt-dlp rejects fail fast as
+  `UnsupportedInput`; transient subtitle retries are yt-dlp's (`--retries 2
+  --retry-sleep http:linear=0.5:1.5:1`, socket timeout 40 s) instead of the
+  Python urlopen loop; the audio auth hint is raised only when every cookie
+  source failed; readable pages are fetched with `curl`.
+- Blockers: none. Next (WS-16): implement `AudioTranscriber` over
+  `asr::transcribe_with_options` and wire `Runtime::url_transcript` to
+  `aimd_url::convert_url`; route `readable_html` (no `TaskType` yet) to
+  `convert_readable_html`.
+
+### 2026-10-25 — agent-core/WS-16 URL wiring ready for review — WS-16
+
+- Changed: `aimd-process` depends on `aimd-url`. `UrlAudioTranscriber`
+  implements `aimd_url::AudioTranscriber` over `asr::transcribe_with_options`,
+  and `convert_url(rt, request, hooks)` wraps `aimd_url::convert_url`.
+  `NativeRuntime::url_transcript` calls it (the `Runtime` seam stays
+  mockable). `UrlOutput` is now the `aimd_url` re-export, and
+  `ProcessResult.platform` comes from `UrlOutput.platform`. Local
+  doc/OCR/ASR markdown now goes through `markitdown_normalize`, as
+  MarkItDown does for every converter; files a converter writes are left
+  as written. Readable HTML is not routed: Python core/CLI/API/MCP never
+  pass `task_type="readable_html"` or `defuddle=True`, so the converter
+  is unreachable there too. User decision: GLM-OCR removed. `glm-ocr`,
+  `GLM OCR`, `mlx-community/GLM-OCR-*` and `zai-org/GLM-OCR` now fail
+  through the unknown-model path (`Unsupported MLX VLM OCR model ...`,
+  ProcessingFailed); the error text no longer lists GLM.
+- Evidence: `cargo test -p aimd-core -p aimd-process -p aimd-cli` = 31 +
+  31 + 11 pass (default device and `AIMD_MLX_DEVICE=cpu`); fmt and clippy
+  `-D warnings` clean. Ported the URL precision forwarding test
+  (`test_use_case_url_passes_precision_to_url_processor`) plus adapter and
+  normalization tests. Release `aimd https://www.youtube.com/watch?v=jNQXAC9IVRw
+  -o yt_rust.md` vs `uv run aimd <same> -o yt_py.md`: byte-identical (712
+  bytes; the view-count line matched too).
+- Blockers: none.
+
+### 2026-10-26 — agent-mcp/WS-20 `aimd-mcp` ready for review — WS-20
+
+- Changed: `crates/aimd-mcp` (lib + `aimd-mcp` bin) on `rmcp` 3.7 (features
+  `server`, `transport-io`; no macros/schemars). Hand-written `ServerHandler`
+  with the Python tool schemas/description reproduced verbatim (tools/list is
+  byte-identical to FastMCP), manual pydantic-style argument validation,
+  `Runtime` injected (`AimdMcp::new(Arc<dyn Runtime>)`), processing on
+  `spawn_blocking`. Ported `test_mcp_server` scenarios (11 tests, mock runtime,
+  duplex JSON-RPC round trip). No changes outside `crates/aimd-mcp/`.
+- Verification: `cargo fmt/clippy -D warnings` clean, `cargo test -p aimd-mcp`
+  green; stdio smoke vs `uv run aimd-mcp` on `page_text.png`: tools/list and
+  OCR result identical. Known diffs: initialize capabilities (`tools: {}` vs
+  Python's listChanged/prompts/resources stubs); error text for domain errors
+  includes the message (Python's masks it); pydantic URL line omitted.
+- Blockers: none.
+
+### 2026-10-26 — agent-api/WS-19 `aimd-api` ready for review — WS-19
+
+- Changed: `crates/aimd-api` (lib + `aimd-api` bin) on axum 0.8 (`http1`,
+  `tokio`, `multipart`) + tokio + `http-body`. Routes `/healthz`, `/readyz`,
+  `POST /v1/process`, `POST /v1/blobs` (streamed to disk), `POST /v1/jobs`,
+  `GET`/`DELETE /v1/jobs/{id}`, `GET /v1/jobs/{id}/events` (hand-written SSE
+  framing, `Last-Event-ID` resume), `/openapi.json` (the FastAPI schema frozen
+  as `src/openapi.json`, version/help texts/`bearerAuth` patched at startup),
+  `/docs`, `/redoc`; FastAPI-shaped 404/405/401 bodies and pydantic-compatible
+  422 bodies (hand-written lax validation: `"3"`->3, `"yes"`->true, ...).
+  Hand-written UUIDs, pydantic UTC timestamps, constant-time bearer check,
+  `realpath`-style allow-root checks, blob store, loopback bind validation.
+  `Processor` seam (`RuntimeProcessor` over `Arc<dyn Runtime>`); processing
+  on `spawn_blocking` with a `ProcessHooks` impl backed by the job record
+  (progress stages mapped onto `JobStage`, `recognizing`->`ocr`). SIGINT/
+  SIGTERM: cooperative cancel, 5 s grace, then abort remaining runners
+  (`Job task cancelled`) and exit. Same env surface (`AIMD_HTTP_HOST`,
+  `AIMD_HTTP_PORT`, `AIMD_API_TOKEN`, `AIMD_ALLOWED_ROOTS`, `AIMD_BLOB_DIR`,
+  `AIMD_TEMP_DIR`); no CLI flags (as Python). No changes outside the crate.
+- Evidence: `cargo test -p aimd-api` = 49 hermetic tests (ports of
+  `test_api`, `test_api_jobs`, `test_api_blobs`, `test_api_sidecar`, plus a
+  bound-socket SSE + shutdown test and captured FastAPI error bodies), 5/5
+  stable reruns, <0.1 s; fmt + clippy `-D warnings` clean. Release smoke:
+  `/healthz` ok; `POST /v1/process` on `ocr_e2e/page_text.png` is
+  byte-identical to `uv run aimd-api`; job + SSE stream (queued, running/
+  extracting, ocr 1/1, completed) and graceful SIGTERM exit verified.
+- Deviations: OpenAPI keys are emitted sorted (same content);
+  `/docs/oauth2-redirect` not served; I/O error texts use Rust wording;
+  JSON-decode `ctx.error` messages are mapped approximately from serde_json;
+  ints beyond i64 are rejected (`int_parsing_size`); `Allow` on 405 also
+  lists `HEAD` for GET routes.
+- Blockers: none.
+
+### 2026-10-25 — agent-tap/WS-21 tap + release automation ready for review — WS-21
+
+- Changed: new tap working copy `/Users/shuuul/repo/homebrew-tap` (git
+  init, one local commit, no remote) in `brew tap-new` layout:
+  `Formula/aimd.rb` (source tarball of a release tag; `rust` build dep;
+  `depends_on :macos`, `arch: :arm64`, `mlx`, `ffmpeg`, `mupdf`, `pandoc`,
+  `yt-dlp`; `cargo install` per binary crate with `std_cargo_args`, a shared
+  `CARGO_TARGET_DIR`, `MLX_PREFIX=formula_opt_prefix("mlx")`, release
+  debuginfo off; hermetic `test do`: `--help`, `.md` passthrough, `.html`
+  via pandoc, api/mcp binaries present), `.github/workflows/tests.yml`
+  (brew test-bot, macos-26 arm64; Linux matrix entry commented out pending
+  WS-09), `publish.yml` (standard `brew pr-pull`), `dependabot.yml`,
+  README. The template's `autobump.yml` is dropped (aimd opens the bump
+  PRs). aimd side: `.github/workflows/rust-release.yml` (`push` on
+  `aimd-rs-v*` tags, `workflow_dispatch`, `workflow_call`): verifies the
+  tag against the workspace version via `cargo metadata --locked`, builds
+  the three binaries on macos-14 with brew mlx, runs the same hermetic
+  smoke as the formula test, hashes the GitHub source tarball, and opens
+  an `aimd <version>` PR on `shuuul/homebrew-tap` (secret
+  `HOMEBREW_TAP_TOKEN`). `release.yml`, `ci.yml` and the release-please
+  config are untouched, so Python keeps releasing.
+- Decisions taken (to confirm): Rust tags are `aimd-rs-vX.Y.Z` while
+  Python releases `vX.Y.Z`, because workspace 0.1.0 would collide with
+  existing Python tags (v0.5.0..v0.23.3). Release-please is not switched yet:
+  a root Python package and a root Cargo workspace cannot share the `.`
+  package path, and a version bump would leave `Cargo.lock` stale for
+  `--locked`. The proposal for WS-15 closeout is in the WS-21 report:
+  release-type `simple` with toml `extra-files` for
+  `$.workspace.package.version`, `release.yml` calling `rust-release.yml`
+  via `workflow_call`, and the AGENTS.md "centralized release.yml" rule
+  restored.
+- Evidence: `actionlint` clean on all aimd and tap workflows; `brew style`
+  and `brew audit --strict --formula` clean. Local proof against the
+  working tree (rsync snapshot without `target*`/`.git`/`.venv` -> tarball,
+  temp tap `ws21tmp/proof` with a `file://` url): the first attempt failed
+  while `aimd-api` was mid-edit (`can't find lib aimd_api`); the retry
+  passed. `brew install --build-from-source` took 2 m 16 s (59 MB, links
+  only `/opt/homebrew/opt/mlx/lib/libmlx.dylib` plus system libs), and
+  `brew test` passed. `--build-bottle` + `brew bottle` gave a relocatable
+  bottle (`cellar: :any`, arm64_golden_gate). Pouring that bottle through a
+  `file://` `root_url` and running `brew test` again passed. Afterwards aimd
+  was uninstalled and the temp taps untapped.
+- Blockers: none for the code. Acceptance (`brew install shuuul/tap/aimd`
+  from a published bottle) needs the coordinator to create and push
+  `shuuul/homebrew-tap`, add `HOMEBREW_TAP_TOKEN`, and cut the first
+  `aimd-rs-v*` tag. Linux bottles wait on WS-09 (tap mlx-cuda formula,
+  Linux `MLX_PREFIX` in build.rs, self-hosted CUDA runner).
 
 ### 2026-10-25 — shuuul/WS-15 split and kickoff — WS-15, WS-16, WS-17, WS-18
 
@@ -666,3 +846,29 @@ Append entries rather than rewriting another worker's record.
 - Next: WS-16/WS-17/WS-18 run in parallel (each owns its crate directory and
   its own `CARGO_TARGET_DIR`); WS-19/WS-20 start once the WS-16 process API
   is stable.
+
+### 2026-10-25 — agent-doc/WS-17 complete — WS-17
+
+- Changed: `crates/aimd-doc` ported from `aimd.plugins.doc`. API:
+  `convert_document(path, output_dir, temp_dir, &dyn ProcessHooks) ->
+  aimd_core::Result<DocOutput{markdown, title: Option<String>}>`,
+  `is_document_extension(ext)`, `DOCUMENT_EXTENSIONS`. Pandoc CLI for every
+  Python format plus `.pptx`/`.xlsx`; `.txt`/`.md` pass through; legacy
+  `.doc/.ppt/.xls` unsupported; `.pdf` goes through the `pdf-inspector` crate
+  (default options, same as the Python binding's `process_pdf`).
+  EPUB: hand-written zip (central directory, stored + `miniz_oxide`
+  inflate, CRC check), container -> OPF -> spine regex walk, per-chapter
+  Pandoc, all cleanup regexes (`regex` crate; the `_dedup_headings`
+  backreference is hand-written), flat image extraction, progress and
+  cancellation per chapter.
+- Evidence: `cargo test -p aimd-doc` 16 unit + 1 parity (parity skipped
+  unless `AIMD_E2E=1`); `AIMD_E2E=1` parity vs the Python converter passes
+  (identical Markdown/title/chapters/image bytes on a rich generated EPUB
+  and `tests/test_files/minimal.epub`, identical `.rst` conversion, 15-case
+  cleaner differential corpus). fmt + clippy `-D warnings` clean.
+- Blockers: none. Needs from WS-16: call `convert_document` only after the
+  scanned/encoding-issue OCR probe; `.pdf` is in `DOCUMENT_EXTENSIONS`.
+
+## Completion summary
+
+(to complete before archiving)

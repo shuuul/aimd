@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Why Small Models Still Matter | Example Engineering Blog</title>
+<meta name="author" content="Ada Example">
+<meta name="description" content="Notes on running compact speech and OCR models locally.">
+</head>
+<body>
+<header class="site-header">
+  <a href="/" class="logo">Example Engineering</a>
+  <nav><ul><li><a href="/">Home</a></li><li><a href="/archive">Archive</a></li><li><a href="/about">About</a></li><li><a href="/subscribe">Subscribe</a></li></ul></nav>
+</header>
+<div class="layout">
+<main>
+<article class="post">
+  <h1>Why Small Models Still Matter</h1>
+  <p class="byline">By <span class="author">Ada Example</span> on <time datetime="2026-09-14">September 14, 2026</time></p>
+  <p>Every few months a larger model arrives and the conversation shifts toward what it can do that the previous generation could not. That framing hides a quieter trend: compact models keep getting better at the narrow tasks that make up most real workloads, such as transcribing a meeting or reading a scanned invoice.</p>
+  <p>Running these models locally changes the economics. There is no per-request fee, no upload of sensitive audio to a third party, and latency is bounded by the machine on your desk rather than a queue in someone else's data center.</p>
+  <h2>Quantization is the lever</h2>
+  <p>Most of the gains come from quantization. Storing weights in four bits instead of sixteen cuts memory traffic by roughly a factor of four, and on unified-memory hardware memory bandwidth is usually the bottleneck for token generation.</p>
+  <ul>
+    <li>Four-bit weights fit a 1.7B speech model in under a gigabyte.</li>
+    <li>Eight-bit weights recover most of the accuracy lost at four bits.</li>
+    <li>Mixed precision keeps embeddings and the output head at higher precision.</li>
+  </ul>
+  <blockquote><p>The fastest request is the one that never leaves the laptop.</p></blockquote>
+  <h2>What still needs work</h2>
+  <p>Long-form audio remains tricky. Models trained on thirty-second clips drift on hour-long recordings, so practical pipelines segment the input, transcribe each piece, and stitch the results while guarding against repetition loops.</p>
+  <p>Document OCR has a different failure mode: tables and multi-column layouts. A model can read every word correctly and still produce an unusable result if it scrambles the reading order.</p>
+  <p>Read more in <a href="/posts/segmenting-audio">our post on segmenting audio</a>.</p>
+</article>
+<section class="comments"><h3>Comments</h3><p>Comments are closed.</p></section>
+</main>
+<aside class="sidebar">
+  <h3>Popular posts</h3>
+  <ul><li><a href="/p/1">Ten tips for faster builds</a></li><li><a href="/p/2">Our on-call rotation</a></li><li><a href="/p/3">Hiring: platform engineer</a></li></ul>
+  <div class="newsletter">Get the newsletter. <a href="/subscribe">Sign up</a></div>
+</aside>
+</div>
+<footer class="site-footer"><p>Copyright 2026 Example Engineering. All rights reserved.</p><p><a href="/privacy">Privacy</a> | <a href="/terms">Terms</a></p></footer>
+</body>
+</html>

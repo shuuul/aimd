@@ -25,6 +25,16 @@ pub enum TaskType {
 }
 
 impl TaskType {
+    /// Parse `transcript` / `convert` / `ocr` (exact, lowercase).
+    pub fn parse(value: &str) -> Option<TaskType> {
+        match value {
+            "transcript" => Some(TaskType::Transcript),
+            "convert" => Some(TaskType::Convert),
+            "ocr" => Some(TaskType::Ocr),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             TaskType::Transcript => "transcript",
@@ -59,10 +69,11 @@ pub struct ProcessInput {
     pub task_type: Option<TaskType>,
     pub model: Option<String>,
     pub language: Option<String>,
-    /// Start offset in seconds (audio/video).
-    pub start: Option<u64>,
-    /// End offset in seconds (audio/video).
-    pub end: Option<u64>,
+    /// 0-based inclusive start page for OCR PDF inputs (signed so negative
+    /// values reach the Python-compatible validation message).
+    pub start: Option<i64>,
+    /// 0-based inclusive end page for OCR PDF inputs.
+    pub end: Option<i64>,
     pub save_original: Option<PathBuf>,
     pub cookies: Option<PathBuf>,
     pub cookies_from_browser: Option<String>,

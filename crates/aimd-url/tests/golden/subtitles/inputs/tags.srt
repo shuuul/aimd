@@ -1,0 +1,15 @@
+1
+00:00:01,000 --> 00:00:02,500
+<i>Hello</i> <b>there</b>, <font color="#ffff00">friend</font>.
+
+2
+00:00:02,500 --> 00:00:04,000
+<v Bob>We meet again.</v> <u>Yes</u> <ruby>漢<rt>kan</rt></ruby> <c.yellow>tagged</c> <lang en>text</lang> <bx>kept</bx> <br> 3 < 4 > 2
+
+3
+00:00:04,000 --> 00:00:05,000
+42
+
+4
+0:00:05.00-->0:00:06.00
+１２３ fullwidth digits stay?

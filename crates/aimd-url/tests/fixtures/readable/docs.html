@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Configuring the cache - Toolkit Docs</title></head>
+<body>
+<div class="topbar"><a href="/">Toolkit</a> <input type="search" placeholder="Search docs"> <a href="/github">GitHub</a></div>
+<nav class="toc-sidebar">
+  <p>Guide</p>
+  <ul><li><a href="/install">Installation</a></li><li><a href="/quickstart">Quickstart</a></li><li class="active"><a href="/cache">Configuring the cache</a></li><li><a href="/cli">CLI reference</a></li><li><a href="/faq">FAQ</a></li></ul>
+</nav>
+<main class="content">
+  <article>
+    <h1>Configuring the cache</h1>
+    <p>The toolkit stores downloaded model weights in a shared cache directory so that repeated runs do not fetch the same files twice. This page explains where the cache lives, how to move it, and how to clean it up safely.</p>
+    <h2>Default location</h2>
+    <p>On macOS and Linux the cache defaults to <code>~/.cache/toolkit</code>. The directory is created on first use with permissions restricted to the current user.</p>
+    <h2>Moving the cache</h2>
+    <p>Set the <code>TOOLKIT_CACHE</code> environment variable before running any command:</p>
+    <pre><code>export TOOLKIT_CACHE=/Volumes/fast-ssd/toolkit-cache
+toolkit fetch speech-small --precision 4bit</code></pre>
+    <p>Existing files are not migrated automatically. Copy the old directory to the new location first if you want to keep previously downloaded weights.</p>
+    <h2>Cleaning up</h2>
+    <ol>
+      <li>List cached entries with <code>toolkit cache list</code>.</li>
+      <li>Remove a single model with <code>toolkit cache rm NAME</code>.</li>
+      <li>Remove everything older than thirty days with <code>toolkit cache prune --days 30</code>.</li>
+    </ol>
+    <table>
+      <thead><tr><th>Command</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td>cache list</td><td>Shows name, size and last use</td></tr>
+        <tr><td>cache rm</td><td>Deletes one entry</td></tr>
+        <tr><td>cache prune</td><td>Deletes stale entries</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Note: pruning never touches a model that is currently loaded by a running process.</p>
+  </article>
+  <div class="pager"><a href="/quickstart">Previous: Quickstart</a> <a href="/cli">Next: CLI reference</a></div>
+</main>
+<footer>Built with a static site generator. Edit this page on GitHub.</footer>
+</body>
+</html>

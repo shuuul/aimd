@@ -1,0 +1,207 @@
+name: rust-release
+
+# Rust/Homebrew release (specs/002-native-engine.md WS-21): build and
+# smoke-test the three binaries from a release tag, then open a formula bump
+# PR against shuuul/homebrew-tap. The tap's own brew test-bot CI builds the
+# bottles on that PR; its `brew pr-pull` workflow publishes them.
+#
+# Tags: while the Python package still releases through release.yml
+# (release-please, `vX.Y.Z` tags), Rust releases use `aimd-rs-vX.Y.Z` so the
+# two version lines cannot collide. After WS-15 closeout, release.yml calls
+# this workflow via `workflow_call` with the release-please tag (tags pushed
+# with GITHUB_TOKEN do not trigger `push: tags` workflows).
+#
+# The version source is `[workspace.package] version` in the root
+# Cargo.toml; the tag must match it (with the `aimd-rs-v` or `v` prefix).
+#
+# Secret: HOMEBREW_TAP_TOKEN — fine-grained PAT scoped to shuuul/homebrew-tap
+# with Contents: read/write and Pull requests: read/write. Without it the
+# build/smoke job still runs and the tap-pr job fails with a clear message.
+
+on:
+  push:
+    tags:
+      - "aimd-rs-v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing Rust release tag (e.g. aimd-rs-v0.1.0)"
+        required: true
+        type: string
+      open_tap_pr:
+        description: "Open the formula bump PR on shuuul/homebrew-tap"
+        required: false
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+      open_tap_pr:
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: false
+
+concurrency:
+  group: rust-release-${{ inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TAP_REPO: shuuul/homebrew-tap
+  FORMULA_PATH: Formula/aimd.rb
+
+jobs:
+  build:
+    name: Build + smoke (macOS arm64)
+    runs-on: macos-14
+    outputs:
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      version: ${{ steps.version.outputs.version }}
+      url: ${{ steps.source.outputs.url }}
+      sha256: ${{ steps.source.outputs.sha256 }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "false"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG_NAME }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag matches workspace version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TAG_NAME" in
+            aimd-rs-v*) tag_version="${TAG_NAME#aimd-rs-v}" ;;
+            v*) tag_version="${TAG_NAME#v}" ;;
+            *) echo "::error::Unsupported tag '$TAG_NAME' (want aimd-rs-vX.Y.Z or vX.Y.Z)"; exit 1 ;;
+          esac
+          # --locked also fails fast when Cargo.lock is stale after a bump.
+          version="$(cargo metadata --no-deps --locked --format-version 1 \
+            | jq -r '[.packages[] | select(.name == "aimd-cli")][0].version')"
+          if [ "$version" != "$tag_version" ]; then
+            echo "::error::Tag $TAG_NAME does not match workspace version $version"
+            exit 1
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install brew dependencies
+        run: brew install mlx pandoc mupdf ffmpeg
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: rust-release-macos14
+          save-if: false
+
+      - name: Build release binaries
+        run: |
+          MLX_PREFIX="$(brew --prefix mlx)"
+          export MLX_PREFIX
+          cargo build --release --locked -p aimd-cli -p aimd-api -p aimd-mcp
+
+      # Mirrors the formula's `test do` block: hermetic, no weights/network.
+      - name: Smoke test
+        shell: bash
+        env:
+          AIMD_MLX_DEVICE: cpu
+        run: |
+          set -euo pipefail
+          bin="$GITHUB_WORKSPACE/target/release"
+          work="$(mktemp -d)"
+          cd "$work"
+          "$bin/aimd" --help | grep -q "Usage: aimd"
+          printf '# Release Smoke\n\nhermetic passthrough\n' > note.md
+          "$bin/aimd" note.md -o note_out.md
+          grep -q "hermetic passthrough" note_out.md
+          printf '<html><body><h1>Brew</h1><p>pandoc <b>works</b></p></body></html>' > page.html
+          "$bin/aimd" page.html -o page_out.md
+          grep -qF "pandoc **works**" page_out.md
+          test -x "$bin/aimd-api"
+          test -x "$bin/aimd-mcp"
+
+      - name: Hash source tarball
+        id: source
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${REPO}/archive/refs/tags/${TAG_NAME}.tar.gz"
+          sha256="$(curl -fsSL --retry 3 "$url" | shasum -a 256 | cut -d' ' -f1)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "$url $sha256"
+
+  tap-pr:
+    name: Open formula bump PR
+    needs: build
+    if: ${{ inputs.open_tap_pr != false }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      SRC_URL: ${{ needs.build.outputs.url }}
+      SRC_SHA256: ${{ needs.build.outputs.sha256 }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Require tap token
+        shell: bash
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set; cannot open the ${TAP_REPO} PR"
+            exit 1
+          fi
+
+      - name: Check out tap
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Bump formula and open PR
+        working-directory: tap
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          sed -i -E \
+            -e "s|^  url \"[^\"]*\"|  url \"${SRC_URL}\"|" \
+            -e "s|^  sha256 \"[^\"]*\"|  sha256 \"${SRC_SHA256}\"|" \
+            "$FORMULA_PATH"
+          if git diff --quiet; then
+            echo "Formula already at ${VERSION}; nothing to do."
+            exit 0
+          fi
+          git diff
+          branch="bump-aimd-${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "aimd ${VERSION}"
+          git push --force origin "$branch"
+          if [ -n "$(gh pr list --repo "$TAP_REPO" --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "PR for $branch already open; branch updated."
+            exit 0
+          fi
+          gh pr create --repo "$TAP_REPO" --base main --head "$branch" \
+            --title "aimd ${VERSION}" \
+            --body "Bump aimd to ${VERSION} (${SRC_URL}). Opened by shuuul/aimd rust-release. Bottles are built by brew test-bot on this PR; publish them with the tap's \`brew pr-pull\` workflow."
