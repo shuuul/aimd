@@ -4,6 +4,11 @@ members = [
     "crates/aimd-weights",
     "crates/aimd-engine",
     "crates/aimd-mlx",
+    "crates/aimd-core",
+    "crates/aimd-doc",
+    "crates/aimd-url",
+    "crates/aimd-process",
+    "crates/aimd-cli",
 ]
 
 [workspace.package]
@@ -27,6 +32,11 @@ image = "0.25"
 
 aimd-weights = { path = "crates/aimd-weights" }
 aimd-mlx = { path = "crates/aimd-mlx" }
+aimd-engine = { path = "crates/aimd-engine" }
+aimd-core = { path = "crates/aimd-core" }
+aimd-doc = { path = "crates/aimd-doc" }
+aimd-url = { path = "crates/aimd-url" }
+aimd-process = { path = "crates/aimd-process" }
 
 [profile.release]
 debug = true

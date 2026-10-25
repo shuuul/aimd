@@ -1,0 +1,11 @@
+[package]
+name = "aimd-core"
+description = "Interface-independent request/result models, domain errors, cancellation/progress hooks, precision parsing, and Markdown title/chunk shaping"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

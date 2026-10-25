@@ -1,0 +1,12 @@
+[package]
+name = "aimd-process"
+description = "Input routing and orchestration: local ASR/OCR over aimd-engine, remote OpenAI-compatible backends, model resolution, doc and URL dispatch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aimd-core = { workspace = true }
+aimd-doc = { workspace = true }
+aimd-url = { workspace = true }
+aimd-engine = { workspace = true }

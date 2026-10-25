@@ -25,6 +25,16 @@
 
 Prepare LLM-ready context from URLs, audio/video, and documents.
 
+> [!NOTE]
+> **Migration in progress.** `aimd` is being rewritten in Rust on top of MLX
+> (Metal on macOS, CUDA on Linux) and will ship as a Homebrew formula
+> (`brew install shuuul/tap/aimd`) instead of a Python package. The native
+> ASR and OCR engines already live in [`crates/`](crates/); the CLI, HTTP API,
+> MCP server, URL and document pipelines are being ported next. Until that
+> lands, the Python package below is the supported install and receives fixes
+> only. A final PyPI release will point users to Homebrew. Progress is tracked
+> in [`specs/002-native-engine.md`](specs/002-native-engine.md).
+
 `aimd` gives you one command that auto-detects input type, extracts or transcribes the content, converts it to Markdown, and returns a chunked text context suitable for downstream AI workflows.
 
 ## Highlights

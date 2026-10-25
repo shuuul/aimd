@@ -32,6 +32,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "aimd-cli"
+version = "0.1.0"
+dependencies = [
+ "aimd-core",
+ "aimd-process",
+]
+
+[[package]]
+name = "aimd-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "aimd-doc"
+version = "0.1.0"
+dependencies = [
+ "aimd-core",
+]
+
+[[package]]
 name = "aimd-engine"
 version = "0.1.0"
 dependencies = [
@@ -55,6 +79,23 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "aimd-process"
+version = "0.1.0"
+dependencies = [
+ "aimd-core",
+ "aimd-doc",
+ "aimd-engine",
+ "aimd-url",
+]
+
+[[package]]
+name = "aimd-url"
+version = "0.1.0"
+dependencies = [
+ "aimd-core",
 ]
 
 [[package]]
