@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export MLX affine-quantization golden reference fixtures (WS-02).
 
-Deterministic exporter for `native/golden/quant/`. Every case stores:
+Deterministic exporter for `crates/aimd-weights/tests/golden/quant/`. Every case stores:
 
 - ``payload.bin``  raw packed-quant bytes (MLX stores them as little-endian
   ``uint32`` words; saved as the exact file bytes, i.e. little-endian).
@@ -37,7 +37,7 @@ import mlx.core as mx
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = REPO_ROOT / "native" / "golden" / "quant"
+OUT_DIR = REPO_ROOT / "crates" / "aimd-weights" / "tests" / "golden" / "quant"
 GROUP_SIZE = 64
 
 HF_SNAPSHOTS = {

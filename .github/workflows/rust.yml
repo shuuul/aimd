@@ -1,0 +1,101 @@
+name: rust
+
+# The Rust engine is MLX-only (specs/002-native-engine.md, "MLX-ONLY engine"):
+# `aimd-engine` links `aimd-mlx`, whose build.rs needs brew `mlx`, so it
+# builds on macOS only. There is deliberately no Linux job yet: the
+# mlx-free crate (aimd-weights) is already exercised by the macOS
+# `cargo test --workspace`, so a Linux runner would add cost, not signal.
+# WS-09 (mlx-cuda on Linux) adds the Linux job; see the TODO below.
+on:
+  push:
+    branches: [main, feat/reimplementation]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Line tables only: smaller artifacts and cache, same backtraces.
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  # Must match the version pinned in crates/aimd-mlx/build.rs docs.
+  MLX_BREW_VERSION: "0.32.4"
+
+jobs:
+  test:
+    name: cargo macos-14
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ runner.arch }}-mlx-${{ env.MLX_BREW_VERSION }}
+          restore-keys: |
+            brew-${{ runner.os }}-${{ runner.arch }}-mlx-
+
+      - name: Install mlx
+        run: |
+          brew install mlx
+          installed="$(brew list --versions mlx)"
+          echo "$installed"
+          case "$installed" in
+            *" ${MLX_BREW_VERSION}"*) ;;
+            *) echo "::warning::brew mlx is '$installed', expected ${MLX_BREW_VERSION}; bump MLX_BREW_VERSION (cache key)" ;;
+          esac
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: rust-macos14
+          cache-on-failure: true
+          # Only main / the integration branch write the cache; PRs restore.
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/reimplementation') }}
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      # clippy only emits metadata (no codegen), so it does not duplicate the
+      # test build; all three steps share one profile and target dir, and
+      # the cc-compiled aimd-mlx shim is built once and cached under target/.
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Hermetic tier only (TEST RULES): golden fixtures are committed, and
+      # checkpoint-backed tests skip without the HF cache; AIMD_E2E is unset.
+      # Hosted macOS runners are virtualized and may expose no usable Metal
+      # device: run the hermetic tier on MLX's CPU device (the shim also
+      # falls back to it automatically when no GPU is available).
+      - name: test
+        env:
+          AIMD_MLX_DEVICE: cpu
+        run: cargo test --workspace
+
+  # TODO(WS-09): add a Linux job once aimd-mlx supports the mlx CUDA backend
+  # (needs a CUDA-capable self-hosted runner such as metacube, or a
+  # CPU-only mlx build for compile + hermetic tests): install mlx/CUDA
+  # toolchain, set MLX_PREFIX, then run the same fmt/clippy/test sequence.

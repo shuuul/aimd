@@ -3,7 +3,7 @@
 
 Runs the mlx-vlm Unlimited-OCR DeepSeek-V2-lite LANGUAGE DECODER (checkpoint
 ``mlx-community/Unlimited-OCR-4bit``) on a deterministic synthetic input and
-writes into ``native/golden/ocr_decoder/``:
+writes into ``crates/aimd-engine/tests/golden/ocr_decoder/``:
 
 - ``logits.bf16``     decoder logits through the quantized ``lm_head`` as
                       raw little-endian bf16 bits, row-major
@@ -59,7 +59,7 @@ Reference chain (mirrors mlx_vlm ``generate_step`` for this model):
 Usage::
 
     uv run python scripts/export_ocr_decoder_reference.py \\
-        [--out native/golden/ocr_decoder] [--checkpoint DIR]
+        [--out crates/aimd-engine/tests/golden/ocr_decoder] [--checkpoint DIR]
 
 Deterministic: fixed seed, fixed prompt fixture, no wall-clock inputs.
 """
@@ -77,10 +77,12 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "native" / "golden" / "ocr_decoder"
+DEFAULT_OUT = REPO_ROOT / "crates" / "aimd-engine" / "tests" / "golden" / "ocr_decoder"
 TOKENIZER_CASE = (
     REPO_ROOT
-    / "native"
+    / "crates"
+    / "aimd-engine"
+    / "tests"
     / "golden"
     / "tokenizer"
     / "cases"
@@ -139,7 +141,7 @@ def sha256_file(path: Path) -> str:
 def load_vision_features(rows: int, hidden: int) -> tuple[np.ndarray | None, str, int]:
     """Real WS-07a vision golden features when present and geometry-matched.
 
-    Reads ``native/golden/ocr_vision/small_final_features.bf16u16`` (bf16 bit
+    Reads ``crates/aimd-engine/tests/golden/ocr_vision/small_final_features.bf16u16`` (bf16 bit
     patterns, u16 LE, row-major) — the projector output for the same gundam
     geometry as the tokenizer fixture (273x1280 for
     ``ocr_document_parsing``). Values that would not survive the Rust f16
@@ -149,7 +151,13 @@ def load_vision_features(rows: int, hidden: int) -> tuple[np.ndarray | None, str
     ``features is None`` means fall back to the synthetic draw.
     """
     path = (
-        REPO_ROOT / "native" / "golden" / "ocr_vision" / "small_final_features.bf16u16"
+        REPO_ROOT
+        / "crates"
+        / "aimd-engine"
+        / "tests"
+        / "golden"
+        / "ocr_vision"
+        / "small_final_features.bf16u16"
     )
     if not path.is_file():
         return None, "synthetic", 0
@@ -422,7 +430,7 @@ def main() -> None:
         "kind": "ocr_decoder",
         "checkpoint": "mlx-community/Unlimited-OCR-4bit",
         "checkpoint_snapshot": str(snapshot),
-        "prompt_source": "native/golden/tokenizer/cases/ocr_document_parsing.json",
+        "prompt_source": "crates/aimd-engine/tests/golden/tokenizer/cases/ocr_document_parsing.json",
         "image_features_source": features_source,
         "image_features_f16_snaps": feature_snaps,
         "image_seed": feature_seed,

@@ -48,7 +48,7 @@ Operational policy from these measurements:
 The native engine (spec 002) runs only on MLX through the `aimd-mlx` C-ABI
 shim (brew `mlx` 0.32.4). Numbers are from Apple M2 Pro (19-core GPU,
 32 GB), release builds of
-`native/crates/aimd-engine/examples/{bench_asr_mlx,bench_ocr}.rs`, rounds
+`crates/aimd-engine/examples/{bench_asr_mlx,bench_ocr}.rs`, rounds
 2-3 steady state, against the Python reference on the same machine.
 
 ### Qwen3-ASR-1.7B-4bit

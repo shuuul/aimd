@@ -1,6 +1,6 @@
 name: CI
 
-# Python CI. Native (Rust) changes are covered by native.yml, so they are
+# Python CI. Native (Rust) changes are covered by rust.yml, so they are
 # ignored here (and vice versa). Note: if either workflow becomes a required
 # status check, paths filtering leaves it "pending" on unrelated PRs; use a
 # path-aware aggregate job in that case.
@@ -9,12 +9,16 @@ on:
     branches:
       - main
     paths-ignore:
-      - "native/**"
-      - ".github/workflows/native.yml"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
   pull_request:
     paths-ignore:
-      - "native/**"
-      - ".github/workflows/native.yml"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

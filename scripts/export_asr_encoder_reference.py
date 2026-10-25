@@ -4,7 +4,7 @@
 Runs the real ``mlx_audio`` Qwen3-ASR audio tower
 (``mlx_audio.stt.models.qwen3_asr.qwen3_asr.AudioEncoder``, the porting
 source of truth) over deterministic synthetic mel inputs and writes, per
-case, into ``native/golden/asr_encoder/cases/<name>/``:
+case, into ``crates/aimd-engine/tests/golden/asr_encoder/cases/<name>/``:
 
 - ``mel.f32``                      the encoder input, little-endian float32,
                                    row-major ``[frames, 128]`` (time-major;
@@ -49,7 +49,7 @@ the float32 mel input), so stages are dumped as f32.
 Usage::
 
     uv run python scripts/export_asr_encoder_reference.py \
-        [--out native/golden/asr_encoder]
+        [--out crates/aimd-engine/tests/golden/asr_encoder]
 
 Deterministic: fixed recipes, no wall-clock; sha256s are byte-stable across
 regeneration runs.
@@ -66,7 +66,7 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "native" / "golden" / "asr_encoder"
+DEFAULT_OUT = REPO_ROOT / "crates" / "aimd-engine" / "tests" / "golden" / "asr_encoder"
 
 # Element-wise parity gate for the Rust port (abs OR rel), matching the
 # constants in encoder.rs tests. Tower weights are consumed bit-identically

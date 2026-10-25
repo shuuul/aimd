@@ -61,7 +61,7 @@ supporting exactly two models on CPU, Metal (M2 Pro), and CUDA (metacube).
 
 In scope:
 
-- Rust engine under `native/`: Cargo workspace with crates `aimd-tensor`,
+- Rust engine under `crates/`: Cargo workspace with crates `aimd-tensor`,
   `aimd-weights`, `aimd-engine` (later `aimd-native` PyO3 cdylib).
 - Hand-written CPU ops (NEON/AVX), Metal MSL kernels (tuned for M2 Pro),
   CUDA .cu kernels (+ CUTLASS shim) with cubin/PTX embedding.
@@ -74,7 +74,7 @@ In scope:
 - Python-side `native` backend in `capabilities.py`, made default; old
   backends demoted then removed.
 - Golden-reference exporters under `scripts/` (Python) plus small committed
-  fixtures under `native/golden/` for CI parity tests.
+  fixtures under each crate's `tests/golden/` for CI parity tests.
 
 Not in scope:
 
@@ -118,7 +118,7 @@ Not in scope:
 | 2026-10-25 | MLX-ONLY engine (user direction "只需要 MLX 版本，跟原来的 Python 版本对标"): supersedes the CPU-baseline, dual-wheel, and hand-written CUDA decisions; hand-written MSL (WS-08) stays as an active macOS optimization track, re-scoped to custom Metal kernels inside the MLX graph rather than a separate backend (user correction). The single compute backend is the `aimd-mlx` shim — Metal on macOS, `mlx` CUDA backend on Linux (metacube). All CPU compute paths (aimd-tensor ops, ASR CPU encoder/decoder, OCR CPU vision/decoder, CPU benches) are deleted; backend-agnostic pieces stay (weights loading, tokenizer, mel, gundam preprocessing, n-gram guard, markdown normalization, retry/parse logic). Correctness reference = the Python mlx-audio / mlx_vlm outputs (golden fixtures + E2E markdown/transcript identity), not a Rust CPU graph | Simplify the codebase; the CPU path was ~0.01x of MLX speed (OCR page 734 s vs 4.8 s) and only served as a parity baseline that the Python reference already provides | WS-03, WS-06, WS-07, WS-08, WS-09, WS-10, WS-11 |
 | 2026-10-25 | Pure Homebrew distribution (user decision): the repo stops being a Python package once WS-15 lands. `aimd` ships as a Homebrew formula in our own tap (`shuuul/homebrew-tap`, not homebrew-core yet) with CI-built bottles for macOS arm64 and Linux; runtime deps via `depends_on` (`yt-dlp`, `ffmpeg`, `pandoc`; mlx on macOS). Linux GPU: brew mlx is macOS-only-bottled and Homebrew has no CUDA toolchain, so the tap carries its own C++-only mlx formula built with the CUDA backend, bottled on metacube/dspark (to be proven in WS-09). WS-10 (PyO3/wheels/PyPI) is cancelled; until WS-15 completes the Python package stays as-is (no new features, no Python-version changes), then gets one final PyPI release pointing to brew. Model weights still download at runtime from HF into the cache; API/MCP servers can run under `brew services` | Removes PyO3, the wheel matrix, release-please's Python flow, and the hand-written tool downloader; brew already distributes every subprocess tool | WS-09, WS-10, WS-15 |
 | 2026-10-25 | Rust-style repo layout (user direction, replaces the queued `native/` -> `crates/` rename): the Cargo workspace root moves to the repo root (`Cargo.toml`/`Cargo.lock`), crates live in root `crates/` (`aimd-weights`, `aimd-mlx`, `aimd-engine`; WS-15 binaries join as `crates/aimd-cli` etc.), golden fixtures move from `native/golden/` into each owning crate's `tests/golden/` (located via `CARGO_MANIFEST_DIR`), `scripts/` exporters write there, `target/` at root is gitignored; the Python package (`src/aimd`, `pyproject.toml`, `tests/`) coexists until WS-15 removes it. Done with `git mv` in its own commit after the MLX-only cleanup lands | Standard Rust workspace shape for the brew-distributed binary; per-crate fixtures follow crate ownership | WS-13, WS-15 |
-| 2026-10-25 | MLX-only cleanup: `aimd-tensor` crate deleted; ANE spike artifacts (`golden/ane_spike`, `scripts/ane_spike`) deleted (report `docs/ane-spike-results.md` kept as history); `aimd_weights::dequantize_affine` kept as the test-only bit-exact oracle for `golden/quant`; `golden/asr_decoder/logits.f32` dropped (unread). MLX device = GPU unless `AIMD_MLX_DEVICE=cpu` or no GPU; hermetic CI runs on the CPU device and the checkpoint tier skips there; quantized-matmul parity tolerance loosened on the CPU device only | Hosted macOS runners may lack Metal; keep CI hermetic and inside the TEST RULES budget (CPU 4 s, Metal 12 s) | WS-02, WS-03, WS-12 |
+| 2026-10-25 | MLX-only cleanup: `aimd-tensor` crate deleted; ANE spike artifacts (`golden/ane_spike`, `scripts/ane_spike`) deleted (report `docs/ane-spike-results.md` kept as history); `aimd_weights::dequantize_affine` kept as the test-only bit-exact oracle for `golden/quant`; `golden/asr_decoder/logits.f32` dropped (unread). MLX device = GPU unless `AIMD_MLX_DEVICE=cpu` or no GPU; hermetic CI runs on the CPU device and the checkpoint tier skips there; MLX's CPU `quantized_matmul` with bf16 inputs loses precision as K grows (vs float64: 1-2% of max|out| at K=128, 6.5-17% at K=4096; f16/dense/f32 <= 0.2%; Metal bf16 < 0.8%; reproduced in Python mlx 0.32.2), so CPU-device parity tests promote bf16 cases to f32 inputs and keep the Metal tolerance; the CPU device must never run real bf16-scale checkpoints | Hosted macOS runners may lack Metal; keep CI hermetic and inside the TEST RULES budget (CPU 4 s, Metal 12 s) | WS-02, WS-03, WS-12 |
 
 ## Workstreams
 
@@ -126,13 +126,13 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | Native workspace scaffold: `native/` Cargo workspace, three crates with stub modules and documented API contracts, workspace deps pre-wired, `cargo test --workspace` green | shuuul | Done | None | `cd native && cargo test --workspace` |
+| WS-01 | Native workspace scaffold: root Cargo workspace (`crates/`), three crates with stub modules and documented API contracts, workspace deps pre-wired, `cargo test --workspace` green | shuuul | Done | None | `cargo test --workspace` |
 | WS-02 | `crates/aimd-weights`: safetensors mmap, MLX 4-bit affine (g=64) unpack + dequant, 8-bit path, `scripts/export_quant_reference.py` + committed golden fixtures | agent-weights | Done | WS-01 | `cargo test -p aimd-weights` golden parity (bit-exact f16 vs MLX exports) |
 | WS-03 | `crates/aimd-tensor`: dtype/shape/CPU tensor, rmsnorm, softmax, rope (theta, window semantics), swiglu, GQA attention (f32/f16) with naive-reference unit tests | agent-tensor | Done | WS-01 | `cargo test -p aimd-tensor` |
 | WS-04 | `crates/aimd-engine/src/tokenizer`: `tokenizers` wrapper loading both checkpoints' `tokenizer.json`, encode/decode roundtrips (CJK-heavy), ASR chat-template builders (language prefix, context system message), OCR `document parsing.` prompt builder | agent-tokenizer + shuuul | Done | WS-01 | `cargo test -p aimd-engine --lib tokenizer` incl. checkpoint roundtrips (skip w/o cache) |
 | WS-05 | `crates/aimd-engine/src/audio`: wav load (f32 mono 16k), 128-bin mel matching the Qwen3-ASR feature extractor, `scripts/export_mel_reference.py` + committed golden fixtures | agent-audio | Done | WS-01 | `cargo test -p aimd-engine --lib audio` golden parity (tolerance vs exported reference) |
 | WS-06 | ASR model graph + generation loop on CPU (windowed encoder n_window=50/infer=800, Qwen3 decoder, greedy, retry-on-loop) | agent-encoder + agent-decoder + shuuul | Done | WS-02, WS-03, WS-04, WS-05 | Commits 2cc53a9/8de3841: token-identical outputs vs MLX, golden argmax stream exact, E2E green. Open tail: labeled golden-corpus CER harness (two-clip identity is evidence, not the gate) |
-| WS-07 | OCR model graph + generation loop on the MLX backend (gundam preprocessing, SAM ViT-B + CLIP + projector, MoE decoder with ring sliding-window KV, n-gram guard, markdown normalization); CPU prototype retired per the MLX-only decision | agent-ocr-vision + agent-ocr-decoder + agent-ocr-integration + agent-ocr-mlx | Done | WS-11 | Vision + prefill bit-exact vs mlx_vlm goldens; E2E markdown identical (similarity 1.0, finish=stop, equal token counts) on both `native/golden/ocr_e2e` fixtures; latency at parity with mlx_vlm (0.83 s / 4.7 s vs 0.88 s / 4.6 s). Open tail: labeled multi-page OCR corpus gate |
+| WS-07 | OCR model graph + generation loop on the MLX backend (gundam preprocessing, SAM ViT-B + CLIP + projector, MoE decoder with ring sliding-window KV, n-gram guard, markdown normalization); CPU prototype retired per the MLX-only decision | agent-ocr-vision + agent-ocr-decoder + agent-ocr-integration + agent-ocr-mlx | Done | WS-11 | Vision + prefill bit-exact vs mlx_vlm goldens; E2E markdown identical (similarity 1.0, finish=stop, equal token counts) on both `crates/aimd-engine/tests/golden/ocr_e2e` fixtures; latency at parity with mlx_vlm (0.83 s / 4.7 s vs 0.88 s / 4.6 s). Open tail: labeled multi-page OCR corpus gate |
 | WS-08 | Hand-written Metal MSL kernels for macOS hot spots, plugged into the MLX graph (`mlx::core::fast::metal_kernel` custom kernels through the shim, e.g. fused MoE dispatch, fused attention/ring-KV update, quantized GEMV variants tuned for M2 Pro); chosen by profiling after WS-13/WS-14, kept only where they beat MLX's built-ins | Unassigned | Pending | WS-13 | Per-kernel A/B vs the MLX built-in with outputs unchanged; end-to-end decode gain recorded in docs/performance.md |
 | WS-09 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR E2E against the Python reference, Linux bottle build + self-hosted CI runner; hand-written .cu/CUTLASS cancelled | Unassigned | Pending | WS-07 | ASR/OCR E2E parity on metacube; `brew install` of the tap mlx formula + Linux bottle works; perf rows in docs/performance.md |
 | WS-10 | PyO3 binding / wheels / PyPI — CANCELLED by the pure Homebrew distribution decision (no work done) | shuuul | Done | None | Cancellation recorded in Decisions (2026-10-25 pure Homebrew) |
@@ -146,12 +146,12 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 - Spec lifecycle: `uv run python scripts/check_specs.py` and
   `uv run pytest -q tests/test_check_specs.py` after any spec change.
-- Workspace: `cd native && cargo test --workspace` and
+- Workspace: `cargo test --workspace` and
   `cargo clippy --workspace --all-targets` must stay green after every
   integration pass.
 - Operator parity: CI-visible tests comparing each op against MLX/NumPy
   reference tensors (golden set exported by `scripts/export_*_reference.py`
-  into `native/golden/`; atol per dtype; checkpoint-dependent tests skip when
+  into each owning crate's `tests/golden/`; atol per dtype; checkpoint-dependent tests skip when
   HF caches are absent).
 - Golden corpus: labeled ASR set (CER/WER) and OCR page set (text similarity,
   `finish=stop` rate) run against both the MLX backend and `aimd._native`;
@@ -169,7 +169,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
   (design), `docs/performance.md` (new baseline rows), `CHANGELOG.md`.
 - Nearest local `AGENTS.md`: replace MLX/Transformers backend sections with
   the native engine contract (models, precisions, devices, weight sources,
-  kernel boundaries) at retirement time; add `native/` layout and cargo
+  kernel boundaries) at retirement time; add `crates/` layout and cargo
   commands when WS-01 lands.
 - Parent/package guidance: `pyproject.toml` entry points and extras updated
   when `aimd._native` lands; remove `mlx-audio`/`mlx-vlm`/`transformers`

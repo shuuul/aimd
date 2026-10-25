@@ -2,7 +2,7 @@
 """Export golden tokenizer/chat-template fixtures for the native engine (WS-04).
 
 Runs the reference Hugging Face tokenization paths over deterministic inputs and
-writes one JSON case per template scenario into ``native/golden/tokenizer/``:
+writes one JSON case per template scenario into ``crates/aimd-engine/tests/golden/tokenizer/``:
 
 - ``cases/<name>.json``  per case: ``{"model", "case", "checkpoint",
   "prompt_text", "prompt_ids", ...}`` plus the parameters the Rust builders
@@ -66,7 +66,7 @@ self-check that the recorded ``prompt_text``/segment encoding round-trips to
 
 Usage::
 
-    uv run python scripts/export_tokenizer_reference.py [--out native/golden/tokenizer]
+    uv run python scripts/export_tokenizer_reference.py [--out crates/aimd-engine/tests/golden/tokenizer]
 
 Deterministic: fixed synthetic inputs, no wall-clock, no randomness.
 """
@@ -82,7 +82,7 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "native" / "golden" / "tokenizer"
+DEFAULT_OUT = REPO_ROOT / "crates" / "aimd-engine" / "tests" / "golden" / "tokenizer"
 
 ASR_CHECKPOINT = "Qwen/Qwen3-ASR-1.7B-hf"
 OCR_CHECKPOINT = "mlx-community/Unlimited-OCR-4bit"

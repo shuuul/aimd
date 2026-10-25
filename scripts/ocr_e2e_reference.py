@@ -1,6 +1,6 @@
 """Render OCR E2E fixtures and dump the mlx_vlm reference.
 
-Usage: uv run python scripts/ocr_e2e_reference.py native/golden/ocr_e2e [--no-generate]
+Usage: uv run python scripts/ocr_e2e_reference.py crates/aimd-engine/tests/golden/ocr_e2e [--no-generate]
 Writes <name>.png plus <name>.json (input_ids, image token positions,
 crop ratio, raw text, tokens, finish_reason, normalized markdown, timing).
 """

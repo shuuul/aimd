@@ -102,7 +102,7 @@ PyPI:
     └── aimd._native（同源代码 --features mlx 构建，链接 MLX C++，
         提供 Metal 后端；运行时加载 libmlx + mlx.metallib）
 
-native/crates/
+crates/
 ├── aimd-tensor/    dtype/shape/CPU tensor + 手写 CPU 算子
 ├── aimd-weights/   safetensors mmap + MLX 4/8-bit affine 解包/反量化
 ├── aimd-engine/    tokenizer、mel 前端、模型图、生成循环

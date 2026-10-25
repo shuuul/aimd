@@ -3,7 +3,7 @@
 
 Runs the Hugging Face ``Qwen3ASRFeatureExtractor`` (checkpoint
 ``Qwen/Qwen3-ASR-1.7B-hf``) over a set of deterministic synthetic signals and
-writes, per case, into ``native/golden/mel/cases/<name>/``:
+writes, per case, into ``crates/aimd-engine/tests/golden/mel/cases/<name>/``:
 
 - ``input.f32``     raw waveform, little-endian float32, one sample per word
 - ``output.f32``    reference log-mel, little-endian float32, row-major
@@ -46,7 +46,7 @@ meet (the Rust implementation follows the same f64-internal data flow).
 
 Usage::
 
-    uv run python scripts/export_mel_reference.py [--out native/golden/mel]
+    uv run python scripts/export_mel_reference.py [--out crates/aimd-engine/tests/golden/mel]
 
 Deterministic: fixed seeds, no wall-clock, no threading effects on values
 (torch CPU STFT is deterministic for a fixed build).
@@ -63,7 +63,7 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "native" / "golden" / "mel"
+DEFAULT_OUT = REPO_ROOT / "crates" / "aimd-engine" / "tests" / "golden" / "mel"
 
 MEL_CONFIG = {
     "sampling_rate": 16000,

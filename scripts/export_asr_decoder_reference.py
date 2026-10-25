@@ -3,7 +3,7 @@
 
 Runs the mlx-audio Qwen3-ASR TEXT DECODER (checkpoint
 ``mlx-community/Qwen3-ASR-1.7B-4bit``) on a deterministic synthetic input and
-writes into ``native/golden/asr_decoder/``:
+writes into ``crates/aimd-engine/tests/golden/asr_decoder/``:
 
 - ``features.f32``  synthetic audio-encoder output, little-endian float32,
                     row-major ``[n_audio, hidden=2048]``. Values are exact
@@ -34,7 +34,7 @@ Reference chain (mirrors mlx-audio ``Qwen3ASRModel`` exactly):
 Usage::
 
     uv run python scripts/export_asr_decoder_reference.py \\
-        [--out native/golden/asr_decoder] [--checkpoint DIR]
+        [--out crates/aimd-engine/tests/golden/asr_decoder] [--checkpoint DIR]
 
 Deterministic: fixed seed, fixed prompt fixture, no wall-clock inputs.
 """
@@ -51,10 +51,12 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "native" / "golden" / "asr_decoder"
+DEFAULT_OUT = REPO_ROOT / "crates" / "aimd-engine" / "tests" / "golden" / "asr_decoder"
 TOKENIZER_CASE = (
     REPO_ROOT
-    / "native"
+    / "crates"
+    / "aimd-engine"
+    / "tests"
     / "golden"
     / "tokenizer"
     / "cases"
@@ -208,7 +210,7 @@ def main() -> None:
         "kind": "asr_decoder",
         "checkpoint": "mlx-community/Qwen3-ASR-1.7B-4bit",
         "checkpoint_snapshot": str(snapshot),
-        "prompt_source": "native/golden/tokenizer/cases/asr_no_context_language_chinese.json",
+        "prompt_source": "crates/aimd-engine/tests/golden/tokenizer/cases/asr_no_context_language_chinese.json",
         "language": language,
         "context": context,
         "audio_seed": AUDIO_SEED,

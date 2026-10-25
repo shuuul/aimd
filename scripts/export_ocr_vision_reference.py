@@ -6,7 +6,7 @@ real mlx-vlm graph (`mlx_vlm.models.unlimited_ocr`), runs the vision path on
 deterministic synthetic images in gundam mode (1024 global view + 640 local
 crops), and dumps per-stage tensors as raw little-endian f32 (plus bf16-bit
 final features and u8 resized pixels) with a `manifest.json` into
-`native/golden/ocr_vision/`.
+`crates/aimd-engine/tests/golden/ocr_vision/`.
 
 Stages dumped per image (mirroring `Model.get_input_embeddings`):
 
@@ -40,7 +40,7 @@ from mlx_vlm.models.deepseekocr.processing_deepseekocr import dynamic_preprocess
 from mlx_vlm.models.deepseekocr.sam import get_abs_pos_sam, get_rel_pos
 
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "native" / "golden" / "ocr_vision"
+OUT = REPO / "crates" / "aimd-engine" / "tests" / "golden" / "ocr_vision"
 IMAGES_DIR = OUT / "images"
 
 CHECKPOINT = "mlx-community/Unlimited-OCR-4bit"
