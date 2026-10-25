@@ -1,0 +1,33 @@
+{
+  "name": "seeded_noise",
+  "samples": 24000,
+  "frames": 150,
+  "n_mels": 128,
+  "layout": "row_major_[n_mels,frames]_f32le",
+  "config": {
+    "sampling_rate": 16000,
+    "n_mels": 128,
+    "n_fft": 400,
+    "hop_length": 160,
+    "f_min": 0.0,
+    "f_max": 8000.0,
+    "mel_scale": "slaney",
+    "norm": "slaney",
+    "power": 2.0,
+    "center": true,
+    "pad_mode": "reflect",
+    "window": "hann",
+    "clamp_min": 1e-10,
+    "floor_offset": 8.0,
+    "norm_offset": 4.0,
+    "norm_scale": 4.0,
+    "drop_last_frame": true,
+    "dither": 0.0
+  },
+  "generator": {
+    "type": "gaussian_noise",
+    "seed": 1234,
+    "amplitude": 0.3
+  },
+  "fraction_below_clamp_floor": 0.0
+}

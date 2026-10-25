@@ -217,4 +217,8 @@ cookies.txt
 .claude/settings.local.json
 
 # examples
-examples/
+/examples/
+
+# Rust native engine build artifacts
+target*/
+.mimosa/

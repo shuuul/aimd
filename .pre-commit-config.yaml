@@ -2,8 +2,11 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Golden fixtures are binary/exact reference dumps: never rewrite them.
       - id: trailing-whitespace
+        exclude: (^|/)golden/
       - id: end-of-file-fixer
+        exclude: (^|/)golden/
       - id: check-yaml
       - id: check-added-large-files
       - id: check-merge-conflict
@@ -14,3 +17,12 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all --
+        language: system
+        types: [rust]
+        pass_filenames: false

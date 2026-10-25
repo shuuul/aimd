@@ -1,0 +1,19 @@
+[package]
+name = "aimd-mlx"
+description = "C-ABI shim over the MLX C++ core (Metal compute backend, MLX CPU-device fallback)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+half = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+cc = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+aimd-weights = { workspace = true }

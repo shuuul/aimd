@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "generator": "scripts/export_tokenizer_reference.py",
+  "checkpoints": {
+    "asr": "Qwen/Qwen3-ASR-1.7B-hf",
+    "ocr": "mlx-community/Unlimited-OCR-4bit"
+  },
+  "generated_with": {
+    "transformers": "5.17.0",
+    "mlx_vlm": "0.7.0",
+    "numpy": "2.5.3"
+  },
+  "language_map": {
+    "zh": "Chinese",
+    "en": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "de": "German",
+    "es": "Spanish",
+    "fr": "French",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "ar": "Arabic",
+    "hi": "Hindi",
+    "th": "Thai",
+    "vi": "Vietnamese",
+    "id": "Indonesian",
+    "tr": "Turkish",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "sv": "Swedish",
+    "da": "Danish",
+    "fi": "Finnish",
+    "ms": "Malay",
+    "yue": "Cantonese",
+    "cs": "Czech",
+    "fil": "Filipino",
+    "fa": "Persian",
+    "el": "Greek",
+    "hu": "Hungarian",
+    "mk": "Macedonian",
+    "ro": "Romanian"
+  },
+  "special_tokens": {
+    "asr": {
+      "eos_token": "<|im_end|>",
+      "eos_token_id": 151645,
+      "pad_token": "<|endoftext|>",
+      "pad_token_id": 151643,
+      "im_start_id": 151644,
+      "im_end_id": 151645,
+      "audio_start_id": 151669,
+      "audio_pad_id": 151676,
+      "audio_end_id": 151670,
+      "asr_text_id": 151704
+    },
+    "ocr": {
+      "bos_token": "<｜begin▁of▁sentence｜>",
+      "bos_id": 0,
+      "eos_token": "<｜end▁of▁sentence｜>",
+      "eos_id": 1,
+      "pad_id": 2,
+      "image_token": "<image>",
+      "image_token_id": 128815
+    }
+  },
+  "template_evidence": {
+    "asr": "chat_template.jinja of Qwen/Qwen3-ASR-1.7B-hf; system turn always emitted; user turn holds <|audio_start|><|audio_pad|>*n<|audio_end|>; assistant continuation is 'language {Name}<asr_text>' with continue_final_message=True (apply_transcription_request) or add_generation_prompt=True without a language; context goes into the system turn",
+    "ocr": "mlx_vlm.models.unlimited_ocr.processing_unlimitedocr.UnlimitedOCRProcessor: template concatenates message contents (no trailing space for a single user turn), then tokenize_with_images encodes text segments with add_special_tokens=False and inserts a contiguous run of <image> ids (128815) after bos id 0"
+  },
+  "cases": [
+    {
+      "name": "asr_no_context_no_language",
+      "model": "asr",
+      "file": "cases/asr_no_context_no_language.json",
+      "prompt_ids_len": 35,
+      "audio_pad_count": 20,
+      "sha256": "d00ba52fda58b00eb92f288ffaa4e870ee58bec40b015b3912afc93ae3dec854"
+    },
+    {
+      "name": "asr_no_context_language_chinese",
+      "model": "asr",
+      "file": "cases/asr_no_context_language_chinese.json",
+      "prompt_ids_len": 38,
+      "audio_pad_count": 20,
+      "sha256": "685cc973cec493b38c839a126b4549d0f2428646d6e48c0c64a8984e29aaf12b"
+    },
+    {
+      "name": "asr_context_only",
+      "model": "asr",
+      "file": "cases/asr_context_only.json",
+      "prompt_ids_len": 52,
+      "audio_pad_count": 23,
+      "sha256": "e29b89d76ccff57b093ccac07493d42830daf204f2534c11d195f7b2708a7895"
+    },
+    {
+      "name": "asr_context_language_chinese",
+      "model": "asr",
+      "file": "cases/asr_context_language_chinese.json",
+      "prompt_ids_len": 55,
+      "audio_pad_count": 23,
+      "sha256": "2c2830d07f9826973e6a07894a198b74af00551824e12f489d195dbead8763cc"
+    },
+    {
+      "name": "asr_cjk_context_only",
+      "model": "asr",
+      "file": "cases/asr_cjk_context_only.json",
+      "prompt_ids_len": 51,
+      "audio_pad_count": 8,
+      "sha256": "e256fe494ee941d155b73986d42151cd163223e71352578c1da7fd4c7126aee2"
+    },
+    {
+      "name": "asr_cjk_context_language_japanese",
+      "model": "asr",
+      "file": "cases/asr_cjk_context_language_japanese.json",
+      "prompt_ids_len": 98,
+      "audio_pad_count": 52,
+      "sha256": "523facc428ec7255b399ea2af61fdd977bde491ca5c93f75c3b7ee4bd5c4ccdb"
+    },
+    {
+      "name": "ocr_document_parsing",
+      "model": "ocr",
+      "file": "cases/ocr_document_parsing.json",
+      "prompt_ids_len": 277,
+      "image_pad_count": 273,
+      "sha256": "37151b1698ab42383feea252b259cec9f8ce56f2f908717476f7c4dcd3708832"
+    },
+    {
+      "name": "ocr_cjk_document_parsing",
+      "model": "ocr",
+      "file": "cases/ocr_cjk_document_parsing.json",
+      "prompt_ids_len": 285,
+      "image_pad_count": 273,
+      "sha256": "408c53b4b53c2e20c0bdd65f2fcd1e18619327feb1fce44e81594d88e82bcd59"
+    },
+    {
+      "name": "ocr_document_parsing_multicrop",
+      "model": "ocr",
+      "file": "cases/ocr_document_parsing_multicrop.json",
+      "prompt_ids_len": 1507,
+      "image_pad_count": 1503,
+      "sha256": "d4a97f4e904186da6072b6decf961a6542dc7728787f31a41d874b35c1176c1a"
+    }
+  ]
+}

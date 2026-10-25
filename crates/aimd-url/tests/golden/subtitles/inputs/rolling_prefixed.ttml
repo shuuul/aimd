@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<tt:tt xml:lang="en" xmlns:tt="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+<tt:head><tt:styling/></tt:head>
+<tt:body><tt:div>
+<tt:p begin="00:00:00.080" end="00:00:02.480">you've discovered something<br/>about the brain</tt:p>
+<tt:p begin="00:00:01.280" end="00:00:03.680"><tt:span tts:color="white">about the brain<br/>I think is</tt:span></tt:p>
+<tt:p begin="00:00:02.480" end="00:00:04.880">I think is<br/>quite surprising. >></tt:p>
+<tt:p begin="00:00:03.680" end="00:00:06.080"><tt:span tts:color="white">quite surprising. >><br/>So we found</tt:span></tt:p>
+<tt:p begin="00:00:04.880" end="00:00:07.280">So we found<br/>that in fathers</tt:p>
+<tt:p begin="00:00:06.080" end="00:00:08.480"><tt:span tts:color="white">that in fathers<br/>the brain is</tt:span></tt:p>
+<tt:p begin="00:00:07.280" end="00:00:09.680">the brain is<br/>actually shrinking. Dr.</tt:p>
+<tt:p begin="00:00:08.480" end="00:00:10.880"><tt:span tts:color="white">actually shrinking. Dr.<br/>Darby found that</tt:span></tt:p>
+<tt:p begin="00:00:09.680" end="00:00:12.080">Darby found that<br/>in the U.S.</tt:p>
+<tt:p begin="00:00:10.880" end="00:00:13.280"><tt:span tts:color="white">in the U.S.<br/>and the U.K.,</tt:span></tt:p>
+<tt:p begin="00:00:12.080" end="00:00:14.480">and the U.K.,<br/>e.g. in Boston.</tt:p>
+<tt:p begin="00:00:13.280" end="00:00:15.680"><tt:span tts:color="white">e.g. in Boston.<br/>>> Yeah, go</tt:span></tt:p>
+<tt:p begin="00:00:14.480" end="00:00:16.880">>> Yeah, go<br/>for it. "Really?"</tt:p>
+<tt:p begin="00:00:15.680" end="00:00:18.080"><tt:span tts:color="white">for it. "Really?"<br/>she asked. (It</tt:span></tt:p>
+<tt:p begin="00:00:16.880" end="00:00:19.280">she asked. (It<br/>was.) Mr. Smith</tt:p>
+<tt:p begin="00:00:18.080" end="00:00:20.480"><tt:span tts:color="white">was.) Mr. Smith<br/>said "No!" then</tt:span></tt:p>
+<tt:p begin="00:00:19.280" end="00:00:21.680">said "No!" then<br/>left... Version 2.0</tt:p>
+<tt:p begin="00:00:20.480" end="00:00:22.880"><tt:span tts:color="white">left... Version 2.0<br/>shipped in Jan.</tt:span></tt:p>
+<tt:p begin="00:00:21.680" end="00:00:24.080">shipped in Jan.<br/>2024 vs. the</tt:p>
+<tt:p begin="00:00:22.880" end="00:00:25.280"><tt:span tts:color="white">2024 vs. the<br/>old one. A.</tt:span></tt:p>
+<tt:p begin="00:00:24.080" end="00:00:26.480">old one. A.<br/>B. Carter agreed.</tt:p>
+</tt:div></tt:body>
+</tt:tt>

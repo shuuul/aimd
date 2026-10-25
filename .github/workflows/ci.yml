@@ -1,75 +1,144 @@
 name: CI
 
+# The Rust engine is MLX-only (specs/002-native-engine.md, "MLX-ONLY engine"):
+# `aimd-engine` links `aimd-mlx`, whose build.rs needs brew `mlx`, so it
+# builds on macOS only. There is deliberately no Linux job yet: the
+# mlx-free crate (aimd-weights) is already exercised by the macOS
+# `cargo test --workspace`, so a Linux runner would add cost, not signal.
+# WS-09 (mlx-cuda on Linux) adds the Linux job; see the TODO below.
+#
+# Cost notes (macOS minutes bill at 10x): PR branches run only via
+# `pull_request` (no duplicate `push` run), drafts skip the macOS job,
+# superseded runs are cancelled, and cheap checks (specs, fmt, ruff) run on
+# ubuntu so they fail before a macOS runner starts.
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths-ignore: &ignored
+      - "**/*.md"
+      - "docs/**"
+      - "assets/**"
+      - ".agents/**"
+      - "LICENSE"
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: *ignored
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Line tables only: smaller artifacts and cache, same backtraces.
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  # Must match the version pinned in crates/aimd-mlx/build.rs docs.
+  MLX_BREW_VERSION: "0.32.4"
+
 jobs:
   lint:
+    name: specs + fmt + scripts lint
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version-file: ".python-version"
+          components: rustfmt
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
+      # rustfmt needs no build (and no mlx), so it runs here, not on macOS.
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      # xtask has no mlx dependency, so it builds on Linux.
+      - name: Check tracked specs
+        run: cargo xtask check-specs
+
+      # Reference exporters under scripts/ are standalone PEP 723 uv scripts.
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
-          enable-cache: true
+          enable-cache: false
 
-      - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
-
-      - name: Ruff lint
-        run: uv run ruff check .
-
-      - name: Ruff format check
-        run: uv run ruff format --check .
+      - name: Ruff (scripts/)
+        run: |
+          uvx ruff@0.16.3 check scripts
+          uvx ruff@0.16.3 format --check scripts
 
   test:
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
-    env:
-      UV_PYTHON: ${{ matrix.python-version }}
-
+    name: cargo macos-27
+    needs: lint
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    # macOS 27 (`xcode-27` image): brew ships the current mlx bottle only for
+    # the newest macOS (arm64_golden_gate); older images build mlx from
+    # source (~30+ min). Bump with brew's bottle tags, not on a schedule.
+    runs-on: xcode-27
+    timeout-minutes: 40
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ runner.arch }}-mlx-${{ env.MLX_BREW_VERSION }}
+          restore-keys: |
+            brew-${{ runner.os }}-${{ runner.arch }}-mlx-
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
+      - name: Install mlx
+        run: |
+          brew install mlx
+          # The runner image's formula index can lag behind (auto-update is
+          # off), so refresh it once when the poured mlx is not the pinned one.
+          if [ "$(brew list --versions mlx)" != "mlx ${MLX_BREW_VERSION}" ]; then
+            brew update
+            brew upgrade mlx
+          fi
+          installed="$(brew list --versions mlx)"
+          echo "$installed"
+          if [ "$installed" != "mlx ${MLX_BREW_VERSION}" ]; then
+            echo "::error::brew mlx is '$installed', expected ${MLX_BREW_VERSION}; bump MLX_BREW_VERSION (cache key) and the shim"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          enable-cache: true
+          components: clippy
 
-      - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: rust-macos27
+          cache-on-failure: true
+          # main writes the cache every PR can restore; a PR also saves its
+          # own (PR-scoped) cache so follow-up pushes skip the cold build.
+          save-if: ${{ github.event_name != 'workflow_dispatch' }}
 
-      - name: Check tracked specs
-        run: uv run python scripts/check_specs.py
+      # clippy only emits metadata (no codegen), so it does not duplicate the
+      # test build; all three steps share one profile and target dir, and
+      # the cc-compiled aimd-mlx shim is built once and cached under target/.
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Run tests
-        run: uv run pytest -q
+      # Hermetic tier only (TEST RULES): golden fixtures are committed, and
+      # checkpoint-backed tests skip without the HF cache; AIMD_E2E is unset.
+      # Hosted macOS runners are virtualized and may expose no usable Metal
+      # device: run the hermetic tier on MLX's CPU device (the shim also
+      # falls back to it automatically when no GPU is available).
+      - name: test
+        env:
+          AIMD_MLX_DEVICE: cpu
+        run: cargo test --workspace
+
+  # TODO(WS-09): add a Linux job once aimd-mlx supports the mlx CUDA backend
+  # (needs a CUDA-capable self-hosted runner such as metacube, or a
+  # CPU-only mlx build for compile + hermetic tests): install mlx/CUDA
+  # toolchain, set MLX_PREFIX, then run the same fmt/clippy/test sequence.

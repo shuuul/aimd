@@ -1,0 +1,15 @@
+[package]
+name = "aimd-doc"
+description = "Document conversion: Pandoc-supported formats, EPUB spine walk with cleanup and image extraction, text-layer PDFs via pdf-inspector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aimd-core = { workspace = true }
+miniz_oxide = "0.9"
+pdf-inspector = "1.25"
+regex = "1"
+
+[dev-dependencies]
+serde_json = { workspace = true }

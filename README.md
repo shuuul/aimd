@@ -1,17 +1,8 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/shuuul/aimd/main/assets/aimd-banner-sm.png" alt="aimd">
 
-  <a href="https://www.python.org/">
-    <img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white" alt="Python 3.11, 3.12, 3.13">
-  </a>
-  <a href="https://docs.astral.sh/uv/">
-    <img src="https://img.shields.io/badge/uv-package-654FF0?logo=uv&logoColor=white" alt="uv package">
-  </a>
   <a href="https://github.com/shuuul/aimd/actions/workflows/ci.yml">
     <img src="https://github.com/shuuul/aimd/actions/workflows/ci.yml/badge.svg" alt="CI">
-  </a>
-  <a href="https://github.com/shuuul/aimd/actions/workflows/release.yml">
-    <img src="https://github.com/shuuul/aimd/actions/workflows/release.yml/badge.svg" alt="Release">
   </a>
   <a href="https://github.com/shuuul/aimd/releases">
     <img src="https://img.shields.io/github/v/release/shuuul/aimd" alt="Latest release">
@@ -21,95 +12,58 @@
   </a>
 </div>
 
-> [!IMPORTANT]
-> **aimd has moved to a native Rust build distributed through Homebrew.**
-> This is the last release of the `aimd-tool` Python package; it will not
-> receive further updates. Install the new version with:
->
-> ```bash
-> brew install shuuul/tap/aimd
-> ```
->
-> The `aimd`, `aimd-api`, and `aimd-mcp` commands keep the same flags and
-> wire format. GLM-OCR and the Linux Transformers/CUDA backends are not
-> carried over (see the GitHub releases for details).
-
 # aimd
 
 Prepare LLM-ready context from URLs, audio/video, and documents.
 
-`aimd` gives you one command that auto-detects input type, extracts or transcribes the content, converts it to Markdown, and returns a chunked text context suitable for downstream AI workflows.
+`aimd` takes one input, works out what kind it is, extracts or transcribes the
+content, and writes Markdown. Results also carry a chunked text context for
+downstream AI workflows. It is a native Rust tool: ASR and OCR run locally on
+Apple Silicon through MLX (Metal), with no Python runtime.
 
 ## Highlights
 
-- **One input command** for URLs, audio/video files, EPUB documents, PDFs, scanned PDFs/images, Markdown, text, and other MarkItDown-supported documents.
-- **URL extraction** through bundled `aimd.plugins.url`: yt-dlp transcript URLs such as podcasts, YouTube, and Bilibili, plus opt-in readable HTML extraction through Defuddle.
-- **ASR transcription** through bundled `aimd.plugins.asr`: local audio/video transcription with `mlx-audio` by default on Apple Silicon, Qwen3-ASR through native Transformers on CUDA, or an opt-in OpenAI-compatible remote endpoint.
-- **Subtitle-first fallback**: download subtitles when available; otherwise download audio and transcribe with `mlx-audio` or Qwen3-ASR through Transformers.
-- **Document conversion** through MarkItDown, with dedicated EPUB chapter/image extraction in the bundled `aimd.plugins.doc` plugin.
-- **OCR task** for scanned PDFs and images, with `mlx-vlm` on macOS/Apple Silicon, CUDA VLM OCR models through Transformers on Linux, or an opt-in remote Unlimited-OCR endpoint.
-- **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP server (`aimd-mcp`).
+- **One command** for URLs, audio/video files, EPUB and other Pandoc
+  documents, text-layer PDFs, scanned PDFs and images, Markdown, and text.
+- **URL transcripts** through yt-dlp (YouTube, Bilibili, podcasts, and other
+  yt-dlp sites). Subtitles are used first; without them, aimd downloads the
+  audio and transcribes it locally.
+- **Local ASR** with Qwen3-ASR (1.7B or 0.6B) on MLX.
+- **Local OCR** with Unlimited-OCR on MLX, for images and scanned PDFs.
+- **Document conversion** through Pandoc. EPUB keeps spine order and extracts
+  chapters and images. Text-layer PDFs are converted by
+  [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
+- **Remote backends**: optional OpenAI-compatible ASR/OCR servers.
+- **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP stdio
+  server (`aimd-mcp`).
 
 ## Install
 
-Install the CLI after release:
-
 ```bash
-uv tool install aimd-tool
+brew install shuuul/tap/aimd
 aimd --help
 ```
 
-Install from GitHub `main` before a release:
+The formula lives in [shuuul/homebrew-tap](https://github.com/shuuul/homebrew-tap).
+Bottles are built for macOS on Apple Silicon (arm64). Linux support depends on
+an MLX build with the CUDA backend and is still in progress.
 
-```bash
-uv tool install --force \
-  "aimd-tool @ git+https://github.com/shuuul/aimd.git@main"
-```
+Homebrew also installs the runtime tools aimd uses: `mlx`, `ffmpeg`, `mupdf`
+(`mutool`, for rendering scanned PDF pages), `pandoc`, and `yt-dlp`. Sites
+change often, so keep yt-dlp current with `brew upgrade yt-dlp`. aimd suggests
+this when yt-dlp's error output looks like an outdated extractor.
 
-Install the full tool set from GitHub, including the API and MCP runtime dependencies:
-
-```bash
-uv tool install --force \
-  "aimd-tool[all] @ git+https://github.com/shuuul/aimd.git@main"
-```
-
-Install API/MCP dependencies from PyPI when needed:
-
-```bash
-# HTTP API + MCP server
-uv tool install "aimd-tool[all]"
-
-# Or install into an existing Python environment
-uv pip install "aimd-tool[all]"
-```
-
-The public PyPI release is intentionally a single distribution (`aimd-tool`). The installed command remains `aimd`.
-
-From a source checkout, use the project directly:
-
-```bash
-git clone https://github.com/shuuul/aimd.git
-cd aimd
-uv sync --dev
-uv run aimd --help
-```
-
-Platform notes:
-
-- macOS transcription is optimized for Apple Silicon through `mlx-audio`; this remains the default backend.
-- macOS OCR uses `mlx-vlm` on Python 3.12+ and downloads OCR model weights on first use.
-- Linux transcription uses Qwen3-ASR through the Transformers backend and requires a CUDA-capable GPU.
-- Explicit `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) transcription model IDs use native Transformers Qwen3-ASR (`transformers>=5.14.1`); on macOS this is an opt-in MPS path, not the default.
-- Linux OCR uses the Transformers backend with CUDA. macOS MLX OCR defaults to the 4-bit Unlimited-OCR checkpoint.
-- Setting `AIMD_ASR_BASE_URL` or `AIMD_OCR_BASE_URL` uses an OpenAI-compatible remote service and skips local MLX/CUDA model loading for that modality.
-- Local file conversion is powered by MarkItDown. Pandoc-backed document conversion is handled by the bundled `aimd.plugins.doc` MarkItDown plugin; EPUB uses a custom ZIP/spine pipeline for stable chapter ordering and image extraction, while other Pandoc-supported formats go through the Pandoc CLI directly.
+Model weights are not bundled. The first local ASR or OCR run downloads the
+selected checkpoint from Hugging Face into the standard HF cache
+(`HF_HUB_CACHE`, else `HF_HOME/hub`, else `~/.cache/huggingface/hub`).
+Checkpoints already in that cache are reused.
 
 ## Quick start
 
 ```bash
-# Auto-detect input type
+# Input type is detected automatically
 aimd audio.mp3
-aimd "https://youtube.com/watch?v=..."
+aimd "https://www.youtube.com/watch?v=..."
 aimd document.epub
 aimd notes.txt
 aimd scan.pdf
@@ -117,67 +71,61 @@ aimd page.png
 
 # Common options
 aimd audio.mp3 --output transcript.md
-aimd audio.wav --language zh
+aimd audio.wav --language en
 aimd scan.pdf --task ocr --start 0 --end 2
-aimd "https://youtube.com/watch?v=..." --cookies-from-browser chrome
-aimd "https://youtube.com/watch?v=..." --raw-transcript
+aimd "https://www.youtube.com/watch?v=..." --cookies-from-browser chrome
+aimd "https://www.youtube.com/watch?v=..." --raw-transcript
 ```
 
-### Remote ASR and OCR
-
-Remote inference is opt-in. Base URLs may include `/v1`; aimd adds it when a
-bare server URL is supplied. The server controls weight precision, so
-`--precision` is ignored with a warning in remote mode.
-
-```bash
-AIMD_ASR_BASE_URL=http://192.168.100.114:8000 \
-AIMD_ASR_MODEL=Qwen3-ASR-1.7B \
-  aimd audio.wav --model qwen3-asr-1.7b
-
-AIMD_OCR_BASE_URL=http://192.168.100.114:10000 \
-AIMD_OCR_MODEL=Unlimited-OCR \
-  aimd scan.png --model unlimited-ocr
-```
-
-Equivalent CLI options are `--asr-base-url`, `--asr-model`, `--asr-api-key`,
-`--ocr-base-url`, `--ocr-model`, and `--ocr-api-key`. HTTP API request fields
-and MCP tool parameters use the same underscore names. API keys default to
-`not-needed` for unauthenticated LAN services.
+Without `--output`, the file name comes from the result title:
+`<title>_transcript.md` in the current directory for transcripts, and
+`<title>_converted.md` or `<title>_ocr.md` next to the input for conversions
+and OCR.
 
 ## CLI usage
+
+```text
+aimd [OPTIONS] INPUT_SOURCE
+```
+
+| Option | Description |
+|--------|-------------|
+| `--task TEXT` | Explicit task: `transcript`, `convert`, or `ocr`. Defaults to auto-routing. |
+| `-o, --output PATH` | Output file. Generated from the title when omitted. |
+| `-m, --model TEXT` | ASR or OCR model (see [Models and precision](#models-and-precision)). |
+| `--precision TEXT` | `4bit`, `6bit`, or `8bit` (dash variants such as `4-bit` are accepted). |
+| `-l, --language TEXT` | Language hint for transcription or OCR (`zh`, `en`, `ja`, ...). |
+| `--context TEXT` | ASR biasing text: proper nouns, names, domain vocabulary. |
+| `--no-context` | Do not build ASR context from URL page metadata. |
+| `--start INTEGER`, `--end INTEGER` | 0-based inclusive page range for OCR of PDFs. |
+| `-s, --save-original PATH` | Save the downloaded audio/video of a URL to a file or directory. |
+| `-c, --cookies PATH` | Netscape-format cookies file for URL extraction. |
+| `--cookies-from-browser TEXT` | Browser cookie source for URL extraction, e.g. `chrome` or `chrome:default`. |
+| `--raw-transcript` | Keep original SRT/VTT subtitle formatting instead of plain text. |
+| `--temp-dir PATH` | Directory for temporary downloads, transcoding, and extraction (env `AIMD_TEMP_DIR`). |
+| `--log-level TEXT` | `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`. Logs go to stderr. |
+| `--asr-base-url`, `--asr-model`, `--asr-api-key` | Remote ASR backend (env `AIMD_ASR_*`). |
+| `--ocr-base-url`, `--ocr-model`, `--ocr-api-key` | Remote OCR backend (env `AIMD_OCR_*`). |
+
+The CLI also reads `KEY=VALUE` pairs from a `.env` file in the current
+directory. Variables already set in the environment take precedence.
 
 ### Audio and video files
 
 ```bash
 aimd interview.m4a
-aimd lecture.mp3
-aimd audio.wav --language zh
-aimd audio.wav --model mlx-community/Qwen3-ASR-1.7B-4bit
+aimd lecture.mp4
+aimd audio.wav --language en
+aimd audio.wav --model qwen3-asr-0.6b --precision 8bit
+aimd interview.mp3 --context "Vocabulary: Qwen, MLX, LoRA."
 ```
 
-Backend selection is automatic:
-
-| Platform | Backend | Notes |
-|--------|----------|-------|
-| macOS Apple Silicon | MLX | Uses `mlx-audio` when available. |
-| CUDA-capable non-Darwin | Transformers | Uses Qwen3-ASR through Transformers when CUDA is available. |
-
-Passing an explicit transcription model ID such as `Qwen/Qwen3-ASR-0.6B-hf` (or the legacy alias `Qwen/Qwen3-ASR-0.6B`) opts into the native Transformers Qwen3-ASR backend, including on macOS/MPS. The automatic macOS backend remains MLX because the quantized MLX models are usually faster and lower-maintenance on Apple Silicon.
-
-### Supported models
-
-`--model` is interpreted by the platform-selected backend. The table below lists the only supported model aliases and IDs. Arbitrary Hugging Face model IDs are rejected so that model/runtime compatibility stays explicit.
-
-| Task | Platform/backend | `--model` value | Upstream model / runtime | Default | Notes |
-|------|------------------|-----------------|--------------------------|---------|-------|
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-1.7B-4bit`<br>`mlx-community/Qwen3-ASR-1.7B-6bit`<br>`mlx-community/Qwen3-ASR-1.7B-8bit`<br>`mlx-community/Qwen3-ASR-1.7B-bf16` | mlx-audio STT | 4bit | Qwen3-ASR 1.7B, all supported MLX precisions. |
-| Transcription | macOS Apple Silicon / MLX | `mlx-community/Qwen3-ASR-0.6B-4bit`<br>`mlx-community/Qwen3-ASR-0.6B-6bit`<br>`mlx-community/Qwen3-ASR-0.6B-8bit`<br>`mlx-community/Qwen3-ASR-0.6B-bf16` | mlx-audio STT | No | Qwen3-ASR 0.6B, all supported MLX precisions. |
-| Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-1.7B-hf` | Native Transformers Qwen3-ASR | Yes on CUDA Transformers | Default CUDA Transformers ASR model; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-1.7B` resolves here. |
-| Transcription | CUDA-capable non-Darwin / Transformers; explicit opt-in on macOS/MPS | `Qwen/Qwen3-ASR-0.6B-hf` | Native Transformers Qwen3-ASR | No | Lower-memory Qwen3-ASR option; explicit opt-in on macOS. Legacy `Qwen/Qwen3-ASR-0.6B` resolves here. |
-| OCR | macOS Apple Silicon / mlx-vlm | `unlimited_ocr` (default)<br>`unlimited_ocr_4bit` / `unlimited_ocr_6bit` / `unlimited_ocr_8bit` / `unlimited_ocr_bf16`<br>`mlx-community/Unlimited-OCR-4bit`<br>`mlx-community/Unlimited-OCR-6bit`<br>`mlx-community/Unlimited-OCR-8bit`<br>`mlx-community/Unlimited-OCR-bf16` | mlx-vlm | Yes | Unlimited-OCR MLX checkpoints. The default alias resolves to `mlx-community/Unlimited-OCR-4bit`; each page uses single-image gundam mode. |
-| OCR | macOS Apple Silicon / mlx-vlm | `glm_ocr` / `glm-ocr` (default)<br>`mlx-community/GLM-OCR-4bit`<br>`mlx-community/GLM-OCR-6bit`<br>`mlx-community/GLM-OCR-8bit`<br>`mlx-community/GLM-OCR-bf16` | mlx-vlm | No | GLM-OCR MLX checkpoints; the default alias resolves to the 4-bit checkpoint. |
-| OCR | Linux/CUDA / Transformers | `unlimited_ocr`, `unlimited-ocr`, `baidu/Unlimited-OCR` | `baidu/Unlimited-OCR` | Yes | Default Linux/CUDA OCR model. Uses Baidu Unlimited-OCR remote code with CUDA and `save_results=True`. |
-| OCR | Linux/CUDA / Transformers | `glm_ocr`, `glm-ocr`, `zai-org/GLM-OCR` | `zai-org/GLM-OCR` | No | May require a newer Transformers build than the PyPI baseline. |
+ffmpeg decodes audio and extracts it from video. Inputs longer than 10
+minutes are transcribed in segments. Local ASR uses Chinese when `--language`
+is omitted. Supported language hints are `zh`, `en`, `ja`, `ko`, `de`, `es`,
+`fr`, `it`, `pt`, and `ru`, or the full language name. If a 4-bit run gets
+stuck in a repetition loop, aimd retries that segment once with the matching
+8-bit checkpoint.
 
 ### URLs
 
@@ -187,34 +135,43 @@ aimd "https://www.bilibili.com/video/BV..."
 aimd "https://www.xiaoyuzhoufm.com/episode/..."
 ```
 
-Subtitles are simplified to plain text by default. Use `--raw-transcript` to preserve SRT/VTT formatting.
+aimd uses subtitles when the page has them and simplifies them to plain text
+unless you pass `--raw-transcript`. Otherwise it downloads the audio and
+transcribes it. In that case the page metadata (title, author, description,
+tags, chapters; at most 2000 characters) becomes ASR context so that names
+and terms are recognized correctly. `--no-context` turns this off. `--context`
+adds your own text, and works for local files too.
 
-When a URL has no subtitles and audio transcription is used, aimd injects the page metadata (title, author, description, tags, chapters) as ASR context so proper nouns and names are recognized more accurately. This is enabled by default; disable it with `--no-context`, or supply your own biasing text with `--context` (works for local audio files too):
-
-```bash
-aimd "https://youtube.com/watch?v=..." --no-context
-aimd interview.mp3 --context "Vocabulary: Qwen, MLX, LoRA."
-```
-
-For authenticated or restricted content:
+For restricted or signed-in content:
 
 ```bash
-aimd "https://youtube.com/watch?v=..." --cookies cookies.txt
+aimd "https://www.youtube.com/watch?v=..." --cookies cookies.txt
 aimd "https://www.bilibili.com/video/BV..." --cookies-from-browser "chrome:default"
 ```
 
-When no cookie option is provided, URL extraction may try available browser cookie sources before falling back to unauthenticated access. Keep this behavior because it makes restricted media work out of the box, but explicit cookie options should fail fast when invalid. Transcript requests should also fail when subtitles and audio transcription both produce no text, instead of returning metadata-only Markdown as a successful transcript.
+Without a cookie option, aimd tries the available browser cookie sources
+before falling back to unauthenticated access. An explicit cookie option that
+yt-dlp rejects fails immediately. If neither subtitles nor audio
+transcription produce text, the request fails; aimd does not return
+metadata-only Markdown as a transcript.
 
 ### Documents
 
 ```bash
 aimd document.epub
-aimd document.pdf
+aimd report.docx
+aimd slides.pptx
+aimd paper.pdf
 aimd notes.md
-aimd document.epub --output output.md
 ```
 
-Asset-bearing documents such as EPUB are expanded into a structured output directory:
+Pandoc converts every format it reads (docx, pptx, xlsx, odt, epub, html,
+rtf, rst, LaTeX, and more). `.txt` and `.md` pass through unchanged. Legacy
+binary `.doc`, `.ppt`, and `.xls` files are not supported because Pandoc has
+no reader for them. MOBI/AZW3 are not supported either.
+
+EPUB, DOCX, and ODT conversions write a directory next to the source, and
+`--output` is ignored for them:
 
 ```text
 document_name/
@@ -223,163 +180,205 @@ document_name/
 └── images/
 ```
 
-The EPUB pipeline preserves spine order, extracts images, converts chapters through Pandoc, and applies Markdown cleanup. Other Pandoc-supported formats are converted by Pandoc directly. Text-layer PDFs are converted locally by [pdf-inspector](https://github.com/firecrawl/pdf-inspector) through the same document plugin, producing structured Markdown (headings, lists, tables) without OCR. Pandoc does not support MOBI/AZW3 as input formats, so AIMD no longer advertises them as supported document inputs.
-
 ### OCR for scanned PDFs and images
 
 ```bash
 aimd page.png
-aimd scan.pdf                                  # OCR if no extractable PDF text or broken font encoding is found
-aimd scan.pdf --task ocr                       # Force OCR; default model is unlimited_ocr
-aimd scan.pdf --model unlimited_ocr_bf16       # macOS MLX full-precision Unlimited-OCR
-aimd scan.pdf --model glm_ocr                  # GLM-OCR on macOS or Linux/CUDA
-aimd scan.pdf --start 0 --end 2                # 0-based inclusive OCR PDF page range
+aimd scan.pdf                      # OCR when the PDF has no usable text layer
+aimd scan.pdf --task ocr           # force OCR
+aimd scan.pdf --precision 8bit     # Unlimited-OCR 8-bit checkpoint
+aimd scan.pdf --start 0 --end 2    # 0-based inclusive page range
 ```
 
-OCR keeps the same Markdown/TextContext output contract as transcript and convert tasks. Images route to OCR automatically. PDF routing is probed with pdf-inspector: PDFs with a clean extractable text layer route to normal document conversion, while scanned PDFs and PDFs whose text layer has broken font encodings (pdf-inspector `has_encoding_issues`, undecodable CID fonts) route to OCR automatically. Linux/CUDA defaults to `baidu/Unlimited-OCR` through the Transformers backend. macOS uses `mlx-vlm>=0.6.4` and defaults to `mlx-community/Unlimited-OCR-4bit`; `unlimited_ocr_4bit`, `unlimited_ocr_6bit`, `unlimited_ocr_8bit`, and `unlimited_ocr_bf16` select the other MLX checkpoints. Unlimited-OCR uses single-image gundam mode (`cropping=True`, `image_size=640`, prompt `document parsing.`), Baidu's sliding-window no-repeat n-gram guard (`ngram_size=35`, `window=128`), and `max_tokens=8192`. GLM-OCR is available through the four `mlx-community/GLM-OCR-*` MLX checkpoints on macOS and `zai-org/GLM-OCR` on Linux/CUDA. Long PDFs are OCR'd page-by-page so page boundaries stay reliable. Unsupported model IDs are rejected.
+Images always go to OCR. For PDFs, pdf-inspector checks the text layer. PDFs
+with clean text are converted as documents. Scanned PDFs, and PDFs whose
+fonts cannot be decoded, go to OCR. aimd renders those pages with `mutool`
+and runs OCR one page at a time. Unlimited-OCR uses single-image gundam mode
+(`document parsing.` prompt), a sliding-window no-repeat n-gram guard
+(n=35, window 128), and at most 8192 tokens per page.
 
-### MarkItDown plugins
+## Models and precision
 
-`aimd` uses MarkItDown with plugins enabled. The bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` modules register standard `markitdown.plugin` entry points, so installing `aimd-tool` also installs URL transcript/readable HTML, local audio/video ASR, Pandoc document, and OCR converters.
+The model (`--model`) and the precision (`--precision`) are separate options.
 
-You can also use the plugins from MarkItDown directly:
+| Task | `--model` | Precisions | Default checkpoint |
+|------|-----------|------------|--------------------|
+| Transcription | `qwen3-asr-1.7b` (default), `qwen3-asr-0.6b` | `4bit` (default), `6bit`, `8bit` | `mlx-community/Qwen3-ASR-1.7B-4bit` |
+| OCR | `unlimited-ocr` (default) | `4bit` (default), `6bit`, `8bit` | `mlx-community/Unlimited-OCR-4bit` |
 
 ```bash
-markitdown --list-plugins
-markitdown --use-plugins document.epub -o doc.md
-markitdown --use-plugins audio.mp3 -o transcript.md
+aimd audio.wav --model qwen3-asr-1.7b --precision 4bit
+aimd scan.pdf --model unlimited-ocr --precision 8bit
 ```
 
-The Defuddle-backed `aimd.plugins.url` readable HTML converter is opt-in so normal HTML conversion does not require Node.js/npm:
+Explicit `mlx-community/Qwen3-ASR-*` and `mlx-community/Unlimited-OCR-*`
+checkpoint IDs are also accepted. If a checkpoint ID already contains a
+precision, a different `--precision` is an error. Other models are rejected.
+bf16 (dense) checkpoints are not supported by the native engine yet. GLM-OCR
+and the Transformers/CUDA backends of the Python releases were removed.
 
-```python
-from markitdown import MarkItDown
+Local inference needs the MLX GPU (Metal) device. With `AIMD_MLX_DEVICE=cpu`,
+or on a machine without a Metal GPU, local ASR/OCR fails early. Use a remote
+backend in that case.
 
-result = MarkItDown(enable_plugins=True).convert("article.html", defuddle=True)
-print(result.markdown)
+## Remote ASR and OCR
+
+Remote inference is opt-in. It sends audio or page images to an
+OpenAI-compatible server (`/v1/audio/transcriptions` for ASR, chat
+completions for OCR), and no local model is loaded for that task. If you give
+a bare server URL, aimd appends `/v1`. The server decides the weight
+precision, so `--precision` is ignored with a warning.
+
+```bash
+AIMD_ASR_BASE_URL=http://192.168.100.114:8000 \
+AIMD_ASR_MODEL=Qwen3-ASR-1.7B \
+  aimd audio.wav
+
+AIMD_OCR_BASE_URL=http://192.168.100.114:10000 \
+AIMD_OCR_MODEL=Unlimited-OCR \
+  aimd scan.png
 ```
+
+| Variable | CLI option | Default |
+|----------|------------|---------|
+| `AIMD_ASR_BASE_URL` | `--asr-base-url` | unset (local ASR) |
+| `AIMD_ASR_MODEL` | `--asr-model` | `Qwen3-ASR-1.7B` |
+| `AIMD_ASR_API_KEY` | `--asr-api-key` | `not-needed` |
+| `AIMD_OCR_BASE_URL` | `--ocr-base-url` | unset (local OCR) |
+| `AIMD_OCR_MODEL` | `--ocr-model` | `Unlimited-OCR` |
+| `AIMD_OCR_API_KEY` | `--ocr-api-key` | `not-needed` |
+
+Explicit options override the environment. HTTP API request fields and MCP
+tool parameters use the same names in snake_case (`asr_base_url`, ...).
 
 ## HTTP API
 
-Run the API server:
-
 ```bash
-aimd-api
+aimd-api                      # http://127.0.0.1:8000
+aimd-api --help               # environment variables
 ```
 
+`aimd-api` is configured only through environment variables and binds only
+to loopback addresses:
+
+| Variable | Purpose |
+|----------|---------|
+| `AIMD_HTTP_HOST` | Loopback bind address (default `127.0.0.1`). |
+| `AIMD_HTTP_PORT` | Port (default `8000`). |
+| `AIMD_API_TOKEN` | When set, every endpoint requires `Authorization: Bearer <token>`. |
+| `AIMD_ALLOWED_ROOTS` | Allow-list of directories (`:`-separated) for local paths in requests. |
+| `AIMD_BLOB_DIR` | Directory for uploaded blobs (default: a temporary directory). |
+| `AIMD_TEMP_DIR` | Directory for temporary downloads, transcoding, and extraction. |
+
 Endpoints:
+
+| Method and path | Purpose |
+|-----------------|---------|
+| `GET /healthz`, `GET /readyz` | Liveness and readiness. |
+| `POST /v1/process` | Process one input synchronously. |
+| `POST /v1/blobs` | Upload bytes (multipart field `file`) for later `blob_id` use. |
+| `POST /v1/jobs` | Start an asynchronous job. |
+| `GET /v1/jobs/{id}`, `DELETE /v1/jobs/{id}` | Job snapshot; request cancellation. |
+| `GET /v1/jobs/{id}/events` | Server-sent job events (resumable with `Last-Event-ID`). |
+| `GET /openapi.json`, `/docs`, `/redoc` | OpenAPI schema and viewers. |
 
 ```bash
 curl http://127.0.0.1:8000/healthz
 
 curl -X POST http://127.0.0.1:8000/v1/process \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_source": "https://www.youtube.com/watch?v=...",
-    "language": "en"
-  }'
+  -H 'Content-Type: application/json' \
+  -d '{"input_source": "https://www.youtube.com/watch?v=...", "language": "en"}'
 
 curl -X POST http://127.0.0.1:8000/v1/process \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_source": "scan.pdf",
-    "task_type": "ocr",
-    "start": 0,
-    "end": 2
-  }'
+  -H 'Content-Type: application/json' \
+  -d '{"input_source": "scan.pdf", "task_type": "ocr", "start": 0, "end": 2}'
+
+curl -X POST http://127.0.0.1:8000/v1/process \
+  -H 'Content-Type: application/json' \
+  -d '{"input_source": "audio.mp3", "model": "qwen3-asr-1.7b", "precision": "4bit"}'
 ```
 
-The process response includes both lossless `markdown` for display/persistence and
-`chunk_list` for context-window consumers. `asset_base_uri` is the URL or local `file:`
-directory (with a trailing slash) against which relative Markdown resources resolve; it
-is `null` for local transcriptions without associated resources.
+Request fields match the CLI options: `input_source` or `blob_id`,
+`task_type`, `output_file`, `model`, `precision`, `language`, `context`,
+`metadata_context` (default `true`), `start`, `end`, `save_original`,
+`cookies`, `cookies_from_browser`, `raw_transcript`, and the remote backend
+fields.
 
-Document conversions that extract assets return a canonical `output_dir` beside the
-source file. That directory and its Markdown/assets are durable caller-owned output: AIMD
-does not remove them when a request or job ends. An `output_file` request is ignored for
-such conversions because moving only the Markdown would break its relative asset links.
-For results without `output_dir`, requested output files are written byte-for-byte from
-`markdown`; `chunk_list` is never recombined for persistence.
+The response includes the lossless `markdown` for display and saving, and a
+`chunk_list` for context windows. `asset_base_uri` is the base for relative
+links in the Markdown: the source URL, or a local `file:` directory ending in
+`/`. It is `null` for local transcriptions. Conversions that extract assets
+return an `output_dir` next to the source. aimd never deletes that directory,
+and it ignores `output_file` for such results so that relative links keep
+working. Other results are written to `output_file` exactly as `markdown`.
 
-OpenAPI docs are available at `/docs` and `/redoc`.
-
-The asynchronous desktop contract is `POST /v1/jobs`, `GET /v1/jobs/{id}`, resumable
-`GET /v1/jobs/{id}/events`, and cancellation through `DELETE /v1/jobs/{id}`. See the
-[local desktop sidecar contract](https://github.com/shuuul/aimd/blob/main/docs/sidecar.md) for authenticated launch, loopback,
-allow-root, readiness, cancellation, and shutdown requirements.
+HTTP status codes follow the error kind: unsupported input 400, input not
+found 404, cancelled 409, backend unavailable 422, processing failure 500.
+For the desktop sidecar contract (authenticated launch, loopback, allowed
+roots, blobs, cancellation, shutdown), see [docs/sidecar.md](docs/sidecar.md).
 
 ## MCP server
-
-Run the stdio MCP server:
 
 ```bash
 aimd-mcp
 ```
 
-Tools:
+A stdio MCP server with two tools:
 
 - `healthz`
-- `process_input`
+- `process_input`: the same flow and fields as `POST /v1/process`
+  (`input_source`, `task_type`, `model`, `precision`, `language`, `context`,
+  `metadata_context`, `start`, `end`, `output_file`, `save_original`,
+  `cookies`, `cookies_from_browser`, `raw_transcript`, and the remote backend
+  fields).
 
-`process_input` mirrors the CLI/API flow and accepts options such as `input_source`, `task_type`, `model`, `language`, `start`, `end`, `output_file`, `save_original`, `cookies`, `cookies_from_browser`, and `raw_transcript`. For MCP, temporary files are controlled by the `AIMD_TEMP_DIR` environment variable.
+Example client configuration:
+
+```json
+{
+  "mcpServers": {
+    "aimd": { "command": "aimd-mcp" }
+  }
+}
+```
+
+Set `AIMD_TEMP_DIR` in the server environment to control where temporary
+files go.
 
 ## Configuration
 
-```bash
-# Optional yt-dlp configuration
-export YT_DLP_CONFIG_HOME="/path/to/config"
-export YT_DLP_CACHE_DIR="/path/to/cache"
+| Variable | Purpose |
+|----------|---------|
+| `AIMD_TEMP_DIR` | Temporary downloads, transcoding, and extraction (CLI: `--temp-dir`). |
+| `AIMD_ASR_*`, `AIMD_OCR_*` | Remote backends (see above). |
+| `AIMD_MLX_DEVICE` | `gpu` or `cpu`. Local inference needs the GPU; `cpu` is for tests. |
+| `AIMD_YT_DLP` | Path to the `yt-dlp` executable (default: `yt-dlp` on `PATH`). |
+| `HF_HUB_CACHE`, `HF_HOME` | Hugging Face cache location for model weights. |
+| `HF_TOKEN` | Hugging Face token for checkpoint downloads. |
+| `HF_ENDPOINT` | Alternative Hugging Face endpoint. |
+| `HF_HUB_OFFLINE` | Use only cached checkpoints and never download. |
+| `YT_DLP_CONFIG_HOME`, `YT_DLP_CACHE_DIR` | Read by yt-dlp itself. |
 
-# Optional temporary directory for downloads, transcoding, and document extraction
-export AIMD_TEMP_DIR="/path/to/writable/tmp"
-```
+## Building from source
 
-You can also pass `--temp-dir` on the CLI.
-
-## Development
-
-```bash
-uv sync --dev --upgrade
-uv run prek --all-files
-uv run pytest -q
-```
-
-Useful maintenance commands:
+This needs Rust (stable, edition 2024) and Homebrew `mlx`. To use the
+binaries, you also need the runtime tools.
 
 ```bash
-uv run prek autoupdate
-uv build
+brew install mlx ffmpeg mupdf pandoc yt-dlp
+git clone https://github.com/shuuul/aimd.git
+cd aimd
+cargo build --release -p aimd-cli -p aimd-api -p aimd-mcp
+./target/release/aimd --help
 ```
 
-Releases are managed by release-please. Commits to `main` update a release PR;
-merging that PR creates the tag and GitHub Release. The release workflow then builds
-the single `aimd-tool` distribution, smoke-installs it on Linux and macOS, and
-publishes it to PyPI.
+`crates/aimd-mlx/build.rs` finds MLX through `brew --prefix mlx`. Set
+`MLX_PREFIX` to use a different MLX install. See [AGENTS.md](AGENTS.md) for
+the crate layout, test tiers, and release process, and
+[docs/architecture.md](docs/architecture.md) for the processing flow.
 
-Project layout:
-
-```text
-src/
-└── aimd/            # core, interfaces/{cli,api,mcp,output.py}, and bundled MarkItDown plugins
-```
-
-## Architecture
-
-`aimd` is a single published distribution, `aimd-tool`. See [docs/architecture.md](https://github.com/shuuul/aimd/blob/main/docs/architecture.md) for the full architecture notes and [docs/performance.md](https://github.com/shuuul/aimd/blob/main/docs/performance.md) for performance expectations and measurement guidance.
-
-The package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
-
-- `aimd.core.models` and `aimd.core.process` own canonical request/response models, input routing, and processing; ASR/OCR backends are selected internally from the current platform.
-- `aimd.core.process.process_input()` sends URL and local-file work through `MarkItDown(enable_plugins=True)`.
-- Bundled modules register MarkItDown plugins: `aimd.plugins.url` for URL transcript extraction and opt-in Defuddle-backed HTML extraction, `aimd.plugins.asr` for local audio/video inputs, `aimd.plugins.doc` for Pandoc-backed documents and pdf-inspector text-layer PDFs, and `aimd.plugins.ocr` for explicit OCR of images and scanned PDFs.
-- Console entry points are `aimd.interfaces.cli:main`, `aimd.interfaces.api:main`, and `aimd.interfaces.mcp.app:main`; MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
-- `aimd.plugins.url` owns URL extraction: yt-dlp metadata, subtitle download, cookie handling, audio download fallback, and readable HTML extraction. It intentionally keeps automatic browser-cookie probing for convenience, while explicit cookie arguments and transcript/audio fallback failures should surface clear errors. `aimd.plugins.asr` owns transcription backend selection, model validation, and the local audio/video MarkItDown plugin.
-- `aimd.core.process` preserves each lossless MarkItDown result on `ProcessResult` and
-  separately shapes it into `TextContext` chunks.
-- CLI/API/MCP modules translate interface requests into core processing. Output file persistence is interface-owned and shared through `aimd.interfaces.output`; it is not part of `ProcessInput`.
-
-All processing returns a shared `ProcessResult`: lossless Markdown and its optional asset
-base URI alongside `TextContext` title, chunks, and split metadata.
+`CHANGELOG.md` covers the Python releases (up to v0.23.x) and is no longer
+updated. Release notes for 1.0.0 and later are on the GitHub Releases page.
 
 ## License
 

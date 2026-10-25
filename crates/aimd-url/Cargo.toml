@@ -1,0 +1,11 @@
+[package]
+name = "aimd-url"
+description = "URL extraction: yt-dlp subtitles/metadata/audio download, browser cookies, readable HTML via dom_smoothie"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aimd-core = { workspace = true }
+serde_json = { workspace = true }
+dom_smoothie = "0.18"

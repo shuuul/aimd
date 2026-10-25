@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<tt xml:lang="en" xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:profile="http://www.w3.org/TR/profile/sdp-us" >
+<head>
+<styling>
+<style xml:id="s1" tts:textAlign="center" tts:extent="90% 90%" tts:origin="5% 5%" tts:displayAlign="after"/>
+<style xml:id="s2" tts:fontSize=".72c" tts:backgroundColor="black" tts:color="white"/>
+</styling>
+<layout>
+<region xml:id="r1" style="s1"/>
+</layout>
+</head>
+<body region="r1">
+<div>
+<p begin="00:00:01.200" end="00:00:03.360" style="s2">All right, so here we are, in front of the<br />elephants</p>
+<p begin="00:00:05.318" end="00:00:07.974" style="s2">the cool thing about these guys is that they<br />have really...</p>
+<p begin="00:00:07.974" end="00:00:12.616" style="s2">really really long trunks</p>
+<p begin="00:00:12.616" end="00:00:14.367" style="s2">and that&#39;s cool</p>
+<p begin="00:00:14.421" end="00:00:15.733" style="s2">(baaaaaaaaaaahhh!!)</p>
+<p begin="00:00:16.881" end="00:00:18.881" style="s2">and that&#39;s pretty much all there is to<br />say</p>
+</div>
+</body>
+</tt>

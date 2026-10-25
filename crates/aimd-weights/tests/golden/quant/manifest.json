@@ -1,0 +1,968 @@
+{
+  "generator": "scripts/export_quant_reference.py",
+  "quantization": {
+    "mode": "affine",
+    "group_size": 64,
+    "bits": [
+      4,
+      8
+    ]
+  },
+  "layout": {
+    "payload": "Packed quantized weights as little-endian uint32 words, row-major (rows, cols*bits/32). Within a row, element j is stored in byte (j*bits)//8, at bit offset (j*bits)%8 from the LSB of that byte: bits=4 packs two 4-bit elements per byte (low nibble = even element, high nibble = odd element); bits=8 stores one element per byte in order.",
+    "scales_biases": "f16 or bf16 bit patterns (little-endian u16), shape (rows, cols/group_size), row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+    "dequant": "out[r,c] = dequant_dtype(scales_f32[r, c//group_size] * q[r,c] + biases_f32[r, c//group_size]); arithmetic in f32, single round-to-nearest-even cast to the scale dtype (verified bit-exact against mlx.core dequantize for f16 and bf16)."
+  },
+  "cases": [
+    {
+      "id": "synthetic-f16-b4-1x64",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        1,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        1,
+        8
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        1,
+        1
+      ],
+      "biases_shape": [
+        1,
+        1
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b4-1x64/payload.bin",
+        "scales": "synthetic-f16-b4-1x64/scales.bin",
+        "biases": "synthetic-f16-b4-1x64/biases.bin",
+        "dequant": "synthetic-f16-b4-1x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "1d0c5167eaa126caf67e39670d20080cbbeb0ae63dd51fac2bb4897d8761b300",
+        "scales": "a99e27f8d40e114ff48dc9c44b04cd7418328c15b7a5ed0ceeaa180783c45fa0",
+        "biases": "006c7862e36be12bf7a02ec346bd7338a101353fde96b39ad6ca0cde9959ccd8",
+        "dequant": "3c21f5fa24dddefb3335647573a11d06641360dc36e5e909f6810edd789b3e6c"
+      }
+    },
+    {
+      "id": "synthetic-f16-b4-2x128",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        2,
+        128
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        2,
+        16
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        2,
+        2
+      ],
+      "biases_shape": [
+        2,
+        2
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b4-2x128/payload.bin",
+        "scales": "synthetic-f16-b4-2x128/scales.bin",
+        "biases": "synthetic-f16-b4-2x128/biases.bin",
+        "dequant": "synthetic-f16-b4-2x128/dequant.bin"
+      },
+      "sha256": {
+        "payload": "d0e42e3be2a2119f338ba6ba766ee412c558072f07e1778c0e7339d5b12604f9",
+        "scales": "07359bb6ba1a3aef072060f55ddc25d4a5ae38040c0b72090e75c55d6ce9664c",
+        "biases": "52b702b1c5eec267e843590b633a241e3ba07d2720081dc9b9a03c218860ed9c",
+        "dequant": "c161a5b9522900969d706766581a35a10911b84938f2d62f85ea1e064b3590fb"
+      }
+    },
+    {
+      "id": "synthetic-f16-b4-3x256",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        3,
+        256
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        3,
+        32
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        3,
+        4
+      ],
+      "biases_shape": [
+        3,
+        4
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b4-3x256/payload.bin",
+        "scales": "synthetic-f16-b4-3x256/scales.bin",
+        "biases": "synthetic-f16-b4-3x256/biases.bin",
+        "dequant": "synthetic-f16-b4-3x256/dequant.bin"
+      },
+      "sha256": {
+        "payload": "1a761800ef560cf749730d577b98d110363932b87f440313ea977bcc1e3fec5f",
+        "scales": "b97472940dc9f72876826c2c372514d971f7ef91b16f4f4cd0186755ffac4f13",
+        "biases": "271ee753c6483c65482667a96231c02bb5435e300db48a3321dcec12e04e811a",
+        "dequant": "35767c403a764c71dc2fd0266bbc080d4466761155381d485709f51d0a95168d"
+      }
+    },
+    {
+      "id": "synthetic-f16-b4-4x192",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        4,
+        192
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        4,
+        24
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        4,
+        3
+      ],
+      "biases_shape": [
+        4,
+        3
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b4-4x192/payload.bin",
+        "scales": "synthetic-f16-b4-4x192/scales.bin",
+        "biases": "synthetic-f16-b4-4x192/biases.bin",
+        "dequant": "synthetic-f16-b4-4x192/dequant.bin"
+      },
+      "sha256": {
+        "payload": "9aaab1a295ca2cb3b52e8d8f59415e5c1cc5a27a61c9e1704702a924cb842114",
+        "scales": "610ec119a6d941702d85e2da4e4040d07c93445c318c6a035735c22422548e19",
+        "biases": "c1bd897de72b1a492fa7a07a9770f4cf19c81f9f9c9e1789af36fb571ca42c76",
+        "dequant": "7b8c0b777977b8bd5bcf0ff8450d99fa9190c808712306c81fff03f231abd81e"
+      }
+    },
+    {
+      "id": "synthetic-f16-b4-8x64",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        8,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        8
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        8,
+        1
+      ],
+      "biases_shape": [
+        8,
+        1
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b4-8x64/payload.bin",
+        "scales": "synthetic-f16-b4-8x64/scales.bin",
+        "biases": "synthetic-f16-b4-8x64/biases.bin",
+        "dequant": "synthetic-f16-b4-8x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "8e74cc62c7be1e70015a2a2c0825fcfe2539f78b5375200cc2ff2717331343e0",
+        "scales": "00c88a1b553d1cd02d9c2e78cd72721300aaf8a137760977965267fe3c2f6800",
+        "biases": "3a5a0ee8cbfadbdb26ca30dcd6506d847533d0b3afa05a1ea00de82e1d72714f",
+        "dequant": "66d98e0b5bcedca8a5339a0198d75a232ac316adaac799c587399a426f1109ce"
+      }
+    },
+    {
+      "id": "synthetic-f16-b8-1x64",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        1,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        1,
+        16
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        1,
+        1
+      ],
+      "biases_shape": [
+        1,
+        1
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b8-1x64/payload.bin",
+        "scales": "synthetic-f16-b8-1x64/scales.bin",
+        "biases": "synthetic-f16-b8-1x64/biases.bin",
+        "dequant": "synthetic-f16-b8-1x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "4c3e811a3f075df0413a1865f0dbc78c9f37c128d6b81215dd1407ac9b97aa65",
+        "scales": "aa84441b41f9cc90b7fe0a3fe0ea572c23534886cbf05eeb0fbbe7eb186e6cf2",
+        "biases": "52b7940bce2e1887a79ee3da4bae520301da662e124b68242c9babf726b608e3",
+        "dequant": "1b474aa455f6ea04d74bb7abe35af00ece2342a48d4e0be4adac1325403ebbe9"
+      }
+    },
+    {
+      "id": "synthetic-f16-b8-2x128",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        2,
+        128
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        2,
+        32
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        2,
+        2
+      ],
+      "biases_shape": [
+        2,
+        2
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b8-2x128/payload.bin",
+        "scales": "synthetic-f16-b8-2x128/scales.bin",
+        "biases": "synthetic-f16-b8-2x128/biases.bin",
+        "dequant": "synthetic-f16-b8-2x128/dequant.bin"
+      },
+      "sha256": {
+        "payload": "4a6de4f65a99da1ecc41b7baca1295bed2e21e5fca2e87f39d9c9eb46966deda",
+        "scales": "1d115e048b63bfce2716cc856911c9faababed88a64d2eee8538a6ac0367d527",
+        "biases": "1757a7c5594754050081dee475668299739c347667da76a93eba3934a16fe031",
+        "dequant": "36b08ae17c3c028fa01b75e1001f8866d2ccf6845ed655f7feb0df7178838fa0"
+      }
+    },
+    {
+      "id": "synthetic-f16-b8-3x256",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        3,
+        256
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        3,
+        64
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        3,
+        4
+      ],
+      "biases_shape": [
+        3,
+        4
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b8-3x256/payload.bin",
+        "scales": "synthetic-f16-b8-3x256/scales.bin",
+        "biases": "synthetic-f16-b8-3x256/biases.bin",
+        "dequant": "synthetic-f16-b8-3x256/dequant.bin"
+      },
+      "sha256": {
+        "payload": "c7675536040555095739f4394ca613f4499893d1714d06f76ca67bcd9458b6c4",
+        "scales": "7ac963a588c031ddcdc11406b647833c291ffbb1a620a920e89ff93844ad6d83",
+        "biases": "8137f2bf928de74c5f4e088fc35ff52f98bc8a214dda772d44712099ddff0df1",
+        "dequant": "796205cd0856a114acdd6fef7d8f3457e22f17d808541729f656fbf54900cdb6"
+      }
+    },
+    {
+      "id": "synthetic-f16-b8-4x192",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        4,
+        192
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        4,
+        48
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        4,
+        3
+      ],
+      "biases_shape": [
+        4,
+        3
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b8-4x192/payload.bin",
+        "scales": "synthetic-f16-b8-4x192/scales.bin",
+        "biases": "synthetic-f16-b8-4x192/biases.bin",
+        "dequant": "synthetic-f16-b8-4x192/dequant.bin"
+      },
+      "sha256": {
+        "payload": "ee4abaef5f9af663d754835641aaeb1eb9c5b6a826c1372e403d1863135057d9",
+        "scales": "b3cd0f20a04f764cb3612728508cd71fb75a78699ad9301faeebacba5140f8f5",
+        "biases": "3096c3a5dacf4f1034d2fc1f11b82dc0fdf3e3d22e012eca57cb0a8ecb815321",
+        "dequant": "4647ffa41b76c705968703b1cf3c149e45c6c6536cd941196978eb6685a18f5c"
+      }
+    },
+    {
+      "id": "synthetic-f16-b8-8x64",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        8,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        16
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        8,
+        1
+      ],
+      "biases_shape": [
+        8,
+        1
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b8-8x64/payload.bin",
+        "scales": "synthetic-f16-b8-8x64/scales.bin",
+        "biases": "synthetic-f16-b8-8x64/biases.bin",
+        "dequant": "synthetic-f16-b8-8x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "fb5d0efe6c5f364906a9200ecf16d673c224e1326ecc57d0d62d17b64e30be1d",
+        "scales": "1e76158c18acada8a355b848d03b3e5763b0b53b3a4af911c8020ddba4c3565f",
+        "biases": "b7a61a6f1ae9051d383ea0cfa5db0af620a407adb7e7e126fc0523605f11021f",
+        "dequant": "7f665f49624ff9807203466faeb6831b41d23c47b655c396a95d7447ce29dc1d"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b4-1x64",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        1,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        1,
+        8
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        1,
+        1
+      ],
+      "biases_shape": [
+        1,
+        1
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b4-1x64/payload.bin",
+        "scales": "synthetic-bf16-b4-1x64/scales.bin",
+        "biases": "synthetic-bf16-b4-1x64/biases.bin",
+        "dequant": "synthetic-bf16-b4-1x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "a30b7a5e3c46177a2597c140ff2ba960a14c2666b129b41657056a0cc2de330e",
+        "scales": "435a5e6e1db45abcc71252d07b1cedd06e879e82489a2c3d2fb9683514bf7802",
+        "biases": "4053d5cf407c2dcdc2b4e70946d37999b94eb8bb7cd42118b5d146559976edc4",
+        "dequant": "a38ca8744252c083d2c084a85cef1943f88fd7c50e56c831f40a51fa92c3fc15"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b4-2x128",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        2,
+        128
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        2,
+        16
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        2,
+        2
+      ],
+      "biases_shape": [
+        2,
+        2
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b4-2x128/payload.bin",
+        "scales": "synthetic-bf16-b4-2x128/scales.bin",
+        "biases": "synthetic-bf16-b4-2x128/biases.bin",
+        "dequant": "synthetic-bf16-b4-2x128/dequant.bin"
+      },
+      "sha256": {
+        "payload": "1db0d24a4435f2ee3ee42825fb8cb23754bf983cc6577a221e2937c422c86cf3",
+        "scales": "450970fc0ab4d6378cdb307adc0e484a475a41c7d8c41f9ca31682156aa36fd8",
+        "biases": "467da9108057c09ed1bc70049310fbca6963adc0014449fdf46a741a342de88c",
+        "dequant": "e3284ee50b13c8a69adf4d0f65b3c8ae69340657cf8c3fb833762f8991ff681d"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b4-3x256",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        3,
+        256
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        3,
+        32
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        3,
+        4
+      ],
+      "biases_shape": [
+        3,
+        4
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b4-3x256/payload.bin",
+        "scales": "synthetic-bf16-b4-3x256/scales.bin",
+        "biases": "synthetic-bf16-b4-3x256/biases.bin",
+        "dequant": "synthetic-bf16-b4-3x256/dequant.bin"
+      },
+      "sha256": {
+        "payload": "2b9974e767d9bd4bae717a08cc5fc423fde292927d629cb73cf57862259b4947",
+        "scales": "7b375e49c98c637049adab0676718ac86f26d3fe46d6aa82e9c22cf53daa1087",
+        "biases": "e47ab2a73a4cb366e48e3d702d4727eb41c800f7fd11cea7fa0878dd06850d9f",
+        "dequant": "54a175aeffa6016b535c937572d78b3c6e220e7959a9cacc0db20b9b109c2107"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b4-4x192",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        4,
+        192
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        4,
+        24
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        4,
+        3
+      ],
+      "biases_shape": [
+        4,
+        3
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b4-4x192/payload.bin",
+        "scales": "synthetic-bf16-b4-4x192/scales.bin",
+        "biases": "synthetic-bf16-b4-4x192/biases.bin",
+        "dequant": "synthetic-bf16-b4-4x192/dequant.bin"
+      },
+      "sha256": {
+        "payload": "16af5a0138f5133e4135d5e2a6c04c524cb4eea558e17b9b4f94d129fed4ada3",
+        "scales": "bec726f62625bb13cca64c15fd7eea798d28fd09d2536370bbd8ed430a0006c2",
+        "biases": "466821327dc9d7b21ca209a6ff33c9f656d0c6626f8fca36f31c4b9d88b7ddd3",
+        "dequant": "fd772f1bc6e244e2308960a71afa48e3d705c6e98c7831e2d70ab7c5c44bf757"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b4-8x64",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        8,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        8
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        8,
+        1
+      ],
+      "biases_shape": [
+        8,
+        1
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b4-8x64/payload.bin",
+        "scales": "synthetic-bf16-b4-8x64/scales.bin",
+        "biases": "synthetic-bf16-b4-8x64/biases.bin",
+        "dequant": "synthetic-bf16-b4-8x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "d6d1ab12627f895e96c1cf8d7e225a95ad2e4b2a71a9ad32aa4563e0355e1807",
+        "scales": "983d6ad27df946ba4cd73a47bfa064343413d7bb2bb25ccf3c35f11db7365a89",
+        "biases": "f8fbbbaed3042d481c31da3c423cd53d268697900efcbf26b8896671a2d359b9",
+        "dequant": "dd8806abbb3d23e6f096eb43df44fe9284131d1f3f5f33abdc216c2afccc49c7"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b8-1x64",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        1,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        1,
+        16
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        1,
+        1
+      ],
+      "biases_shape": [
+        1,
+        1
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b8-1x64/payload.bin",
+        "scales": "synthetic-bf16-b8-1x64/scales.bin",
+        "biases": "synthetic-bf16-b8-1x64/biases.bin",
+        "dequant": "synthetic-bf16-b8-1x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "e349db1fe4217baf9a6fafc4f780a681ae4b7f11570208420269653394456a3b",
+        "scales": "92fd30358e3d474dec1244ea739ba1eeb85e029dd7f3abd9e7d67d69b48010d0",
+        "biases": "f960af946f95c558ab4268c9293f4ddd394c90c15e3b4220ff5b50bf9b3c2ac4",
+        "dequant": "a6dfb219f44a407d6d3c1771b0a15304720f128513b46cf1e21520873ac6c160"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b8-2x128",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        2,
+        128
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        2,
+        32
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        2,
+        2
+      ],
+      "biases_shape": [
+        2,
+        2
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b8-2x128/payload.bin",
+        "scales": "synthetic-bf16-b8-2x128/scales.bin",
+        "biases": "synthetic-bf16-b8-2x128/biases.bin",
+        "dequant": "synthetic-bf16-b8-2x128/dequant.bin"
+      },
+      "sha256": {
+        "payload": "c7d71dc3a42ee2c785f12820008700b87f1a4d628cd64f6687295ebb35a7703f",
+        "scales": "8b0faeb940c44bead553385b31ebe24a7306df4a7eebdff56563eb1c80852932",
+        "biases": "ec231379218a05d7c074925020f5001c92598e24b5af1fa1229afdd3b204f124",
+        "dequant": "93b66aceb5e4b73f4853290c9b5aa2392437d03036ce095433e4d6268e7f99f7"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b8-3x256",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        3,
+        256
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        3,
+        64
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        3,
+        4
+      ],
+      "biases_shape": [
+        3,
+        4
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b8-3x256/payload.bin",
+        "scales": "synthetic-bf16-b8-3x256/scales.bin",
+        "biases": "synthetic-bf16-b8-3x256/biases.bin",
+        "dequant": "synthetic-bf16-b8-3x256/dequant.bin"
+      },
+      "sha256": {
+        "payload": "382fc58ea0dcc2a770f44a32d3a9429770bdbd4aa3048c591825e30f8b052113",
+        "scales": "75c81172ead680413e5d75d26fc8ad0417fd20b689e2c2c9b90cc974e27b8b7e",
+        "biases": "94ef63233bc719334cb8c6590c4d0a540fc4672ba595a337f60dc2b4957b69cb",
+        "dequant": "e6fbc0ad0b880e56425ba23e450618b4ba180ecd32261b78a7a4b400bb2b7c7a"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b8-4x192",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        4,
+        192
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        4,
+        48
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        4,
+        3
+      ],
+      "biases_shape": [
+        4,
+        3
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b8-4x192/payload.bin",
+        "scales": "synthetic-bf16-b8-4x192/scales.bin",
+        "biases": "synthetic-bf16-b8-4x192/biases.bin",
+        "dequant": "synthetic-bf16-b8-4x192/dequant.bin"
+      },
+      "sha256": {
+        "payload": "91f782186acff4ba576fa621f4f925813490e089a3aa79d337c0c4a902d739cc",
+        "scales": "367d03c4525f1406c89fb8ac94cf6ae0a2c5e4faf1b2d6c2fa46a94358a391eb",
+        "biases": "d88a8f61761aacabba55c1dfdacae68c1938f6e65b2e2147214c7e1613685baf",
+        "dequant": "2838aa4330b83681a83ce829aac7acbb24816ba031875655bd07b461d1bb1591"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b8-8x64",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        8,
+        64
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        16
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        8,
+        1
+      ],
+      "biases_shape": [
+        8,
+        1
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b8-8x64/payload.bin",
+        "scales": "synthetic-bf16-b8-8x64/scales.bin",
+        "biases": "synthetic-bf16-b8-8x64/biases.bin",
+        "dequant": "synthetic-bf16-b8-8x64/dequant.bin"
+      },
+      "sha256": {
+        "payload": "a1e5244a081f3a993e4dcc4fd1139b5bc3ed99da2798633f9f952514fae60b88",
+        "scales": "26915fd74f9c9dc5d917e807bfc6bc46a492c43c34e8bbf675d099e1dd72128e",
+        "biases": "23a9f33fdf17532ce39e3aba4b856d566d978af81dab0c5a143651d83e14ea6f",
+        "dequant": "5faf77cd80f0d4b733ec83518d6c3f7b74dfa1cbc04ebb486a0463d714a4f759"
+      }
+    },
+    {
+      "id": "synthetic-f16-b4-3x128-large",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        3,
+        128
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        3,
+        16
+      ],
+      "scale_dtype": "F16",
+      "scales_shape": [
+        3,
+        2
+      ],
+      "biases_shape": [
+        3,
+        2
+      ],
+      "dequant_dtype": "F16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-f16-b4-3x128-large/payload.bin",
+        "scales": "synthetic-f16-b4-3x128-large/scales.bin",
+        "biases": "synthetic-f16-b4-3x128-large/biases.bin",
+        "dequant": "synthetic-f16-b4-3x128-large/dequant.bin"
+      },
+      "sha256": {
+        "payload": "b3ea51357c0ff357b114fa9e744f3be526c03aea321557e1e9f80aad3b985538",
+        "scales": "59113eb931702219e5a9b1b2eb87ce16ea3986fc4881d675e2ec25c83954fe40",
+        "biases": "00a2cb5670cc09bf34c8507ca2a63f9126957f8a30d54dd431119f1e3995b939",
+        "dequant": "c35ab6110b298d77dd56b6e110d92b4c0614c6600956afe46b16b8ab9c8e665c"
+      }
+    },
+    {
+      "id": "synthetic-bf16-b4-3x128-large",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        3,
+        128
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        3,
+        16
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        3,
+        2
+      ],
+      "biases_shape": [
+        3,
+        2
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "synthetic-bf16-b4-3x128-large/payload.bin",
+        "scales": "synthetic-bf16-b4-3x128-large/scales.bin",
+        "biases": "synthetic-bf16-b4-3x128-large/biases.bin",
+        "dequant": "synthetic-bf16-b4-3x128-large/dequant.bin"
+      },
+      "sha256": {
+        "payload": "4e5e847e70dc2425f62583883448bc1fe67f4bab0e3184e0da76d0dd955b89d2",
+        "scales": "65c8ac270cdf197dc8127766e885e14fc5b3f6682a990c65ce92254b801b6cd4",
+        "biases": "2f3ba3896e18fe8dbfeb634aa6908f45293a498759d149fa42cf5441fad29835",
+        "dequant": "2041edbb8bbcddd3dbf25f21b0d328116dae60bd17df06698a936ab930f78e48"
+      }
+    },
+    {
+      "id": "checkpoint-asr-4bit-model-layers-0-self_attn-k_proj-r8",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        8,
+        2048
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        256
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        8,
+        32
+      ],
+      "biases_shape": [
+        8,
+        32
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "checkpoint-asr-4bit-model-layers-0-self_attn-k_proj-r8/payload.bin",
+        "scales": "checkpoint-asr-4bit-model-layers-0-self_attn-k_proj-r8/scales.bin",
+        "biases": "checkpoint-asr-4bit-model-layers-0-self_attn-k_proj-r8/biases.bin",
+        "dequant": "checkpoint-asr-4bit-model-layers-0-self_attn-k_proj-r8/dequant.bin"
+      },
+      "sha256": {
+        "payload": "64628c9191d12742569c093aa1a0202e92a339b2b72ae62e3fc04786e4510460",
+        "scales": "70280fc01fd920e05e1df4d44b140ea71aee18ed2d25ac96250dad377954e114",
+        "biases": "f9b6821bafba610e2447617dd6b3fd3fd233dba7756a8dc12ffe10f32c1f1437",
+        "dequant": "96547f49bed663f124ba9c8d51bba6b43ae6a942b1575315a75a870dbee09ee6"
+      }
+    },
+    {
+      "id": "checkpoint-asr-8bit-model-layers-0-self_attn-k_proj-r8",
+      "mode": "affine",
+      "bits": 8,
+      "group_size": 64,
+      "shape": [
+        8,
+        2048
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        512
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        8,
+        32
+      ],
+      "biases_shape": [
+        8,
+        32
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "checkpoint-asr-8bit-model-layers-0-self_attn-k_proj-r8/payload.bin",
+        "scales": "checkpoint-asr-8bit-model-layers-0-self_attn-k_proj-r8/scales.bin",
+        "biases": "checkpoint-asr-8bit-model-layers-0-self_attn-k_proj-r8/biases.bin",
+        "dequant": "checkpoint-asr-8bit-model-layers-0-self_attn-k_proj-r8/dequant.bin"
+      },
+      "sha256": {
+        "payload": "6f27c907de904696644f3ebaddb7ac230614f096df89f43fbb6878e65c2d83bd",
+        "scales": "efff36275f092907a21a992632a8e97f1de86bfc590c0adea31dd165c6ca48f1",
+        "biases": "f9b6821bafba610e2447617dd6b3fd3fd233dba7756a8dc12ffe10f32c1f1437",
+        "dequant": "2a3bbd4b51e8f3e2f99997dbc072bf302158e72d6013e5ddfacc6be3b59603f7"
+      }
+    },
+    {
+      "id": "checkpoint-ocr-4bit-language_model-lm_head-r8",
+      "mode": "affine",
+      "bits": 4,
+      "group_size": 64,
+      "shape": [
+        8,
+        1280
+      ],
+      "payload_dtype": "U32",
+      "payload_shape": [
+        8,
+        160
+      ],
+      "scale_dtype": "BF16",
+      "scales_shape": [
+        8,
+        20
+      ],
+      "biases_shape": [
+        8,
+        20
+      ],
+      "dequant_dtype": "BF16",
+      "byte_layout": "payload: little-endian u32 words, row-major; element j of a row lives in byte (j*bits)//8 at bit shift (j*bits)%8 (LSB-first). scales/biases/dequant: f16 or bf16 bit patterns, little-endian, row-major; group g of row r covers columns [g*group_size, (g+1)*group_size).",
+      "files": {
+        "payload": "checkpoint-ocr-4bit-language_model-lm_head-r8/payload.bin",
+        "scales": "checkpoint-ocr-4bit-language_model-lm_head-r8/scales.bin",
+        "biases": "checkpoint-ocr-4bit-language_model-lm_head-r8/biases.bin",
+        "dequant": "checkpoint-ocr-4bit-language_model-lm_head-r8/dequant.bin"
+      },
+      "sha256": {
+        "payload": "6d673c2ee1716e29e388bed6dc0ffed3e2e8934120a78d2503eb49469d31aed4",
+        "scales": "46bb6102b641ff81892a40646ffb68a584b96d3fe6fb0ccdf346a8e82c28a234",
+        "biases": "e0b64d98e3712e0afe863f9609987cd1b721d4a4fc1579f6252de3c4a92605ca",
+        "dequant": "73c6626b13bf6c14d860c4e9cb53e14204da4ff419c60a0c55ac9fc00503b0da"
+      }
+    }
+  ]
+}

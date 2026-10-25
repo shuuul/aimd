@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aimd-weights",
+    "crates/aimd-engine",
+    "crates/aimd-mlx",
+    "crates/aimd-core",
+    "crates/aimd-doc",
+    "crates/aimd-url",
+    "crates/aimd-process",
+    "crates/aimd-cli",
+    "crates/aimd-api",
+    "crates/aimd-mcp",
+    "crates/xtask",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/shuuul/aimd"
+
+# Shared dependencies. Workers add crate-level deps here only; do not edit
+# this file without coordinator sign-off (parallel builds share Cargo.lock).
+[workspace.dependencies]
+half = "2"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+memmap2 = "0.9"
+safetensors = "0.6"
+tokenizers = "0.22"
+cc = "1"
+image = "0.25"
+
+aimd-weights = { path = "crates/aimd-weights" }
+aimd-mlx = { path = "crates/aimd-mlx" }
+aimd-engine = { path = "crates/aimd-engine" }
+aimd-core = { path = "crates/aimd-core" }
+aimd-doc = { path = "crates/aimd-doc" }
+aimd-url = { path = "crates/aimd-url" }
+aimd-process = { path = "crates/aimd-process" }
+
+[profile.release]
+debug = true
+
+# Checkpoint tests run real 1.7B-parameter graphs; unoptimized first-party
+# kernels make them 10-30x slower. Optimize only our crates in dev/test
+# builds (dependencies stay at opt-level 0, keeping compile times low).
+[profile.dev.package.aimd-weights]
+opt-level = 3
+[profile.dev.package.aimd-engine]
+opt-level = 3
+[profile.dev.package.aimd-mlx]
+opt-level = 3

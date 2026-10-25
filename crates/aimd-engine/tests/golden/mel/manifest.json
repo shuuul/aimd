@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "generator": "scripts/export_mel_reference.py",
+  "checkpoint": "Qwen/Qwen3-ASR-1.7B-hf",
+  "feature_extractor_type": "Qwen3ASRFeatureExtractor",
+  "generated_with": {
+    "transformers": "5.17.0",
+    "torch": "2.14.0",
+    "numpy": "2.5.3"
+  },
+  "config": {
+    "sampling_rate": 16000,
+    "n_mels": 128,
+    "n_fft": 400,
+    "hop_length": 160,
+    "f_min": 0.0,
+    "f_max": 8000.0,
+    "mel_scale": "slaney",
+    "norm": "slaney",
+    "power": 2.0,
+    "center": true,
+    "pad_mode": "reflect",
+    "window": "hann",
+    "clamp_min": 1e-10,
+    "floor_offset": 8.0,
+    "norm_offset": 4.0,
+    "norm_scale": 4.0,
+    "drop_last_frame": true,
+    "dither": 0.0
+  },
+  "reference_chain": [
+    "f32 waveform @ 16 kHz",
+    "torch.stft(n_fft=400, hop=160, hann periodic, center=reflect(200), normalized=False)",
+    "1 + floor(N/hop) frames -> drop last -> floor(N/hop)",
+    "power = |stft|^2 (no normalization)",
+    "mel_filters.T @ power (slaney scale+norm, 201 -> 128, 0..8000 Hz)",
+    "clamp(min=1e-10).log10()",
+    "floor at global max - 8.0",
+    "(x + 4.0) / 4.0"
+  ],
+  "wrapper_padding_note": "min_length=8000 zero pad, max_length=480000 pad/truncate, and mel-axis pad to a multiple of 2*n_window=100 are caller-side padding concerns (model graph), not part of these fixtures.",
+  "tolerance": {
+    "abs": 0.01,
+    "rel": 0.001,
+    "note": "element-wise pass if abs <= 1e-2 or rel <= 1e-3; observed mirror bound recorded below"
+  },
+  "mirror_vs_torch_max_abs_diff": {
+    "sine_sweep_20hz_8khz": 4.6759843826293945e-05,
+    "multi_tone": 1.379847526550293e-05,
+    "seeded_noise": 1.1548399925231934e-06,
+    "near_silence_clamp": 1.1920928955078125e-07,
+    "silence": 0.0,
+    "speech_am_burst": 1.3977289199829102e-05,
+    "short_clip_nonmultiple": 1.2367963790893555e-05
+  },
+  "filterbank_mirror_max_abs_diff": 0.0,
+  "cases": [
+    {
+      "name": "sine_sweep_20hz_8khz",
+      "input": "cases/sine_sweep_20hz_8khz/input.f32",
+      "output": "cases/sine_sweep_20hz_8khz/output.f32",
+      "meta": "cases/sine_sweep_20hz_8khz/meta.json",
+      "samples": 32000,
+      "frames": 200,
+      "sha256": {
+        "input.f32": "246bcf4848b99122ac64cf1afc19b159ca8354b24c123bed70606198c13a1f0f",
+        "output.f32": "d0b965fd0a4a6adba6cbf0de0c7f4033c8cba1cb31e528c7c1fc9f6f53d35476"
+      }
+    },
+    {
+      "name": "multi_tone",
+      "input": "cases/multi_tone/input.f32",
+      "output": "cases/multi_tone/output.f32",
+      "meta": "cases/multi_tone/meta.json",
+      "samples": 24000,
+      "frames": 150,
+      "sha256": {
+        "input.f32": "a8bcafe16fb83debc422af5090b74f9aa35733645adf8f8673e5b764c5c21540",
+        "output.f32": "21dd45633cc8a68cd07f3b1434d29dbc23640098682de8a1023244cba258e1e9"
+      }
+    },
+    {
+      "name": "seeded_noise",
+      "input": "cases/seeded_noise/input.f32",
+      "output": "cases/seeded_noise/output.f32",
+      "meta": "cases/seeded_noise/meta.json",
+      "samples": 24000,
+      "frames": 150,
+      "sha256": {
+        "input.f32": "acdf0a105a069cb730018ecd77636a947a81d0624286be21ce0e573fdf86ca10",
+        "output.f32": "01bd56c1459a0f83457f2d9cc582cfa06b9ff93f9a5eb910a2fbc9991caf9644"
+      }
+    },
+    {
+      "name": "near_silence_clamp",
+      "input": "cases/near_silence_clamp/input.f32",
+      "output": "cases/near_silence_clamp/output.f32",
+      "meta": "cases/near_silence_clamp/meta.json",
+      "samples": 16000,
+      "frames": 100,
+      "sha256": {
+        "input.f32": "358a587c4f9fcf6c67d6688b27b4ab2f5065f01cfc338eeb0ff37eb6dfb64ea5",
+        "output.f32": "7901dd6f5c806ab835951739f5dd3681e95f97976b404ada580c06b8df6bca9b"
+      }
+    },
+    {
+      "name": "silence",
+      "input": "cases/silence/input.f32",
+      "output": "cases/silence/output.f32",
+      "meta": "cases/silence/meta.json",
+      "samples": 8000,
+      "frames": 50,
+      "sha256": {
+        "input.f32": "0c92bddb4e96f3ea9ec9f0f64a668255a6c15527ac09f6f119cafde60c7c4a39",
+        "output.f32": "9fc2e16fa5e53cd85d6846049e139c4f7310944c5392d41c31f978e3a8a70204"
+      }
+    },
+    {
+      "name": "speech_am_burst",
+      "input": "cases/speech_am_burst/input.f32",
+      "output": "cases/speech_am_burst/output.f32",
+      "meta": "cases/speech_am_burst/meta.json",
+      "samples": 28800,
+      "frames": 180,
+      "sha256": {
+        "input.f32": "b7e2fc053a51064f566f76e65d8b850ba45a7a70eed534c7498f5aec84f6f488",
+        "output.f32": "08aa3736a228acba4d79fda327ad864117455a23229011a7417a1c87ec099993"
+      }
+    },
+    {
+      "name": "short_clip_nonmultiple",
+      "input": "cases/short_clip_nonmultiple/input.f32",
+      "output": "cases/short_clip_nonmultiple/output.f32",
+      "meta": "cases/short_clip_nonmultiple/meta.json",
+      "samples": 9760,
+      "frames": 61,
+      "sha256": {
+        "input.f32": "28d715c6153aede8b5ccca80c5947ba16fc0e93fcfeda03b3e58848cd19c13cd",
+        "output.f32": "8fc6951c31edaeae1469338f424c274605eb64b57acdd83f32c3f8cedd2b8fed"
+      }
+    }
+  ]
+}

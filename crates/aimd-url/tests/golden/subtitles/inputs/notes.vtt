@@ -1,0 +1,19 @@
+WEBVTT - with title
+KIND: captions
+language: ja
+
+NOTE This is a comment
+
+NOTE
+multi-line note body
+
+cue-1
+00:00.000 --> 00:01.000
+short timestamps are not cue lines
+
+00:00:01.000 --> 00:00:02.000 line:90%
+- dash line one.
+- Dash line two.
+
+00:00:02.000 --> 00:00:03.000
+　ideographic　space sep end.

@@ -1,0 +1,21 @@
+[package]
+name = "aimd-engine"
+description = "MLX model graphs (Qwen3-ASR, Unlimited-OCR), tokenizer, audio/image front-ends, generation loops"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aimd-weights = { workspace = true }
+half = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokenizers = { workspace = true }
+image = { workspace = true }
+aimd-mlx = { workspace = true }
+
+[features]
+# MLX is the only compute backend and always linked; this empty alias is kept
+# so `--features mlx` invocations keep building.
+mlx = []

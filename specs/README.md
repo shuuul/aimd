@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [002-native-engine.md](002-native-engine.md) | Active | Hand-written Rust inference engine (CPU/Metal/CUDA) for Qwen3-ASR-1.7B + Unlimited-OCR behind the retained Python interfaces |
 
 ## Archived specs
 
@@ -54,8 +55,8 @@ Run the structural validator and its regression tests after any spec change,
 and always before archiving:
 
 ```bash
-uv run python scripts/check_specs.py  # exit 1 lists every problem
-uv run pytest -q tests/test_check_specs.py
+cargo xtask check-specs  # exit 1 lists every problem
+cargo test -p xtask
 ```
 
 The validator enforces filenames, flat frontmatter, real dates, per-directory
@@ -84,4 +85,4 @@ Before moving a spec to `specs/archive/`:
 5. Complete the completion summary and set `status: Completed`.
 6. Move the file (unchanged except closeout edits) and its index row to
    `specs/archive/` in the same change.
-7. Run `uv run python scripts/check_specs.py` and the focused validator tests.
+7. Run `cargo xtask check-specs` and the focused validator tests (`cargo test -p xtask`).

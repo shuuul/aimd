@@ -1,0 +1,47 @@
+{
+  "name": "speech_am_burst",
+  "samples": 28800,
+  "frames": 180,
+  "n_mels": 128,
+  "layout": "row_major_[n_mels,frames]_f32le",
+  "config": {
+    "sampling_rate": 16000,
+    "n_mels": 128,
+    "n_fft": 400,
+    "hop_length": 160,
+    "f_min": 0.0,
+    "f_max": 8000.0,
+    "mel_scale": "slaney",
+    "norm": "slaney",
+    "power": 2.0,
+    "center": true,
+    "pad_mode": "reflect",
+    "window": "hann",
+    "clamp_min": 1e-10,
+    "floor_offset": 8.0,
+    "norm_offset": 4.0,
+    "norm_scale": 4.0,
+    "drop_last_frame": true,
+    "dither": 0.0
+  },
+  "generator": {
+    "type": "speech_am_burst",
+    "freqs_hz": [
+      300.0,
+      700.0,
+      1220.0,
+      2600.0
+    ],
+    "am_amplitude": [
+      0.45,
+      0.25,
+      0.2,
+      0.15
+    ],
+    "am_hz": 3.0,
+    "gate_hz": 1.2,
+    "noise_seed": 99,
+    "noise_amplitude": 0.02
+  },
+  "fraction_below_clamp_floor": 0.0
+}

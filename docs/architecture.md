@@ -2,116 +2,159 @@
 
 ## Overview
 
-The repository has one published distribution, `aimd-tool`, with source code under `src/aimd`.
-The `aimd` package uses MarkItDown as the URL/local-file conversion contract and keeps core as a small interface-independent processing service:
+`aimd` is a Rust workspace at the repo root. It ships three binaries through Homebrew
+(`aimd`, `aimd-api`, `aimd-mcp`). The interface crates are thin. All routing and
+orchestration lives in `aimd-process`, which sits on interface-independent pipeline
+crates:
 
-- `aimd.core.models`: canonical request/response models.
-- `aimd.core.process`: input routing and processing.
-- `aimd.core.process`: processing orchestration, MarkItDown runner, and Markdown shaping helpers.
-- `aimd.interfaces.output`: shared output persistence helper for interfaces.
-- `aimd.interfaces.cli`: Typer CLI interface (`aimd.interfaces.cli:main`).
-- `aimd.interfaces.api`: FastAPI-backed HTTP API module (`aimd.interfaces.api:main`).
-- `aimd.interfaces.mcp`: MCP stdio server module (`aimd.interfaces.mcp.app:main`).
-- `aimd.plugins.url`: MarkItDown plugin for URL transcript extraction, yt-dlp subtitle-first/audio fallback, cookie handling, and opt-in Defuddle readable HTML extraction. Logic lives directly under `aimd.plugins.url/` (flattened).
-- `aimd.plugins.asr`: MarkItDown plugin for audio/video transcription, audio preprocessing, and backend selection. Backend implementations live under `aimd.plugins.asr.models` (`mlx`, `transformers`, `remote`).
-- `aimd.plugins.doc`: MarkItDown plugin for document conversion. EPUB uses a custom spine/image extraction pipeline; other Pandoc-supported formats use direct Pandoc conversion; text-layer PDFs use pdf-inspector (`AimdPdfConverter`) ahead of MarkItDown's built-in `PdfConverter`.
-- `aimd.plugins.ocr`: MarkItDown plugin and OCR task implementation for images and scanned PDFs. Engine implementations include local MLX/Transformers models and an OpenAI-compatible remote Unlimited-OCR adapter.
-
-Bundled MarkItDown plugin entry points are `aimd.plugins.asr`, `aimd.plugins.url`, `aimd.plugins.doc`, and `aimd.plugins.ocr`.
+- `aimd-core`: canonical request/response models (`ProcessInput`, `ProcessResult`,
+  `TextContext`, `TaskType`, `SourceKind`, `InputRoute`), `AimdError`/`ErrorKind`,
+  `ProcessHooks`, Markdown title/chunk shaping, precision parsing, remote-backend
+  configuration, extension tables, and interface-owned output persistence (`output`).
+- `aimd-doc`: document conversion. EPUB uses hand-written zip reading and an OPF spine
+  walk, runs Pandoc per chapter, applies cleanup, and extracts images into a flat
+  directory. Other formats go through the Pandoc CLI directly. Text-layer PDFs use the
+  `pdf-inspector` crate. `.txt`/`.md` pass through.
+- `aimd-url`: URL extraction over the yt-dlp CLI. It handles metadata, the subtitle-first
+  transcript, cookie handling with automatic browser probing, metadata ASR context, and
+  the audio download. The audio is handed to an `AudioTranscriber` trait.
+- `aimd-process`: `process_input`, routing (`route.rs`), the `Runtime` system seam,
+  local Qwen3-ASR (ffmpeg decode/segmenting, 8-bit retry), local Unlimited-OCR (images and
+  `mutool`-rendered PDF pages), OpenAI-compatible remote ASR/OCR, model alias/precision
+  resolution, and HF cache lookup/download.
+- `aimd-engine`: tokenizer, mel front-end, and the MLX model graphs and generation loops
+  for Qwen3-ASR and Unlimited-OCR.
+- `aimd-mlx`: C-ABI shim over MLX C++ (Metal; device selection via `AIMD_MLX_DEVICE`).
+- `aimd-weights`: safetensors mmap and the bit-exact MLX affine unpack used as a test
+  oracle.
+- `aimd-cli`, `aimd-api`, `aimd-mcp`: the CLI (hand-written argument parser), the axum
+  HTTP API (jobs, SSE, blobs, sidecar auth), and the rmcp stdio MCP server.
 
 ## Dependency Rules
 
-- Interface modules depend on the core processing service, not plugin implementation internals.
-- URL and local-file processing should go through `MarkItDown(enable_plugins=True)` rather than calling bundled plugin processors directly.
-- Plugins and core processing do not import interfaces.
-- Feature modules that handle local files should follow MarkItDown's plugin/converter contract.
-- Output destinations are interface concerns. `ProcessInput` does not carry `output_file`; CLI/API/MCP persist requested outputs through `aimd.interfaces.output`.
-- API/MCP response/request payload shaping lives in the API/MCP modules, not in core.
+- Interface crates depend on `aimd-core` and `aimd-process`, not on pipeline internals.
+- `aimd-doc` and `aimd-url` depend only on `aimd-core`. The URL audio fallback reaches
+  ASR through `aimd_url::AudioTranscriber`, which `aimd-process` implements
+  (`UrlAudioTranscriber`). This keeps the crate graph acyclic.
+- No pipeline crate depends on an interface crate.
+- System access in `aimd-process` (env, `PATH`, subprocesses, device preflight, model
+  loading, PDF probing) goes through the `Runtime` trait. `NativeRuntime` is the real
+  system, and tests substitute fakes.
+- Output destinations are interface concerns. `ProcessInput` does not carry
+  `output_file`; CLI/API/MCP persist requested outputs through `aimd_core::output`.
+- API/MCP request validation and response shaping live in the API/MCP crates.
 
 ## Primary Flow
 
-1. CLI/API/MCP receives request payload/options.
-2. The interface builds `ProcessInput` with shared mapping helpers and calls `aimd.core.process.process_input()`.
-3. Core routes request by `InputRoute(source_kind, task_type)`.
-4. URL and local-file tasks go through MarkItDown plus bundled plugins (`aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, `aimd.plugins.ocr`).
-5. Core returns lossless Markdown and its asset base alongside the shaped `TextContext`.
-6. The interface maps `ProcessResult` to interface-specific response/output and persists `output_file` if requested.
+1. CLI/API/MCP receives the request and builds a `ProcessInput`.
+2. The interface calls `aimd_process::process_input(&input, &hooks)` (the API and MCP run
+   it on a blocking worker).
+3. `ensure_supported_input` classifies the source into an `InputRoute { source_kind,
+   task_type }`. For PDFs, the pdf-inspector probe sends scanned PDFs and PDFs with
+   broken font encodings to OCR.
+4. Dispatch:
+   - URL -> `aimd-url` (subtitles, else audio download + ASR through the transcriber).
+   - `transcript` -> local or remote ASR.
+   - `ocr` -> local or remote OCR (images, or PDF pages rendered by `mutool`).
+   - `convert` -> `aimd-doc`.
+5. Local results are normalized (trailing whitespace stripped per line, runs of three or
+   more newlines collapsed). `process_input` then returns the lossless Markdown, its
+   asset base, and the shaped `TextContext`.
+6. The interface maps `ProcessResult` to its response or output and persists
+   `output_file` if requested.
 
 ```diagram
-╭──────────────╮     ╭──────────────────────╮     ╭──────────────────────╮
-│ CLI/API/MCP  │────▶│ process_input()      │────▶│ MarkItDown plugins  │
-│ interfaces   │     │ route + dispatch     │     │ URL/local conversion│
-╰──────┬───────╯     ╰──────────────────────╯     ╰──────────┬───────────╯
-       │                                                     │
-       │                                                     ▼
-       │                                          ╭──────────────────────╮
-       │                                          │ aimd.plugins.url, aimd.plugins.asr, │
-       │                                          │ aimd.plugins.doc, aimd.plugins.ocr │
-       │                                          ╰──────────┬───────────╯
-       ▼                                                     ▼
-╭────────────────────╮                           ╭──────────────────────╮
-│ aimd.interfaces.output +      │◀──────────────────────────│ ProcessResult        │
-│ interface mapping  │                           │ Markdown + asset base│
-│                    │                           │ + TextContext shape  │
-╰────────────────────╯                           ╰──────────────────────╯
+╭──────────────╮     ╭──────────────────────╮     ╭───────────────────────╮
+│ aimd-cli     │     │ aimd-process         │     │ aimd-url  (yt-dlp)    │
+│ aimd-api     │────▶│ process_input()      │────▶│ aimd-doc  (pandoc,    │
+│ aimd-mcp     │     │ route + dispatch     │     │   pdf-inspector)      │
+╰──────┬───────╯     ╰──────────┬───────────╯     │ asr / ocr / remote    │
+       │                        │                 ╰──────────┬────────────╯
+       │                        ▼                            ▼
+       │             ╭──────────────────────╮     ╭───────────────────────╮
+       │             │ aimd-engine          │◀────│ local ASR/OCR         │
+       │             │ aimd-mlx (Metal)     │     │ (ffmpeg, mutool)      │
+       │             ╰──────────────────────╯     ╰───────────────────────╯
+       ▼
+╭─────────────────────────╮       ╭─────────────────────────╮
+│ aimd_core::output +     │◀──────│ ProcessResult           │
+│ interface mapping       │       │ Markdown + asset base   │
+│                         │       │ + TextContext           │
+╰─────────────────────────╯       ╰─────────────────────────╯
 ```
 
-`ProcessResult.markdown` is the exact MarkItDown output before context splitting.
-`TextContext.chunk_list` remains the context-window representation and is not a lossless
-viewer artifact. `asset_base_uri` is the original URL for URL processing, the generated
-asset directory for document conversions that emit one, the input parent directory for
-other local convert/OCR work, and `None` for local transcriptions without related assets.
-Local directory URIs always end in `/` so standards-based URL joining preserves directory
+`ProcessResult.markdown` is the exact converter output before context splitting.
+`TextContext.chunk_list` is the context-window representation and is not a lossless
+viewer artifact. `asset_base_uri` takes one of these values:
+
+- the original URL, for URL processing;
+- the generated asset directory, for document conversions that emit one;
+- the input's parent directory, for other local convert/OCR work;
+- `None`, for local transcriptions.
+
+Local directory URIs always end in `/` so standards-based URL joining keeps directory
 semantics.
 
-Asset-producing document conversions create `output_dir` beside the local source. The
-directory is durable caller-owned output, not request-scoped temporary storage, and AIMD
-does not clean it up when an interface call completes. Interfaces therefore ignore a
-separate requested `output_file` for these results so relative links remain valid. Other
-requested files are persisted byte-for-byte from `ProcessResult.markdown`; interfaces
-must not reconstruct them from `TextContext.chunk_list`.
+Asset-producing document conversions (`.docx`, `.epub`, `.odt`) create `output_dir`
+beside the local source. The directory is durable caller-owned output, not
+request-scoped temporary storage. aimd does not clean it up when an interface call
+completes. Interfaces therefore ignore a separately requested `output_file` for these
+results, so relative links stay valid. Other requested files are written byte-for-byte
+from `ProcessResult.markdown`; interfaces must not rebuild them from
+`TextContext.chunk_list`.
 
 ## Backend And Model Boundaries
 
-Model selection is task-specific and flows through `ProcessInput.model` to the selected processor:
+| Task | Boundary | Model source |
+|------|----------|--------------|
+| Transcript | `aimd-url` for URL subtitles/audio; `aimd-process::asr` for transcription | Qwen3-ASR 1.7B/0.6B (`mlx-community/Qwen3-ASR-*-{4,6,8}bit`) on MLX, or remote `/v1/audio/transcriptions` when `AIMD_ASR_BASE_URL` is set. |
+| Convert | `aimd-doc` | Pandoc CLI, pdf-inspector, passthrough for `.txt`/`.md`. |
+| OCR | `aimd-process::ocr` | Unlimited-OCR (`mlx-community/Unlimited-OCR-{4,6,8}bit`) on MLX, or remote `/v1/chat/completions` when `AIMD_OCR_BASE_URL` is set. |
 
-| Task | Backend boundary | Supported model source |
-|------|-----------------|------------------------|
-| Transcript | `aimd.plugins.url` for URL/subtitle/audio fallback, `aimd.plugins.asr` for transcription | Qwen3-ASR 1.7B/0.6B through local MLX/Transformers, or remote `/v1/audio/transcriptions` when `AIMD_ASR_BASE_URL` is set. |
-| Convert | MarkItDown | MarkItDown built-ins plus bundled `aimd.plugins.url`, `aimd.plugins.asr`, `aimd.plugins.doc`, and `aimd.plugins.ocr` plugin entry points. |
-| OCR | MarkItDown + `aimd.plugins.ocr` plugin | Local MLX/Transformers models, or remote Unlimited-OCR chat completions when `AIMD_OCR_BASE_URL` is set. |
+The README is the user-facing source of truth for `--model` values. Resolution lives in
+`aimd-process/src/models.rs`, and the CLI help texts live in `aimd-core/src/output.rs`.
+Each checkpoint is loaded once per process and reused. Before loading, local inference
+checks that the MLX GPU device is active; on the CPU device it fails with
+`BackendUnavailable`.
 
-The README is the user-facing source of truth for supported `--model` values. Implementation constants live in `aimd.plugins.asr.const` and `aimd.plugins.ocr.backends`.
+Remote settings flow through `ProcessInput`, so CLI, API, MCP, local-file work, and the
+URL audio fallback share one selection path. Explicit request values override
+`AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`. A configured remote URL bypasses the local MLX
+preflight. Without one, local inference is used.
 
-Remote settings flow through `ProcessInput` and MarkItDown kwargs so CLI, API,
-MCP, local-file work, and URL audio fallback share one selection path. Explicit
-request values override `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`. A configured
-remote URL bypasses local CUDA/MLX preflight; without one, local behavior is
-unchanged.
+For performance expectations and benchmarks, see [Performance](performance.md).
+[Local desktop sidecar contract](sidecar.md) describes the authenticated loopback,
+path, job, and output-lifetime boundary that desktop clients use.
 
-For performance expectations and benchmarking guidance, see [Performance](performance.md).
-For the authenticated loopback process, path, job, and output-lifetime boundary used by
-desktop clients, see [Local desktop sidecar contract](sidecar.md).
+## Cancellation And Progress
 
-## MarkItDown Worker And Domain-Error Normalization
-
-Core runs MarkItDown conversion off the event loop via `_run_markitdown()` (`asyncio` executor). Failures are normalized by `_raise_from_markitdown_failure()`:
-
-1. Bare `AimdError` subclasses re-raise unchanged.
-2. MarkItDown `FileConversionException` aggregates are scanned in converter-attempt order, and the first nested `AimdError` cause/context is restored.
-3. Any other exception is wrapped as `ProcessingFailedError`.
-
-Feature plugins own mapping at their boundary:
-
-- Missing external backends (`pandoc`, `npx`, ASR engines) -> `BackendUnavailableError`
-- Missing input paths -> `InputNotFoundError`
-- Conversion/transcription failures -> `ProcessingFailedError`
+Every pipeline receives `&dyn ProcessHooks`. Pipelines report progress stages
+(`extracting`, `downloading`, `transcribing`, `converting`, `recognizing`) with unit
+counts when known. They call `check_cancelled()` only at safe boundaries: between ASR
+segments, OCR pages, and EPUB chapters. Model calls and subprocesses are never
+interrupted. The API maps the hooks onto job records and stages. A cancellation that
+arrives during uninterruptible work ends as `completed_after_request` with the artifact
+kept.
 
 ## Error Handling
 
-Domain errors in `aimd.core.errors` are preserved and used end-to-end:
+Errors are `aimd_core::AimdError { kind, message }` end-to-end. Each pipeline maps
+failures at its boundary:
 
-- `UnsupportedInputError` -> 400 in HTTP API
-- `BackendUnavailableError` -> 422 in HTTP API
-- `InputNotFoundError` -> 404 in HTTP API
-- `ProcessingFailedError` -> 500 in HTTP API
+- Missing tools, models, or device (`pandoc`, `yt-dlp`, `ffmpeg`, `mutool`, MLX GPU,
+  unsupported bf16 checkpoint) -> `BackendUnavailable`
+- Missing input paths -> `InputNotFound`
+- Unsupported inputs, options, or rejected cookie options -> `UnsupportedInput`
+- Conversion/transcription failures, unknown models -> `ProcessingFailed`
+- Cooperative cancellation -> `Cancelled`
+
+HTTP API status codes come from `ErrorKind::status_code`:
+
+- `UnsupportedInput` -> 400
+- `InputNotFound` -> 404
+- `Cancelled` -> 409
+- `BackendUnavailable` -> 422
+- `ProcessingFailed` -> 500
+
+The CLI logs the message to stderr and exits non-zero. MCP returns the message as a tool
+error.
