@@ -211,6 +211,37 @@ fn main() {
         roof,
     );
     drop((kv, kv_back));
+    let fused = quant_pool(&mut rng, 1, 4096, h);
+    row(
+        "qmv 2048->4096 (fused q|k|v) + same add tail",
+        chain(300, &x, |i, x| {
+            let y = qmm(x, &fused[i % fused.len()]);
+            let q = y.slice(&[0, 0], &[1, h], &[1, 1]).unwrap();
+            let kv = y.slice(&[0, h], &[1, 2 * h], &[1, 1]).unwrap();
+            q.add(&kv).unwrap()
+        }),
+        fused[0].bytes,
+        roof,
+    );
+    drop(fused);
+    // The decoder issues q, k and v from the same input; MLX dispatches the
+    // three independent kernels concurrently.
+    let qs = quant_pool(&mut rng, 1, h, h);
+    let ks = quant_pool(&mut rng, 1, 1024, h);
+    let vs = quant_pool(&mut rng, 1, 1024, h);
+    row(
+        "qmv q + k + v from one input (concurrent)",
+        chain(300, &x, |i, x| {
+            let q = qmm(x, &qs[i % qs.len()]);
+            let k = qmm(x, &ks[i % ks.len()]);
+            let v = qmm(x, &vs[i % vs.len()]);
+            q.add(&MlxArray::concatenate(&[&k, &v], 1).unwrap())
+                .unwrap()
+        }),
+        qs[0].bytes + 2 * ks[0].bytes,
+        roof,
+    );
+    drop((qs, ks, vs));
     let up = quant_pool(&mut rng, 1, 6144, h);
     let down = quant_pool(&mut rng, 1, h, 6144);
     let us = chain(200, &x, |i, x| {
@@ -304,6 +335,18 @@ fn main() {
         roof,
     );
     drop(att);
+    let fused = quant_pool(&mut rng, 1, 3 * d, d);
+    row(
+        "qmv 1280->3840 (fused q|k|v)",
+        chain(300, &x, |i, x| {
+            qmm(x, &fused[i % fused.len()])
+                .slice(&[0, 0], &[1, d], &[1, 1])
+                .unwrap()
+        }),
+        fused[0].bytes,
+        roof,
+    );
+    drop(fused);
     let su = quant_pool(&mut rng, 1, 1792, d);
     let sd = quant_pool(&mut rng, 1, d, 1792);
     row(

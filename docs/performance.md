@@ -134,9 +134,11 @@ roofline.
 
 Candidates ranked by expected saving per token:
 
-1. Fused q|k|v projection (load-time weight concatenation, plain MLX, no
-   custom kernel): OCR ~0.2 ms, ASR ~0.3 ms. Small qmv shapes run at 49-60%
-   of roofline, so one wider qmv beats three narrow ones.
+1. ~~Fused q|k|v projection~~ (tried 2026-10-26, not kept): outputs were
+   byte-identical (3 ASR clips, 7 OCR images) but decode moved <1% (OCR
+   196-204 tok/s both ways). In the real graph the three projections share
+   an input, so MLX dispatches them concurrently: 41.8 µs per ASR layer vs
+   35.6 µs fused, not the 44 µs the serial chain suggests.
 2. Fused MoE expert kernel (gather up|gate + SwiGLU + down + weighted sum):
    82 µs at 57% -> ~50 µs per layer, OCR ~0.35 ms.
 3. Split-K decode attention for long KV (flash-decoding style): OCR
@@ -146,7 +148,11 @@ Candidates ranked by expected saving per token:
 5. Small-op fusion (rms_norm + rope + KV row write): ~10 µs per layer, both
    models.
 
-Ceiling if all land: OCR decode ~1.25x, ASR ~1.15x. Prefill and the OCR
+Caveat: the chain serializes every op, so it overstates ops that run
+concurrently in the decoder (q/k/v, gate/up, shared vs routed experts).
+Treat the per-op times as upper bounds and the serially dependent paths
+(router -> experts, attention) as the reliable targets. Ceiling if all land:
+OCR decode ~1.2x, ASR ~1.1x. Prefill and the OCR
 vision tower (2.6 s of a 4.8 s page) are separate targets.
 
 ## Smoke-test record (Python era)

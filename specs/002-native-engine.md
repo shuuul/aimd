@@ -939,6 +939,19 @@ Append entries rather than rewriting another worker's record.
   expert kernel via `mlx::core::fast::metal_kernel` through the shim,
   each A/B'd with text-identical outputs.
 
+### 2026-10-26 — shuuul/WS-08 fused q|k|v tried and dropped — WS-08
+
+- Changed: fused q|k|v (load-time `concatenate` of the three quantized
+  projections, one qmv, head slices) implemented for both decoders, then
+  reverted. `bench_ops` gained fused and concurrent q/k/v rows.
+- Evidence: engine goldens passed; transcripts (3 clips) and OCR markdown
+  (7 images) byte-identical; ASR long clip 2.98-3.07 s base vs 2.94-3.05 s,
+  OCR decode 200-204 vs 196-204 tok/s (interleaved). Concurrent dispatch of
+  the separate projections already recovers most of the saving
+  (41.8 vs 35.6 µs per ASR layer).
+- Next action: fused MoE expert kernel (`metal_kernel` through the shim),
+  measured end-to-end against the concurrent baseline, not the chain.
+
 ## Completion summary
 
 (to complete before archiving)
