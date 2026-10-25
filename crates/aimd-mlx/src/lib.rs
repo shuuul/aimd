@@ -860,7 +860,8 @@ impl MlxArray {
     }
 
     /// Exact-erf GELU, composed in `mlx.nn.gelu`'s evaluation order
-    /// (`x * (1 + erf(x / sqrt(2))) / 2` with input-dtype scalars).
+    /// (`x * (1 + erf(x / sqrt(2))) / 2` with input-dtype scalars) and
+    /// compiled into one kernel like `mlx.nn.gelu`.
     pub fn gelu(&self) -> Result<Self, MlxError> {
         let ptr = unsafe { ffi::mlx_gelu(self.ptr.as_ptr()) };
         Self::from_handle(ptr, "mlx_gelu")

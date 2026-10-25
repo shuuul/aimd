@@ -189,6 +189,18 @@ Treat the per-op times as upper bounds and the serially dependent paths
 OCR decode ~1.2x, ASR ~1.1x. Prefill and the OCR
 vision tower (2.6 s of a 4.8 s page) are separate targets.
 
+OCR vision tower (2026-10-26, sym-6, 12 crops + global view, ~1.5 s):
+SAM over the crops is ~1.0 s (window blocks ~75 ms, global blocks ~95 ms
+at B = 12), the global view's SAM ~0.27 s, CLIP ~0.23 s. The bf16 GEMMs
+(qkv, lin1, lin2) run at 4-5 TFLOPS. `gelu` was five unfused elementwise
+kernels (7.5 ms per crop block); it is now compiled like `mlx.nn.gelu`
+(`@mx.compile(shapeless=True)`, intermediates keep their dtype) into one
+kernel (3.1 ms): vision 1.505 -> 1.432 s per page, OCR markdown and ASR
+text identical (the first run on a machine pays a one-time Metal compile).
+The rel-pos bias broadcast add already writes ~104 GB/s in isolation; a
+custom kernel was no faster (the 25 ms seen under per-op evals is
+first-touch allocation).
+
 ## Smoke-test record (Python era)
 
 Functional smoke tests of the Python package, not benchmarks. They verified that the

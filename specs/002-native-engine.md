@@ -1031,6 +1031,18 @@ Append entries rather than rewriting another worker's record.
   tok/s median (base = 04ccb0e).
 - Next action: residual add + rms_norm, rope + KV write.
 
+### 2026-10-26 — shuuul/WS-08 compiled GELU — WS-08
+
+- Changed: `mlx_gelu` compiles the `mlx.nn.gelu` graph
+  (`compile(shapeless=true)`), as mlx does in Python: one fused kernel
+  instead of five (SAM, CLIP, and the Qwen3-ASR audio encoder).
+- Evidence: OCR vision 1.505 -> 1.432 s per page; OCR markdown
+  byte-identical on 7 images; ASR text identical on 3 clips (5-minute clip
+  22.15 -> 21.95 s). A custom rel-pos bias kernel was not kept (the
+  broadcast add is already ~104 GB/s). Measured cost of one dispatch per
+  decoder layer: ~0.7% of OCR decode.
+- Next action: residual add + rms_norm, rope + KV write (~0.7% each).
+
 ## Completion summary
 
 (to complete before archiving)

@@ -272,6 +272,17 @@ std::vector<array> swiglu_impl(const std::vector<array>& inputs) {
       mlx::core::multiply(gate, mlx::core::sigmoid(gate)), inputs[1])};
 }
 
+// `mlx.nn.gelu` (`x * (1 + erf(x / sqrt(2))) / 2` under
+// `@mx.compile(shapeless=True)`), scalars in the input dtype.
+std::vector<array> gelu_impl(const std::vector<array>& inputs) {
+  const array& a = inputs[0];
+  array sqrt2 = array(std::sqrt(2.0), a.dtype());
+  array one = array(1, a.dtype());
+  array two = array(2, a.dtype());
+  array t = mlx::core::erf(mlx::core::divide(a, sqrt2));
+  return {mlx::core::divide(mlx::core::multiply(a, mlx::core::add(one, t)), two)};
+}
+
 } // namespace
 
 extern "C" {
@@ -773,23 +784,20 @@ AimdMlxArray* mlx_layer_norm(
   });
 }
 
-/// Exact-erf GELU, composed in the exact `mlx.nn.gelu` evaluation order:
-/// `x * (1 + erf(x / sqrt(2))) / 2` (mlx/nn/layers/activations.py:169).
-/// Scalars are created with the input's dtype so promotion matches the
-/// Python weak-scalar behavior (no accidental f32 upcast for bf16/f16
-/// inputs).
+/// Exact-erf GELU in `mlx.nn.gelu`'s evaluation order, compiled like
+/// `mlx.nn.gelu` (`@mx.compile(shapeless=True)`, mlx/nn/layers/activations.py)
+/// into one fused elementwise kernel; each intermediate keeps its dtype, so
+/// values match the unfused ops. Scalars are created with the input's dtype
+/// so promotion matches the Python weak-scalar behavior (no accidental f32
+/// upcast for bf16/f16 inputs).
 AimdMlxArray* mlx_gelu(AimdMlxArray* x) {
   return guarded([&]() -> AimdMlxArray* {
     if (x == nullptr) {
       throw std::invalid_argument("[aimd_mlx] null array handle");
     }
-    array& a = as_array(x);
-    array sqrt2 = array(std::sqrt(2.0), a.dtype());
-    array one = array(1, a.dtype());
-    array two = array(2, a.dtype());
-    array t = mlx::core::erf(mlx::core::divide(a, sqrt2));
-    array out = mlx::core::divide(mlx::core::multiply(a, mlx::core::add(one, t)), two);
-    return reinterpret_cast<AimdMlxArray*>(new array(std::move(out)));
+    static const auto compiled = mlx::core::compile(gelu_impl, true);
+    return reinterpret_cast<AimdMlxArray*>(
+        new array(compiled({as_array(x)})[0]));
   });
 }
 
