@@ -74,6 +74,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Verify tag matches package version
         shell: bash
@@ -135,6 +136,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install released ref as uv tool
         run: >-

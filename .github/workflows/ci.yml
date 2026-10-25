@@ -1,10 +1,20 @@
 name: CI
 
+# Python CI. Native (Rust) changes are covered by native.yml, so they are
+# ignored here (and vice versa). Note: if either workflow becomes a required
+# status check, paths filtering leaves it "pending" on unrelated PRs; use a
+# path-aware aggregate job in that case.
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "native/**"
+      - ".github/workflows/native.yml"
   pull_request:
+    paths-ignore:
+      - "native/**"
+      - ".github/workflows/native.yml"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -13,32 +23,36 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_LOCKED: "1"
+
 jobs:
+  # Runs once (not per Python version): specs validator + ruff. Only the dev
+  # dependency group is installed, so no torch/ML wheels are resolved.
   lint:
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version-file: ".python-version"
-
       - name: Install uv
         uses: astral-sh/setup-uv@v10.0.1
         with:
+          python-version: "3.12"
           enable-cache: true
+          cache-dependency-glob: uv.lock
 
-      - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
+      - name: Check tracked specs
+        run: uv run --only-group dev python scripts/check_specs.py
 
       - name: Ruff lint
-        run: uv run ruff check .
+        run: uv run --only-group dev ruff check .
 
       - name: Ruff format check
-        run: uv run ruff format --check .
+        run: uv run --only-group dev ruff format --check .
+
+      - name: Prune uv cache
+        run: uv cache prune --ci
 
   test:
     runs-on: ubuntu-latest
@@ -48,28 +62,25 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
-    env:
-      UV_PYTHON: ${{ matrix.python-version }}
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install uv
+      # setup-uv installs the interpreter through uv (UV_PYTHON), replacing
+      # a separate setup-python step.
+      - name: Install uv and Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v10.0.1
         with:
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
+        run: uv sync --all-extras --dev
 
-      - name: Check tracked specs
-        run: uv run python scripts/check_specs.py
-
+      # Tests are hermetic: ML backends are mocked, no weights or network.
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run --no-sync pytest -q
+
+      - name: Prune uv cache
+        run: uv cache prune --ci

@@ -279,7 +279,7 @@ async def test_extract_subtitles_uses_metadata_cookie_source(monkeypatch) -> Non
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def urlopen(self, url):  # noqa: ARG002
+        def urlopen(self, url):  # noqa: ARG002  # nosemgrep: test-double for ydl.urlopen
             return _FakeResponse()
 
     monkeypatch.setattr(
