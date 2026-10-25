@@ -3,7 +3,7 @@ id: "002"
 title: "Native Rust inference engine reimplementation"
 status: Active
 created: 2026-10-25
-updated: 2026-10-25
+updated: 2026-10-26
 coordinator: "shuuul"
 ---
 
@@ -991,6 +991,18 @@ Append entries rather than rewriting another worker's record.
   row-per-threadgroup gemv (-0.8 µs only).
 - Next action: shared-expert MLP through the expert kernel (E=1), then
   decode attention.
+
+### 2026-10-26 — shuuul/WS-08 shared + dense MLP as one expert — WS-08
+
+- Changed: single-token GPU steps run the OCR shared-expert MLP and the
+  layer-0 dense MLP through `moe_swiglu_4bit` with `[1, out, in/8]` weight
+  views, `inds = [0]`, `scores = [1]`. The parity test gained the
+  1280/1792 and 1280/6848 one-expert shapes against the plain
+  `quantized_matmul` MLP (bit-identical: mlx's M=1 qmv takes `qmv_impl`
+  for K % 512 != 0).
+- Evidence: OCR markdown byte-identical on 7 images; OCR decode ~259 ->
+  ~262 tok/s median (4 interleaved runs x 4 rounds, base = f6f4642).
+- Next action: decode attention, then small-op fusion.
 
 ## Completion summary
 

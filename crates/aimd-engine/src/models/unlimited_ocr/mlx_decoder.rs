@@ -109,18 +109,81 @@ struct DenseMlp {
     gate: QWeights,
     up: QWeights,
     down: QWeights,
+    /// Single-token GPU steps run the MLP as one expert of
+    /// [`MlxArray::moe_swiglu_4bit`]: `[1, out, in/..]` views of the
+    /// gate/up/down weights, `inds = [0]` and `scores = [1]`.
+    one: Option<OneExpert>,
+}
+
+struct OneExpert {
+    w: [MlxArray; 9],
+    inds: MlxArray,
+    scores: MlxArray,
 }
 
 impl DenseMlp {
-    fn load(store: &WeightStore, p: &str, gs: u32, bits: u32) -> Result<Self, LoadError> {
+    fn load(
+        store: &WeightStore,
+        p: &str,
+        gs: u32,
+        bits: u32,
+        fused: bool,
+    ) -> Result<Self, LoadError> {
+        let gate = QWeights::load(store, &format!("{p}.gate_proj"), gs, bits)?;
+        let up = QWeights::load(store, &format!("{p}.up_proj"), gs, bits)?;
+        let down = QWeights::load(store, &format!("{p}.down_proj"), gs, bits)?;
+        let one = if fused {
+            let view = |a: &MlxArray| -> Result<MlxArray, MlxError> {
+                let s = a.shape()?;
+                a.reshape(&[1, s[0], s[1]])
+            };
+            let [g, u, d] = [&gate, &up, &down].map(QWeights::packed);
+            Some(OneExpert {
+                w: [
+                    view(g[0])?,
+                    view(g[1])?,
+                    view(g[2])?,
+                    view(u[0])?,
+                    view(u[1])?,
+                    view(u[2])?,
+                    view(d[0])?,
+                    view(d[1])?,
+                    view(d[2])?,
+                ],
+                inds: MlxArray::from_u32(&[1], &[0])?,
+                scores: MlxArray::scalar_f32(1.0)?
+                    .reshape(&[1])?
+                    .astype(gate.scales.dtype()?)?,
+            })
+        } else {
+            None
+        };
         Ok(Self {
-            gate: QWeights::load(store, &format!("{p}.gate_proj"), gs, bits)?,
-            up: QWeights::load(store, &format!("{p}.up_proj"), gs, bits)?,
-            down: QWeights::load(store, &format!("{p}.down_proj"), gs, bits)?,
+            gate,
+            up,
+            down,
+            one,
         })
     }
 
     fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+        if let Some(one) = &self.one {
+            let s = x.shape()?;
+            if s[0] * s[1] == 1 {
+                let w = &one.w;
+                return x
+                    .reshape(&[s[2]])?
+                    .moe_swiglu_4bit(
+                        &one.inds,
+                        &one.scores,
+                        [&w[0], &w[1], &w[2]],
+                        [&w[3], &w[4], &w[5]],
+                        [&w[6], &w[7], &w[8]],
+                        self.gate.group_size,
+                    )?
+                    .reshape(&s);
+            }
+        }
         let g = self.gate.linear(x)?;
         let u = self.up.linear(x)?;
         self.down.linear(&g.swiglu(&u)?)
@@ -218,7 +281,7 @@ impl Moe {
 }
 
 enum Mlp {
-    Dense(DenseMlp),
+    Dense(Box<DenseMlp>),
     Moe(Box<Moe>),
 }
 
@@ -320,11 +383,23 @@ impl OcrDecoder {
                         gs,
                         bits,
                     )?,
-                    shared: DenseMlp::load(store, &format!("{l}.mlp.shared_experts"), gs, bits)?,
+                    shared: DenseMlp::load(
+                        store,
+                        &format!("{l}.mlp.shared_experts"),
+                        gs,
+                        bits,
+                        fused_moe,
+                    )?,
                     fused: fused_moe,
                 }))
             } else {
-                Mlp::Dense(DenseMlp::load(store, &format!("{l}.mlp"), gs, bits)?)
+                Mlp::Dense(Box::new(DenseMlp::load(
+                    store,
+                    &format!("{l}.mlp"),
+                    gs,
+                    bits,
+                    fused_moe,
+                )?))
             };
             layers.push(Layer {
                 input_ln: dense(

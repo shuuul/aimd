@@ -151,6 +151,10 @@ Candidates ranked by expected saving per token:
    accumulation order and bf16 rounding, so the output is bit-identical
    to the `gather_qmm` graph. Layouts that kept more activations per lane
    (registers or threadgroup memory) lost occupancy and ran 100-173 µs.
+   The shared-expert and layer-0 dense MLPs run through the same kernel as
+   one expert with score 1 (bit-identical to the `quantized_matmul` MLP:
+   M=1 takes `qmv_impl` for K=1280/1792/6848): OCR decode ~259 -> ~262
+   tok/s (+1.5%), markdown byte-identical on 7 images.
 3. Split-K decode attention for long KV (flash-decoding style): OCR
    102 -> ~80 µs per layer (~0.25 ms), ASR ~0.3 ms on long clips.
 4. Fused router (shipped 2026-10-26): `mlx_moe_router` keeps mlx's gate

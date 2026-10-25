@@ -794,9 +794,16 @@ fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
         state
     };
     let bf = |v: f32| bf16::from_f32(v).to_bits();
-    // (hidden, intermediate, experts, top-k): a small case and the
-    // Unlimited-OCR decode shape (1280 / 896, top-6) with fewer experts.
-    for (d, inter, experts, k) in [(256usize, 128usize, 8usize, 3usize), (1280, 896, 10, 6)] {
+    // (hidden, intermediate, experts, top-k): a small case, the
+    // Unlimited-OCR decode shape (1280 / 896, top-6) with fewer experts, and
+    // its shared-expert and dense MLPs as one expert with score 1 (checked
+    // against the plain `quantized_matmul` MLP).
+    for (d, inter, experts, k) in [
+        (256usize, 128usize, 8usize, 3usize),
+        (1280, 896, 10, 6),
+        (1280, 1792, 1, 1),
+        (1280, 6848, 1, 1),
+    ] {
         let gs = 64usize;
         let mut quant = |rows: usize, cols: usize| {
             let r = experts * rows;
@@ -828,7 +835,13 @@ fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
             .map(|i| (i * 7 + 2) % experts as u32)
             .collect();
         let sv: Vec<bf16> = (0..k)
-            .map(|i| bf16::from_f32(0.3 - i as f32 * 0.04))
+            .map(|i| {
+                bf16::from_f32(if experts == 1 {
+                    1.0
+                } else {
+                    0.3 - i as f32 * 0.04
+                })
+            })
             .collect();
         let x = MlxArray::from_bf16(&[d], &xv).unwrap();
         let inds = MlxArray::from_u32(&[k], &picks).unwrap();
@@ -864,15 +877,37 @@ fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
         };
         let x5 = x.reshape(&[1, 1, 1, 1, d]).unwrap();
         let h = gq(&x5, &gate).swiglu(&gq(&x5, &up)).unwrap();
-        let want = gq(&h, &down)
-            .reshape(&[1, 1, k, d])
-            .unwrap()
-            .multiply(&scores.reshape(&[1, 1, k, 1]).unwrap())
-            .unwrap()
-            .sum_axis(-2, false)
-            .unwrap()
-            .reshape(&[d])
-            .unwrap();
+        let want = if experts == 1 {
+            let qm = |x: &MlxArray, q: &(MlxArray, MlxArray, MlxArray)| {
+                let flat = |a: &MlxArray| {
+                    let s = a.shape().unwrap();
+                    a.reshape(&[s[1], s[2]]).unwrap()
+                };
+                x.quantized_matmul(
+                    &flat(&q.0),
+                    &flat(&q.1),
+                    Some(&flat(&q.2)),
+                    true,
+                    Some(gs as i32),
+                    Some(4),
+                    None,
+                )
+                .unwrap()
+            };
+            let x3 = x.reshape(&[1, 1, d]).unwrap();
+            let h = qm(&x3, &gate).swiglu(&qm(&x3, &up)).unwrap();
+            qm(&h, &down).reshape(&[d]).unwrap()
+        } else {
+            gq(&h, &down)
+                .reshape(&[1, 1, k, d])
+                .unwrap()
+                .multiply(&scores.reshape(&[1, 1, k, 1]).unwrap())
+                .unwrap()
+                .sum_axis(-2, false)
+                .unwrap()
+                .reshape(&[d])
+                .unwrap()
+        };
         // Same accumulation order and rounding as mlx: bit-identical.
         assert_eq!(
             got.to_bf16_vec().unwrap(),
