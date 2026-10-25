@@ -161,7 +161,8 @@ jobs:
   tap-pr:
     name: Open formula bump PR
     needs: build
-    if: ${{ inputs.open_tap_pr != false }}
+    # `inputs` is null on tag pushes, so test the event, not just the input.
+    if: ${{ github.event_name == 'push' || inputs.open_tap_pr }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
