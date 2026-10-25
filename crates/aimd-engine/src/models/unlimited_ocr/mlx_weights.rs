@@ -219,6 +219,11 @@ impl QWeights {
         })
     }
 
+    /// The packed `(weight, scales, biases)` triple.
+    pub(crate) fn packed(&self) -> [&MlxArray; 3] {
+        [&self.w, &self.scales, &self.biases]
+    }
+
     /// `nn.QuantizedLinear.__call__`: `quantized_matmul(x, w, transpose)`
     /// then `+ bias`.
     pub(crate) fn linear(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {

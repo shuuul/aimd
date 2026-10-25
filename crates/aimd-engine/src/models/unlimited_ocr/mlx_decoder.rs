@@ -19,7 +19,9 @@
 //!   top-6 via `argpartition` + `take_along_axis` (routed scaling 1.0),
 //!   `SwitchGLU` over 4-bit experts through `gather_qmm` (sorted path when
 //!   `indices.size >= 64`), weighted sum over the selected experts, plus
-//!   the 2-expert shared MLP (intermediate 1792).
+//!   the 2-expert shared MLP (intermediate 1792). Single-token steps on the
+//!   GPU run the routed experts as one fused kernel pair
+//!   (`MlxArray::moe_swiglu_4bit`), bit-identical to that graph.
 //! - Final RMSNorm and the untied 4-bit `lm_head`.
 //! - Embeddings are `nn.QuantizedEmbedding` (row gather + dequantize).
 //!
@@ -133,6 +135,10 @@ struct Moe {
     sw_up: QWeights,
     sw_down: QWeights,
     shared: DenseMlp,
+    /// Single-token steps use the fused expert kernel
+    /// ([`MlxArray::moe_swiglu_4bit`], bit-identical to `switch_glu`):
+    /// 4-bit experts on the GPU device only.
+    fused: bool,
 }
 
 impl Moe {
@@ -183,8 +189,23 @@ impl Moe {
 
     fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
         let s = x.shape()?;
-        let (b, l) = (s[0], s[1]);
+        let (b, l, d) = (s[0], s[1], s[2]);
         let (inds, scores) = self.route(x)?;
+        if self.fused && b * l == 1 {
+            let k = self.top_k;
+            let y = x
+                .reshape(&[d])?
+                .moe_swiglu_4bit(
+                    &inds.reshape(&[k])?,
+                    &scores.reshape(&[k])?,
+                    self.sw_gate.packed(),
+                    self.sw_up.packed(),
+                    self.sw_down.packed(),
+                    self.sw_gate.group_size,
+                )?
+                .reshape(&[b, l, d])?;
+            return y.add(&self.shared.forward(x)?);
+        }
         let y = self.switch_glu(x, &inds)?;
         let y = y
             .multiply(&scores.reshape(&[b, l, self.top_k, 1])?)?
@@ -256,6 +277,8 @@ impl OcrDecoder {
             ));
         }
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
+        // Custom Metal kernels need the GPU; the CPU device keeps gather_qmm.
+        let fused_moe = bits == 4 && !aimd_mlx::device_is_cpu().unwrap_or(true);
         let p = "language_model.model";
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for i in 0..cfg.num_hidden_layers {
@@ -294,6 +317,7 @@ impl OcrDecoder {
                         bits,
                     )?,
                     shared: DenseMlp::load(store, &format!("{l}.mlp.shared_experts"), gs, bits)?,
+                    fused: fused_moe,
                 }))
             } else {
                 Mlp::Dense(DenseMlp::load(store, &format!("{l}.mlp"), gs, bits)?)

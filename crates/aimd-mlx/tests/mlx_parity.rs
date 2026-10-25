@@ -778,3 +778,106 @@ fn mlx_device_follows_env_override() {
         _ => {}
     }
 }
+
+#[test]
+fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
+    // Custom Metal kernels need the GPU; the CPU device (hermetic CI) keeps
+    // the gather_qmm path.
+    if aimd_mlx::device_is_cpu().expect("device query") {
+        return;
+    }
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let bf = |v: f32| bf16::from_f32(v).to_bits();
+    // (hidden, intermediate, experts, top-k): a small case and the
+    // Unlimited-OCR decode shape (1280 / 896, top-6) with fewer experts.
+    for (d, inter, experts, k) in [(256usize, 128usize, 8usize, 3usize), (1280, 896, 10, 6)] {
+        let gs = 64usize;
+        let mut quant = |rows: usize, cols: usize| {
+            let r = experts * rows;
+            let (words, groups) = (cols / 8, cols / gs);
+            let payload: Vec<u8> = (0..r * words * 4).map(|_| next() as u8).collect();
+            let scales: Vec<u16> = (0..r * groups)
+                .map(|_| bf(0.001 + (next() % 1000) as f32 * 4e-6))
+                .collect();
+            let biases: Vec<u16> = (0..r * groups)
+                .map(|_| bf(-0.03 + (next() % 1000) as f32 * 3e-5))
+                .collect();
+            MlxArray::quantized_weight(
+                &payload,
+                &[experts, rows, words],
+                &scales,
+                &biases,
+                &[experts, rows, groups],
+                MlxDtype::Bf16,
+            )
+            .unwrap()
+        };
+        let gate = quant(inter, d);
+        let up = quant(inter, d);
+        let down = quant(d, inter);
+        let xv: Vec<bf16> = (0..d)
+            .map(|_| bf16::from_f32((next() % 2000) as f32 / 1000.0 - 1.0))
+            .collect();
+        let picks: Vec<u32> = (0..k as u32)
+            .map(|i| (i * 7 + 2) % experts as u32)
+            .collect();
+        let sv: Vec<bf16> = (0..k)
+            .map(|i| bf16::from_f32(0.3 - i as f32 * 0.04))
+            .collect();
+        let x = MlxArray::from_bf16(&[d], &xv).unwrap();
+        let inds = MlxArray::from_u32(&[k], &picks).unwrap();
+        let scores = MlxArray::from_bf16(&[k], &sv).unwrap();
+
+        let got = x
+            .moe_swiglu_4bit(
+                &inds,
+                &scores,
+                [&gate.0, &gate.1, &gate.2],
+                [&up.0, &up.1, &up.2],
+                [&down.0, &down.1, &down.2],
+                gs as i32,
+            )
+            .unwrap();
+        assert_eq!(got.shape().unwrap(), vec![d]);
+
+        // Reference: the decoder's unfused SwitchGLU graph.
+        let idx = inds.reshape(&[1, 1, k]).unwrap();
+        let gq = |x: &MlxArray, q: &(MlxArray, MlxArray, MlxArray)| {
+            x.gather_qmm(
+                &q.0,
+                &q.1,
+                Some(&q.2),
+                None,
+                Some(&idx),
+                true,
+                Some(gs as i32),
+                Some(4),
+                false,
+            )
+            .unwrap()
+        };
+        let x5 = x.reshape(&[1, 1, 1, 1, d]).unwrap();
+        let h = gq(&x5, &gate).swiglu(&gq(&x5, &up)).unwrap();
+        let want = gq(&h, &down)
+            .reshape(&[1, 1, k, d])
+            .unwrap()
+            .multiply(&scores.reshape(&[1, 1, k, 1]).unwrap())
+            .unwrap()
+            .sum_axis(-2, false)
+            .unwrap()
+            .reshape(&[d])
+            .unwrap();
+        // Same accumulation order and rounding as mlx: bit-identical.
+        assert_eq!(
+            got.to_bf16_vec().unwrap(),
+            want.to_bf16_vec().unwrap(),
+            "d={d} inter={inter}"
+        );
+    }
+}

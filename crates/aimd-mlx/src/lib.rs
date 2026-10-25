@@ -332,6 +332,21 @@ mod ffi {
             bits: i32,
             sorted_indices: u8,
         ) -> *mut AimdMlxArray;
+        pub fn mlx_moe_swiglu_4bit(
+            x: *mut AimdMlxArray,
+            inds: *mut AimdMlxArray,
+            scores: *mut AimdMlxArray,
+            gate_w: *mut AimdMlxArray,
+            gate_s: *mut AimdMlxArray,
+            gate_b: *mut AimdMlxArray,
+            up_w: *mut AimdMlxArray,
+            up_s: *mut AimdMlxArray,
+            up_b: *mut AimdMlxArray,
+            down_w: *mut AimdMlxArray,
+            down_s: *mut AimdMlxArray,
+            down_b: *mut AimdMlxArray,
+            group_size: i32,
+        ) -> *mut AimdMlxArray;
         pub fn mlx_async_eval(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_eval_many(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_device_is_cpu() -> i32;
@@ -1115,6 +1130,41 @@ impl MlxArray {
             )
         };
         Self::from_handle(ptr, "mlx_gather_qmm")
+    }
+
+    /// Fused single-token MoE experts over affine 4-bit expert stacks:
+    /// `sum_k scores[k] * down[e](silu(gate[e](x)) * up[e](x))`, `e =
+    /// inds[k]`, in two custom Metal kernels. `self` is `[D]`, `inds` `[K]`
+    /// u32, `scores` `[K]`; each projection is `(weight, scales, biases)`
+    /// with `[E, out, in/8]` u32 weights. Returns `[D]`. Tracks the
+    /// `gather_qmm` + SwiGLU + weighted-sum graph to bf16 rounding.
+    pub fn moe_swiglu_4bit(
+        &self,
+        inds: &Self,
+        scores: &Self,
+        gate: [&Self; 3],
+        up: [&Self; 3],
+        down: [&Self; 3],
+        group_size: i32,
+    ) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_moe_swiglu_4bit(
+                self.ptr.as_ptr(),
+                inds.ptr.as_ptr(),
+                scores.ptr.as_ptr(),
+                gate[0].ptr.as_ptr(),
+                gate[1].ptr.as_ptr(),
+                gate[2].ptr.as_ptr(),
+                up[0].ptr.as_ptr(),
+                up[1].ptr.as_ptr(),
+                up[2].ptr.as_ptr(),
+                down[0].ptr.as_ptr(),
+                down[1].ptr.as_ptr(),
+                down[2].ptr.as_ptr(),
+                group_size,
+            )
+        };
+        Self::from_handle(ptr, "mlx_moe_swiglu_4bit")
     }
 
     /// Schedules `arrays` for evaluation without blocking (`mx.async_eval`).

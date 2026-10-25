@@ -389,7 +389,89 @@ fn main() {
         per_expert * topk,
         roof,
     );
-    drop((e_up, e_down));
+    let e_gate = quant_pool(&mut rng, experts, inter, d);
+    let scores = bf16_array(&mut rng, &[1, 1, topk, 1]);
+    row(
+        "MoE experts unfused: gate|up + swiglu + down + score sum",
+        chain(200, &x5, |i, x| {
+            let (g, u) = (&e_gate[i % e_gate.len()], &e_up[i % e_up.len()]);
+            let h = gq(x, g).swiglu(&gq(x, u)).unwrap();
+            gq(&h, &e_down[i % e_down.len()])
+                .reshape(&[1, 1, topk, d])
+                .unwrap()
+                .multiply(&scores)
+                .unwrap()
+                .sum_axis(-2, false)
+                .unwrap()
+                .reshape(&[1, 1, 1, 1, d])
+                .unwrap()
+        }),
+        per_expert * topk * 3 / 2,
+        roof,
+    );
+    if std::env::var("AIMD_MOE_STAGE").is_ok() {
+        row(
+            "  unfused stage: gate|up + swiglu (slice back to x)",
+            chain(200, &x5, |i, x| {
+                let (g, u) = (&e_gate[i % e_gate.len()], &e_up[i % e_up.len()]);
+                gq(x, g)
+                    .swiglu(&gq(x, u))
+                    .unwrap()
+                    .reshape(&[topk * inter])
+                    .unwrap()
+                    .slice(&[0], &[d], &[1])
+                    .unwrap()
+                    .reshape(&[1, 1, 1, 1, d])
+                    .unwrap()
+            }),
+            per_expert * topk,
+            roof,
+        );
+        let h0 = bf16_array(&mut rng, &[1, 1, topk, 1, inter]);
+        row(
+            "  unfused stage: down + score sum (fixed h)",
+            chain(200, &x5, |i, x| {
+                gq(&h0, &e_down[i % e_down.len()])
+                    .reshape(&[1, 1, topk, d])
+                    .unwrap()
+                    .multiply(&scores)
+                    .unwrap()
+                    .sum_axis(-2, false)
+                    .unwrap()
+                    .reshape(&[1, 1, 1, 1, d])
+                    .unwrap()
+                    .add(x)
+                    .unwrap()
+            }),
+            per_expert * topk / 2,
+            roof,
+        );
+    }
+    let inds1 = MlxArray::from_u32(&[topk], &picks).unwrap();
+    let scores1 = scores.reshape(&[topk]).unwrap();
+    let x1 = bf16_array(&mut rng, &[d]);
+    row(
+        "MoE experts fused kernel (2 dispatches)",
+        chain(200, &x1, |i, x| {
+            let (g, u, dn) = (
+                &e_gate[i % e_gate.len()],
+                &e_up[i % e_up.len()],
+                &e_down[i % e_down.len()],
+            );
+            x.moe_swiglu_4bit(
+                &inds1,
+                &scores1,
+                [&g.w, &g.s, &g.b],
+                [&u.w, &u.s, &u.b],
+                [&dn.w, &dn.s, &dn.b],
+                GROUP as i32,
+            )
+            .unwrap()
+        }),
+        per_expert * topk * 3 / 2,
+        roof,
+    );
+    drop((e_up, e_down, e_gate));
     let wgate = bf16_array(&mut rng, &[d, experts]);
     let x3 = bf16_array(&mut rng, &[1, 1, d]);
     let gate_logits = |x: &MlxArray| x.matmul(&wgate, None).unwrap();

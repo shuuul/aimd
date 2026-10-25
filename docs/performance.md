@@ -122,6 +122,8 @@ ASR ~8.9 ms vs ~8.5 ms. Dispatch floor is 2.3 µs per kernel.
 | OCR qmv 1280->1280 (q, k, v, o) | 11.4 | 0.92 MB | 49% |
 | OCR shared expert up\|gate + down (1280<->1792) | 31.0 per pair | 2.58 MB | 50% |
 | OCR gather_qmm up + down, 6 of 64 experts, + sum | 82.4 | 7.74 MB | 57% |
+| OCR routed experts unfused (gate\|up + swiglu + down + score sum) | 105 | 11.6 MB | 70% |
+| OCR routed experts, fused kernel pair (shipped) | 75 | 11.6 MB | ~95% |
 | OCR router: gate matmul (W_g.T view) + softmax + top-6 | ~8.5 + 2.6 + ~12 | — | dispatch-bound |
 | OCR sdpa 10 heads, kv 2455 (prefill + ring) | 102.2 | 12.6 MB | 74% |
 | OCR lm_head 1280->129280 (per token) | 561 | 93 MB | ~100% |
@@ -139,8 +141,14 @@ Candidates ranked by expected saving per token:
    196-204 tok/s both ways). In the real graph the three projections share
    an input, so MLX dispatches them concurrently: 41.8 µs per ASR layer vs
    35.6 µs fused, not the 44 µs the serial chain suggests.
-2. Fused MoE expert kernel (gather up|gate + SwiGLU + down + weighted sum):
-   82 µs at 57% -> ~50 µs per layer, OCR ~0.35 ms.
+2. Fused MoE expert kernel (shipped 2026-10-26): `mlx_moe_swiglu_4bit`,
+   two custom Metal kernels (gate|up + SwiGLU, down + weighted sum) for
+   single-token steps. Experts per layer 105 -> 75 µs in the chain (~95%
+   of roofline); OCR decode 229-232 -> 238-247 tok/s (+7%), markdown
+   byte-identical on 7 images. The kernels mirror mlx `qmv_impl`
+   accumulation order and bf16 rounding, so the output is bit-identical
+   to the `gather_qmm` graph. Layouts that kept more activations per lane
+   (registers or threadgroup memory) lost occupancy and ran 100-173 µs.
 3. Split-K decode attention for long KV (flash-decoding style): OCR
    102 -> ~80 µs per layer (~0.25 ms), ASR ~0.3 ms on long clips.
 4. Fused router (gemv + softmax + top-6 in one kernel): ~23 -> ~4 µs per

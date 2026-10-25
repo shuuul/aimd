@@ -952,6 +952,29 @@ Append entries rather than rewriting another worker's record.
 - Next action: fused MoE expert kernel (`metal_kernel` through the shim),
   measured end-to-end against the concurrent baseline, not the chain.
 
+### 2026-10-26 — shuuul/WS-08 fused MoE expert kernel — WS-08
+
+- Changed: `mlx_moe_swiglu_4bit` in the shim: two `fast::metal_kernel`
+  dispatches (gate|up + SwiGLU sharing one activation pass, then down +
+  score-weighted expert sum) replace the six `gather_qmm`/elementwise
+  dispatches. The kernels follow mlx `qmv_impl` (one u32 per lane per
+  256-value block, nibbles masked against pre-scaled activations), mlx
+  `Sigmoid` in bf16 arithmetic, and the bf16-typed sum, so the result is
+  bit-identical to the unfused graph. The OCR decoder uses it for
+  single-token steps on the GPU with 4-bit experts; prefill, 6/8-bit and
+  the CPU device keep `switch_glu`. New parity test
+  `mlx_moe_swiglu_4bit_matches_gather_qmm_graph` (GPU only) asserts bf16
+  equality at a small shape and the OCR shape; `bench_ops` gained
+  unfused/fused expert rows.
+- Evidence: experts per MoE layer 105 -> 75 µs in the chain (~95% of the
+  read roofline). OCR markdown byte-identical on 7 images (5 PDF pages +
+  `page_text.png`, `small_text.png`); OCR decode 229-232 -> 238-247 tok/s
+  (4 interleaved runs x 4 steady-state rounds, sym-6 + arx-5), about +7%.
+  Earlier register-heavy layouts (x in registers / threadgroup memory,
+  16-byte lane chunks) were 100-173 µs, slower than MLX.
+- Next action: fused router (gate gemv + softmax + top-6) and split-K
+  decode attention, same bit-identical bar.
+
 ## Completion summary
 
 (to complete before archiving)
