@@ -55,7 +55,9 @@ fn main() {
     let bytes = std::fs::read(&args[0]).expect("fixture file");
     assert_eq!(bytes.len() % 4, 0, "fixture size not f32-aligned");
     let mel: Vec<f32> = bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
     let frames = mel.len() / n_mels;
@@ -81,7 +83,7 @@ fn main() {
     let mut timings = Vec::with_capacity(rounds);
     for round in 1..=rounds {
         let t = Instant::now();
-        let out = tower.forward(&mel, frames).expect("forward");
+        let _out = tower.forward(&mel, frames).expect("forward");
         let elapsed = t.elapsed().as_secs_f64();
         timings.push(elapsed);
         println!("  round{round}: {:>8.2} ms", elapsed * 1e3);
@@ -89,7 +91,12 @@ fn main() {
     timings.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = timings[timings.len() / 2];
     let mean: f64 = timings.iter().sum::<f64>() / timings.len() as f64;
-    println!("median: {:#.2} ms   mean: {:.2} ms   ({} rounds)", median * 1e3, mean * 1e3, rounds);
+    println!(
+        "median: {:#.2} ms   mean: {:.2} ms   ({} rounds)",
+        median * 1e3,
+        mean * 1e3,
+        rounds
+    );
 
     // Deterministic checksum for cross-backend sanity (printed once).
     let checksum: f32 = out.features.iter().map(|v| v.abs()).sum();

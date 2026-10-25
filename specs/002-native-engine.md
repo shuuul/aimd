@@ -124,7 +124,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-09 | CUDA .cu kernels + CUTLASS shim (ASR then OCR) on metacube; `mlx[cuda]` as fallback/comparison | Unassigned | Pending | WS-06, WS-07 | CUDA perf gate + numeric parity harness |
 | WS-10 | `aimd-native` PyO3 binding, Python `native` backend default, dual-wheel matrix (default CPU + `[mlx]`/CUDA variants), old-backend deprecation + removal | Unassigned | Pending | WS-06, WS-07 | Wheel smoke installs (default small, variants functional); behavior tests on retained interfaces |
 | WS-11 | `aimd-mlx` C-ABI shim over `mlx::core` (array lifetime, `quantized_matmul`, GEMM/attention composition); model graphs on the MLX backend; `--features mlx` variant build. Promoted to the active wave (ASR first); brew mlx 0.32.4 link target | Unassigned | In progress | WS-06 | Same-machine perf >= MLX baseline by construction; variant wheel builds |
-| WS-12 | ANE feasibility spike: Core ML routes (stateful LLM on ANE, encoder-on-ANE), fp16/weight-size constraints, mlx-or-torch conversion source, Rust integration path, expected gains vs Metal on M2 Pro; go/no-go recommendation in `docs/ane-feasibility.md` | Unassigned | In progress | None | Report reviewed; go/no-go decision recorded in this spec |
+| WS-12 | ANE feasibility spike: Core ML routes (stateful LLM on ANE, encoder-on-ANE), fp16/weight-size constraints, mlx-or-torch conversion source, Rust integration path, expected gains vs Metal on M2 Pro; go/no-go recommendation in `docs/ane-feasibility.md` | agent-ane + agent-ane-spike + shuuul | Done | None | Report reviewed; NO-GO recorded (commit 8fc1650): gates passed technically, ~4-5% end-to-end gain does not justify the artifact/maintenance cost |
 
 ## Verification
 
@@ -451,6 +451,33 @@ Append entries rather than rewriting another worker's record.
 - Remaining: WS-11b (MLX backend) still in flight.
 - Blockers: none.
 - Next action: WS-11b integration on completion.
+
+### 2026-10-25 — agent-mlxgraph/WS-11b complete — WS-11
+
+- Changed: `MlxAsrPipeline` landed behind `--features mlx` (mlx_backend.rs,
+  1587 lines, 11 tests): full-MLX architecture (conv2d + fast::sdpa +
+  fast::rope/layer_norm all present in mlx 0.32.4 C++ headers — no hybrid
+  fallback), 4-bit/8-bit triples fed DIRECTLY into quantized_matmul
+  (embeddings, every projection, and transposed logits — no eager
+  dequant), KV cache as MlxArray state, greedy loop with in-mlx argmax +
+  4-byte scalar readback, retry composed as mlx_transcribe_with_retry.
+  Shim extended by 10 symbols (+12 op tests; aimd-mlx 29/29).
+- Evidence (release, idle machine, same clips/checkpoint as baseline):
+  load 0.42 s warm / 3.81 s cold vs mlx-audio 10.01 s; zh 8.56 s audio
+  0.40 s (21.6x realtime) vs mlx-audio 0.43 s; en 3.75 s 0.23 s (16.6x)
+  vs 0.25 s — at 0.92-0.93x of mlx-audio latency, i.e. slightly FASTER,
+  with token-identical outputs (incl. the same mishearing) and the golden
+  16-token argmax stream token-exact; tower parity 2.0e-7 abs vs the
+  committed reference. Two bring-up bugs found via ground-truth isolation:
+  missing conv biases, and mlx stream thread-affinity (fixed with a
+  process-global serialized stream; MlxArray Send+Sync, documented).
+- Also: coordinator landed `[profile.dev.package.aimd-*] opt-level = 3`
+  after the agent's accidental full-CPU debug suites burned 45 min (killed
+  and re-scoped mid-run; checkpoint tests now ~10x faster).
+- Remaining: workspace gate (in flight), commit of all mlx wiring.
+- Blockers: none.
+- Next action: gate green -> commit; WS-07 (OCR engine) is the next
+  construction wave.
 
 ## Completion summary
 

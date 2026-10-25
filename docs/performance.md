@@ -74,6 +74,8 @@ Interpretation:
 
 | 2026-10-25 | native CPU (release, bit-trick cvt) | same | 10.44 s | zh 8.56 s TTS: ~33 s (0.3x); en 3.75 s: ~25 s (0.2x) | 0.2-0.3x | f16->f32 conversion now fully vectorized on stable NEON via the integer bit algorithm (exhaustively bit-exact over all 65536 f16 patterns). 1.2x over the prior SIMD pass; cumulative 1.75-1.9x over naive. Conversion is no longer the dominant cost — further CPU gains need register-tiled microkernels (real kernel work, out of the casual pass; CPU stays the fallback path per v0.5). |
 
+| 2026-10-25 | native MLX backend (release, `--features mlx`) | same checkpoints/clips | **0.42 s warm / 3.81 s cold** | zh 8.56 s: 0.40 s (21.6x); en 3.75s: 0.23 s (16.6x) | 21.6x / 16.6x | WS-11b: full-MLX graph (tower conv2d + SDPA + fast::rope/layer_norm on Metal), 4-bit triples directly into quantized_matmul (no eager dequant — hence the 24x faster load vs mlx-audio), argmax in-mlx with 4-byte readback. **Slightly faster than mlx-audio** (0.92-0.93x of baseline latency) with token-identical outputs incl. the same mishearing; golden 16-token argmax stream token-exact, tower parity 2.0e-7 abs. |
+
 ## Current smoke-test record
 
 The following are functional smoke tests, not benchmarks. They verify that heavyweight model paths can load and execute in development environments.

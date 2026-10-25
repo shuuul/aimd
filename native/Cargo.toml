@@ -4,6 +4,7 @@ members = [
     "crates/aimd-tensor",
     "crates/aimd-weights",
     "crates/aimd-engine",
+    "crates/aimd-mlx",
 ]
 
 [workspace.package]
@@ -24,9 +25,23 @@ memmap2 = "0.9"
 safetensors = "0.6"
 tokenizers = "0.22"
 rayon = "1"
+cc = "1"
 
 aimd-tensor = { path = "crates/aimd-tensor" }
 aimd-weights = { path = "crates/aimd-weights" }
+aimd-mlx = { path = "crates/aimd-mlx" }
 
 [profile.release]
 debug = true
+
+# Checkpoint tests run real 1.7B-parameter graphs; unoptimized first-party
+# kernels make them 10-30x slower. Optimize only our crates in dev/test
+# builds (dependencies stay at opt-level 0, keeping compile times low).
+[profile.dev.package.aimd-tensor]
+opt-level = 3
+[profile.dev.package.aimd-weights]
+opt-level = 3
+[profile.dev.package.aimd-engine]
+opt-level = 3
+[profile.dev.package.aimd-mlx]
+opt-level = 3

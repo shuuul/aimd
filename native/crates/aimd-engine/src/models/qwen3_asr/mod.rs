@@ -32,4 +32,6 @@ pub mod config;
 pub mod decoder;
 pub mod encoder;
 pub mod generate;
+#[cfg(feature = "mlx")]
+pub mod mlx_backend;
 pub mod pipeline;

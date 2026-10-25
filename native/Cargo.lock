@@ -29,6 +29,7 @@ dependencies = [
 name = "aimd-engine"
 version = "0.1.0"
 dependencies = [
+ "aimd-mlx",
  "aimd-tensor",
  "aimd-weights",
  "anyhow",
@@ -37,6 +38,20 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokenizers",
+]
+
+[[package]]
+name = "aimd-mlx"
+version = "0.1.0"
+dependencies = [
+ "aimd-tensor",
+ "aimd-weights",
+ "anyhow",
+ "cc",
+ "half",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

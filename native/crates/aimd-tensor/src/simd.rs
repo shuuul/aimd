@@ -20,6 +20,8 @@ use half::f16;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Level {
     Neon,
+    /// Only constructed on x86_64; keep the variant for the dispatch arms.
+    #[allow(dead_code)]
     Avx,
     Scalar,
 }
@@ -169,7 +171,8 @@ unsafe fn axpy_neon(alpha: f32, b: &[f16], acc: &mut [f32], n: usize) {
         j += 8;
     }
     if j + 4 <= n {
-        let lo: [f32; 4] = cvt4_neon(&b[j..]);
+        // SAFETY: NEON detected; reads exactly 4 f16 words.
+        let lo: [f32; 4] = unsafe { cvt4_neon(&b[j..]) };
         unsafe {
             let dst = acc[j..].as_mut_ptr();
             let lo_f: float32x4_t = std::mem::transmute(lo);
@@ -206,7 +209,7 @@ unsafe fn dot_neon(a: &[f16], b: &[f16], n: usize) -> f32 {
         }
         j += 8;
     }
-    let mut sum = unsafe { vaddvq_f32(acc0) + vaddvq_f32(acc1) };
+    let mut sum = vaddvq_f32(acc0) + vaddvq_f32(acc1);
     sum += dot_scalar(&a[j..n], &b[j..n], n - j);
     sum
 }
