@@ -210,6 +210,7 @@ mod ffi {
         pub fn mlx_power(a: *mut AimdMlxArray, b: *mut AimdMlxArray) -> *mut AimdMlxArray;
         pub fn mlx_softmax(array_handle: *mut AimdMlxArray, axis: i32) -> *mut AimdMlxArray;
         pub fn mlx_silu(array_handle: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_swiglu(gate: *mut AimdMlxArray, up: *mut AimdMlxArray) -> *mut AimdMlxArray;
         pub fn mlx_rms_norm(
             x: *mut AimdMlxArray,
             weight: *mut AimdMlxArray,
@@ -741,6 +742,13 @@ impl MlxArray {
     pub fn silu(&self) -> Result<Self, MlxError> {
         let ptr = unsafe { ffi::mlx_silu(self.ptr.as_ptr()) };
         Self::from_handle(ptr, "mlx_silu")
+    }
+
+    /// `silu(self) * up` as one compiled (fused, shapeless) kernel: mlx-lm
+    /// `swiglu`.
+    pub fn swiglu(&self, up: &Self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_swiglu(self.ptr.as_ptr(), up.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_swiglu")
     }
 
     /// Fused RMS norm over the last axis; `weight: None` skips the affine

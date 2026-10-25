@@ -77,6 +77,7 @@ use aimd_weights::{ScaleDtype, WeightStore, WeightsError, load_checkpoint};
 use half::bf16;
 
 use crate::audio::{AudioError, MelConfig, load_wav, mel_spectrogram};
+use crate::models::kv_cache::KvCache;
 use crate::models::qwen3_asr::config::{
     AudioTowerConfig, Qwen3AsrCheckpointConfig, TextDecoderConfig, parse_config,
 };
@@ -555,7 +556,7 @@ impl Pass {
 }
 
 /// Qwen3 dense text decoder over MLX quantized weights. Immutable after
-/// load; the KV cache is a caller-owned [`MlxKvCache`].
+/// load; the KV caches are caller-owned [`KvCache`]s (one per layer).
 struct MlxDecoder {
     cfg: TextDecoderConfig,
     embed: MlxQuantWeights,
@@ -614,16 +615,21 @@ impl MlxDecoder {
                 )));
             }
         }
-        let indices = MlxArray::from_u32(&[ids.len()], ids)?;
-        let w = self.embed.w.take(&indices, 0)?;
-        let scales = self.embed.scales.take(&indices, 0)?;
-        let biases = self.embed.biases.take(&indices, 0)?;
-        Ok(w.dequantize(
+        Ok(self.embed_indices(&MlxArray::from_u32(&[ids.len()], ids)?)?)
+    }
+
+    /// Dequantized embedding rows `[n, hidden]` bf16 for a device-resident
+    /// u32 index vector `[n]` (already in vocab range, e.g. an argmax).
+    fn embed_indices(&self, indices: &MlxArray) -> Result<MlxArray, MlxError> {
+        let w = self.embed.w.take(indices, 0)?;
+        let scales = self.embed.scales.take(indices, 0)?;
+        let biases = self.embed.biases.take(indices, 0)?;
+        w.dequantize(
             &scales,
             Some(&biases),
             Some(self.embed.group_size),
             Some(self.embed.bits),
-        )?)
+        )
     }
 
     /// Tied-embedding logits: quantized matmul of `[rows, hidden]` hidden
@@ -633,20 +639,18 @@ impl MlxDecoder {
         self.embed.matmul(hidden_states)
     }
 
-    /// Greedy pick from `[1, hidden]` hidden states: logits matmul + argmax
-    /// stay on the GPU; the only host traffic is the 4-byte token id (the
-    /// step's explicit eval). mlx argmax tie-breaks to the first index like
-    /// `np.argmax`, so picks match the `np.argmax` golden semantics.
-    fn argmax(&self, hidden_states: &MlxArray) -> Result<u32, PipelineError> {
-        let logits = self.logits(hidden_states)?;
-        let pick = logits.argmax(-1, false)?;
-        Ok(pick.to_u32_vec()?[0])
+    /// Lazy greedy pick `[1]` u32 from `[1, hidden]` hidden states: logits
+    /// matmul + argmax stay on the GPU, so the next step can be queued
+    /// before the 4-byte readback. mlx argmax tie-breaks to the first index
+    /// like `np.argmax`, so picks match the `np.argmax` golden semantics.
+    fn argmax(&self, hidden_states: &MlxArray) -> Result<MlxArray, MlxError> {
+        self.logits(hidden_states)?.argmax(-1, false)
     }
 
     /// Full forward over prompt embeds `[seq, hidden]` bf16, filling
     /// `cache`; returns the final-normed hidden states
     /// `[1, seq, hidden]` bf16.
-    fn prefill(&self, embeds: MlxArray, cache: &mut MlxKvCache) -> Result<MlxArray, PipelineError> {
+    fn prefill(&self, embeds: MlxArray, cache: &mut [KvCache]) -> Result<MlxArray, PipelineError> {
         let hidden = self.cfg.hidden_size;
         if embeds.ndim()? != 2 || embeds.dim(1)? != hidden {
             return Err(PipelineError::Layout(format!(
@@ -668,7 +672,7 @@ impl MlxDecoder {
         &self,
         embed: &MlxArray,
         position: u32,
-        cache: &mut MlxKvCache,
+        cache: &mut [KvCache],
     ) -> Result<MlxArray, PipelineError> {
         let hidden = self.cfg.hidden_size;
         if embed.ndim()? != 2 || embed.dim(1)? != hidden || embed.dim(0)? != 1 {
@@ -689,7 +693,7 @@ impl MlxDecoder {
         index: usize,
         lw: &MlxDecoderLayer,
         x: MlxArray,
-        cache: &mut MlxKvCache,
+        cache: &mut [KvCache],
         pass: Pass,
     ) -> Result<MlxArray, MlxError> {
         let cfg = &self.cfg;
@@ -718,9 +722,8 @@ impl MlxDecoder {
         let offset = pass.rope_offset();
         let q = q.rope(head_dim, cfg.rope_theta, 1.0, offset)?;
         let k = k.rope(head_dim, cfg.rope_theta, 1.0, offset)?;
-        cache.append(index, k, v)?;
-        let (k_cached, v_cached) = cache.layer(index);
-        let attn = q.scaled_dot_product_attention(k_cached, v_cached, scale, pass.mask())?;
+        let (k_cached, v_cached) = cache[index].update_and_fetch(&k, &v)?;
+        let attn = q.scaled_dot_product_attention(&k_cached, &v_cached, scale, pass.mask())?;
         let attn = attn
             .transpose(&[0, 2, 1, 3])?
             .reshape(&[1, seq, q_heads * head_dim])?;
@@ -734,44 +737,9 @@ impl MlxDecoder {
         let flat = normed.reshape(&[seq, hidden])?;
         let gate = lw.gate.matmul(&flat)?;
         let up = lw.up.matmul(&flat)?;
-        let activated = gate.silu()?.multiply(&up)?;
+        let activated = gate.swiglu(&up)?;
         let out = lw.down.matmul(&activated)?.reshape(&[1, seq, hidden])?;
         x.add(&out)
-    }
-}
-
-/// Per-layer KV cache of head-major `[1, kv_heads, cached_len, head_dim]`
-/// bf16 arrays, grown per append with `concatenate` along axis 2 (the mlx
-/// `KVCache.update_and_fetch` layout).
-struct MlxKvCache {
-    layers: Vec<Option<(MlxArray, MlxArray)>>,
-}
-
-impl MlxKvCache {
-    fn new(layers: usize) -> Self {
-        Self {
-            layers: (0..layers).map(|_| None).collect(),
-        }
-    }
-
-    fn append(&mut self, index: usize, k: MlxArray, v: MlxArray) -> Result<(), MlxError> {
-        let slot = &mut self.layers[index];
-        *slot = Some(match slot.take() {
-            None => (k, v),
-            Some((old_k, old_v)) => (
-                MlxArray::concatenate(&[&old_k, &k], 2)?,
-                MlxArray::concatenate(&[&old_v, &v], 2)?,
-            ),
-        });
-        Ok(())
-    }
-
-    /// Cached (k, v) of a layer; every call site appends before attending.
-    fn layer(&self, index: usize) -> (&MlxArray, &MlxArray) {
-        self.layers[index]
-            .as_ref()
-            .map(|(k, v)| (k, v))
-            .expect("cache slot must be appended before attention")
     }
 }
 
@@ -928,7 +896,9 @@ impl Qwen3AsrPipeline {
         let embeds = MlxArray::from_bf16(&[prompt_ids.len(), hidden], &merged)?;
 
         // Prefill + first-token argmax at the last prompt position.
-        let mut cache = MlxKvCache::new(self.decoder.cfg.num_hidden_layers);
+        let mut cache: Vec<KvCache> = (0..self.decoder.cfg.num_hidden_layers)
+            .map(|_| KvCache::new(None))
+            .collect();
         let final_hidden = self.decoder.prefill(embeds, &mut cache)?;
         let prompt_len = prompt_ids.len();
         let last = final_hidden
@@ -939,26 +909,37 @@ impl Qwen3AsrPipeline {
             )?
             .reshape(&[1, hidden])?;
         let mut y = self.decoder.argmax(&last)?;
+        MlxArray::async_eval(&[&y])?;
 
-        // Decode steps: positions continue sequentially; each step's logits
-        // readback is the step's explicit eval.
+        // Decode steps, pipelined like mlx-lm `generate_step`: the next step
+        // is queued from the device-resident pick `y` before `y` is read
+        // back, so the GPU never idles on the host EOS check. Positions
+        // continue sequentially; a step queued behind EOS is discarded.
         let mut tokens = Vec::with_capacity(settings.max_new_tokens.min(1024));
         let mut finish_reason = FinishReason::MaxNewTokens;
         loop {
+            let next = if tokens.len() < settings.max_new_tokens {
+                let emb = self.decoder.embed_indices(&y)?;
+                let position = (prompt_len + tokens.len()) as u32;
+                let step_hidden = self.decoder.step(&emb, position, &mut cache)?;
+                Some(self.decoder.argmax(&step_hidden.reshape(&[1, hidden])?)?)
+            } else {
+                None
+            };
+            let tok = y.to_u32_vec()?[0];
             if let Some(eos) = eos_ids
-                && eos.contains(&y)
+                && eos.contains(&tok)
             {
                 finish_reason = FinishReason::Eos;
                 break;
             }
-            if tokens.len() >= settings.max_new_tokens {
-                break;
+            let Some(next) = next else { break };
+            tokens.push(tok);
+            y = next;
+            MlxArray::async_eval(&[&y])?;
+            if tokens.len().is_multiple_of(256) {
+                aimd_mlx::clear_cache()?;
             }
-            tokens.push(y);
-            let emb = self.decoder.embed_rows(&[y])?;
-            let position = (prompt_len + tokens.len() - 1) as u32;
-            let step_hidden = self.decoder.step(&emb, position, &mut cache)?;
-            y = self.decoder.argmax(&step_hidden.reshape(&[1, hidden])?)?;
         }
 
         Ok(TokenStream {

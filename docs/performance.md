@@ -67,6 +67,9 @@ mlx_vlm) on the same machine, measured before the Python package was removed.
 |------|---------|-------|------|--------------|----------|-------|
 | 2026-10-25 | mlx-audio (Metal) | zh 8.56 s / en 3.75 s TTS clips | 10.01 s | zh 0.43 s; en 0.25 s | 19.9x / 15x | Reference. |
 | 2026-10-25 | native MLX | same | 0.42-0.45 s warm / 3.81 s cold | zh 0.40-0.44 s; en 0.23-0.27 s | ~20x / ~15x | Token-identical text (incl. the same 上下文忠诚 mishearing); 4-bit triples go straight into `quantized_matmul` (no eager dequant), hence ~24x faster load. Unchanged after the CPU-path deletion (transcripts byte-identical). |
+| 2026-10-26 | mlx-audio 0.5.3 (Metal) | 59.96 s en TTS clip (797-token prompt, 191 tokens) | — | 2.88-2.95 s | ~20.5x | Reference for the long clip. |
+| 2026-10-26 | native MLX, `main` (concatenate KV, sync per step) | zh 4.83 s / en 4.09 s / 59.96 s en | — | zh 0.32 s; en 0.31 s; long 3.47-6.05 s (median 4.18 s) | ~15x / ~13x / ~14x | WS-13 A/B baseline, interleaved with the next row on a loaded machine. |
+| 2026-10-26 | native MLX, WS-13 | same | — | zh 0.30-0.31 s; en 0.29-0.30 s; long 3.07-3.20 s (median 3.13 s) | ~16x / ~14x / ~19x | Step-256 preallocated KV (`slice_update`), `async_eval`-pipelined decode, compiled SwiGLU. Long clip -25% and far steadier; transcripts byte-identical. On a quiet machine: long 2.73-2.75 s; encoder 0.44 s, prefill 0.67 s (~1.2k tok/s), decode 1.65 s (~117 tok/s). |
 
 ### Unlimited-OCR-4bit
 
@@ -76,12 +79,20 @@ mlx_vlm) on the same machine, measured before the Python package was removed.
 | 2026-10-25 | native MLX | same | 0.58 s | 0.36-0.37 s | 0.12 s (2300 tok/s) | 200-205 tok/s | 0.82-0.84 s | Markdown identical (similarity 1.0), finish=stop, 69/69 tokens. |
 | 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/page_text.png` (4x5 crops, 2327-token prompt) | — | 2.50-2.55 s | ~0.77 s | 170-177 tok/s | 4.51-4.65 s | Reference. |
 | 2026-10-25 | native MLX | same | — | 2.61-2.63 s | 0.79-0.82 s | 165-175 tok/s | 4.67-4.75 s | Markdown identical, finish=stop, 197/197 tokens. Vision + prefill are bit-exact vs mlx_vlm goldens; single-token decode drifts ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
+| 2026-10-26 | native MLX, `main` vs WS-13 | same, interleaved on a loaded machine | — | 2.59-2.80 s both | 0.77-0.92 s both | 166-177 tok/s both | 4.64-4.87 s both | Compiled SwiGLU (dense MLP, shared experts, `SwitchGLU`) is neutral within noise; OCR already had the step-256/ring KV and `async_eval` pipelining. |
 
 Retired: the hand-written CPU prototype reached 0.1-0.3x realtime on ASR
 and ~734 s per OCR page (vs 4.8 s on MLX); it was deleted under the
-MLX-only decision. Remaining MLX headroom is tracked as WS-13 (ring KV +
-`mlx::core::compile`), WS-14 (speculative decoding) and WS-08 (custom
-Metal kernels inside the MLX graph).
+MLX-only decision.
+
+WS-13 findings: in the pipelined ASR loop the host builds a step's graph in
+~0.4 ms, and the remaining ~8 ms per token is GPU work plus Metal encode for
+~25 kernels per layer x 28 layers. Elementwise fusion (`mlx::core::compile`)
+buys little there. A whole-step `compile` does not fit because the KV cache
+grows every step, so a shape-keyed compile would retrace each token and a
+shapeless one cannot express the slice bounds (mlx-lm doesn't compile the
+step either). Remaining decode headroom is tracked as WS-14 (speculative
+decoding) and WS-08 (custom Metal kernels inside the MLX graph).
 
 ## Smoke-test record (Python era)
 

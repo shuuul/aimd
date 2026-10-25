@@ -39,6 +39,7 @@
 #pragma clang diagnostic ignored "-Wc++20-extensions"
 
 #include "mlx/array.h"
+#include "mlx/compile.h"
 #include "mlx/ops.h"
 #include "mlx/fast.h"
 #include "mlx/memory.h"
@@ -260,6 +261,14 @@ int32_t copy_out(void* handle, uint8_t* out, int64_t cap, Dtype required) {
     }
     return 0;
   });
+}
+
+// mlx-lm `swiglu` (`nn.silu(gate) * x` under `@mx.compile(shapeless=True)`):
+// a free function so mlx's compile cache keys on its address.
+std::vector<array> swiglu_impl(const std::vector<array>& inputs) {
+  const array& gate = inputs[0];
+  return {mlx::core::multiply(
+      mlx::core::multiply(gate, mlx::core::sigmoid(gate)), inputs[1])};
 }
 
 } // namespace
@@ -623,6 +632,19 @@ AimdMlxArray* mlx_silu(AimdMlxArray* array_handle) {
     array& x = as_array(array_handle);
     return reinterpret_cast<AimdMlxArray*>(
         new array(mlx::core::multiply(x, mlx::core::sigmoid(x))));
+  });
+}
+
+/// Compiled SwiGLU `silu(gate) * up`: one fused elementwise kernel instead
+/// of three (mlx `compile(fun, shapeless=true)`, compile.h).
+AimdMlxArray* mlx_swiglu(AimdMlxArray* gate, AimdMlxArray* up) {
+  return guarded([&]() -> AimdMlxArray* {
+    if (gate == nullptr || up == nullptr) {
+      throw std::invalid_argument("[aimd_mlx] null array handle");
+    }
+    static const auto compiled = mlx::core::compile(swiglu_impl, true);
+    return reinterpret_cast<AimdMlxArray*>(
+        new array(compiled({as_array(gate), as_array(up)})[0]));
   });
 }
 

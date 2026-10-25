@@ -595,6 +595,32 @@ fn mlx_silu_matches_f32_reference() {
         let want = v * sigmoid;
         assert!((g - want).abs() <= 1e-6, "silu({v}): {g} vs {want}");
     }
+    // Compiled swiglu == unfused silu(gate) * up, bit-for-bit in bf16
+    // (the decoders' dtype), across shapes (shapeless compile) and on a
+    // transposed (strided) gate.
+    for (rows, cols) in [(1usize, 6usize), (3, 4)] {
+        let n = rows * cols;
+        let g: Vec<f32> = (0..n).map(|i| i as f32 * 0.37 - 1.1).collect();
+        let u: Vec<f32> = (0..n).map(|i| 0.5 - i as f32 * 0.21).collect();
+        let bf = |v: &[f32], shape: &[usize]| {
+            MlxArray::from_f32(shape, v)
+                .unwrap()
+                .astype(MlxDtype::Bf16)
+                .unwrap()
+        };
+        let (gate, up) = (bf(&g, &[rows, cols]), bf(&u, &[rows, cols]));
+        let unfused = gate.silu().unwrap().multiply(&up).unwrap();
+        assert_eq!(
+            gate.swiglu(&up).unwrap().to_bf16_vec().unwrap(),
+            unfused.to_bf16_vec().unwrap()
+        );
+        let gate_t = bf(&g, &[cols, rows]).transpose(&[1, 0]).unwrap();
+        let unfused_t = gate_t.silu().unwrap().multiply(&up).unwrap();
+        assert_eq!(
+            gate_t.swiglu(&up).unwrap().to_bf16_vec().unwrap(),
+            unfused_t.to_bf16_vec().unwrap()
+        );
+    }
 }
 
 #[test]
