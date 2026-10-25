@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "generator": "scripts/export_asr_encoder_reference.py",
+  "checkpoint": "mlx-community/Qwen3-ASR-1.7B-4bit",
+  "feature_extractor": "Qwen/Qwen3-ASR-1.7B-hf",
+  "generated_with": {
+    "mlx": "0.32.2",
+    "mlx_audio": "0.5.3",
+    "transformers": "5.17.0",
+    "numpy": "2.5.3"
+  },
+  "tower_config": {
+    "d_model": 1024,
+    "encoder_layers": 24,
+    "encoder_attention_heads": 16,
+    "encoder_ffn_dim": 4096,
+    "num_mel_bins": 128,
+    "n_window": 50,
+    "n_window_infer": 800,
+    "conv_chunksize": 500,
+    "downsample_hidden_size": 480,
+    "output_dim": 2048,
+    "activation_function": "gelu",
+    "max_source_positions": 1500
+  },
+  "weight_map": {
+    "conv2d1.weight": "conv2d1 weights [480, 3, 3, 1] (MLX NHWC [o, kh, kw, c])",
+    "conv2d1.bias": "conv2d1 bias [480]",
+    "conv2d2.weight": "conv2d2 weights [480, 3, 3, 480]",
+    "conv2d2.bias": "conv2d2 bias [480]",
+    "conv2d3.weight": "conv2d3 weights [480, 3, 3, 480]",
+    "conv2d3.bias": "conv2d3 bias [480]",
+    "conv_out.weight": "conv_out linear [1024, 7680], no bias; input order c*16 + f",
+    "layers.N.self_attn.q_proj.{weight,bias}": "per-layer q projection [1024, 1024] + [1024]",
+    "layers.N.self_attn.k_proj.{weight,bias}": "per-layer k projection",
+    "layers.N.self_attn.v_proj.{weight,bias}": "per-layer v projection",
+    "layers.N.self_attn.out_proj.{weight,bias}": "per-layer attention output projection",
+    "layers.N.self_attn_layer_norm.{weight,bias}": "pre-attention LayerNorm (eps 1e-5, biased var)",
+    "layers.N.fc1.{weight,bias}": "FFN up [4096, 1024], exact-erf GELU",
+    "layers.N.fc2.{weight,bias}": "FFN down [1024, 4096]",
+    "layers.N.final_layer_norm.{weight,bias}": "pre-FFN LayerNorm",
+    "ln_post.{weight,bias}": "final LayerNorm before the projection head",
+    "proj1.{weight,bias}": "projection head hidden [1024, 1024]",
+    "proj2.{weight,bias}": "projection head output [2048, 1024]"
+  },
+  "frames_to_pads_formula": "pads(L) = floor((floor((floor((L%100 - 1)/2) + 1 - 1)/2) + 1 - 1)/2) + 1 + (L // 100) * 13 (floor division, python semantics for rem == 0)",
+  "notes": [
+    "Tower weights are unquantized bf16 (audio_tower.*); the 4-bit text decoder is not part of these fixtures.",
+    "MLX runs the tower with float32 activations (bf16 weights promoted per op); stages are dumped f32.",
+    "The conv front-end runs per 100-frame chunk (n_window*2) with zero padding at chunk edges only; positional embedding restarts at 0 for every chunk.",
+    "Attention is block-diagonal: additive -1e9 mask outside cu_seqlens blocks; block length is max_len_after_cnn * (n_window_infer // (n_window * 2)).",
+    "conv_chunksize (500) and max_source_positions (1500) are loaded by mlx_audio but unused by the tower forward."
+  ],
+  "tolerance": {
+    "abs": 0.001,
+    "rel": 0.01,
+    "note": "element-wise pass if abs <= gate_abs or rel <= gate_rel; tower weights are bit-identical raw bf16 on both sides, so the residual is f32 accumulation order. Observed Rust parity: max abs 7.8e-5 (interior stages) / 8.5e-7 (final projection); max rel ~0.19 only at near-zero elements (abs-covered)."
+  },
+  "cases": [
+    {
+      "name": "sine_1_5s",
+      "frames": 150,
+      "audio_pad_count": 20,
+      "geometry": {
+        "feature_lens": [
+          150
+        ],
+        "chunk_size": 100,
+        "chunk_lengths": [
+          100,
+          50
+        ],
+        "feature_lens_after_cnn": [
+          13,
+          7
+        ],
+        "max_chunk_len": 100,
+        "max_len_after_cnn": 13,
+        "window_aftercnn": 104,
+        "cu_seqlens": [
+          0,
+          20
+        ],
+        "aftercnn_lens": [
+          20
+        ]
+      },
+      "files": {
+        "mel.f32": {
+          "shape": [
+            150,
+            128
+          ]
+        },
+        "stage_conv_front_end.f32": {
+          "shape": [
+            20,
+            1024
+          ]
+        },
+        "stage_layer_00.f32": {
+          "shape": [
+            20,
+            1024
+          ]
+        },
+        "stage_layer_01.f32": {
+          "shape": [
+            20,
+            1024
+          ]
+        },
+        "stage_layer_12.f32": {
+          "shape": [
+            20,
+            1024
+          ]
+        },
+        "stage_layer_23.f32": {
+          "shape": [
+            20,
+            1024
+          ]
+        },
+        "stage_final_projection.f32": {
+          "shape": [
+            20,
+            2048
+          ]
+        }
+      },
+      "sha256": {
+        "mel.f32": "4942b6fb5701b7e913a5548694e6a41efb63eb2ddf978dba78b4633aebbc9be2",
+        "meta.json": "b18eef13c8c6e3641cbcf4e44f12eac2b23f6912d3deb984fb25aa8b8e2afdfd",
+        "stage_conv_front_end.f32": "abd14e78dff66a06836580d177828b0b297c1de34941db4c8607b2817183dcdf",
+        "stage_layer_00.f32": "6c7f6f2e836867c1b66dcf69135b51ac74bff466396602ed8369e1ad8219d54e",
+        "stage_layer_01.f32": "dbd8efdfe888f594b4d17ba9ecd7430a896b78d7a92dc9f3d48f077a1004c3c6",
+        "stage_layer_12.f32": "3a62199939f21882d2b0bf49c7e5a9933a7b917f75ca69dad61a0e606a39bfad",
+        "stage_layer_23.f32": "bf0d637c3fca02dbbeaba53577c743096fd90c7fa06613853b1b3af614ba04a7",
+        "stage_final_projection.f32": "1196483e86114cf7f46c4aef07be32ffa8384463f15134dda3e16755fd09a14e"
+      }
+    },
+    {
+      "name": "multi_tone_2_7s",
+      "frames": 270,
+      "audio_pad_count": 35,
+      "geometry": {
+        "feature_lens": [
+          270
+        ],
+        "chunk_size": 100,
+        "chunk_lengths": [
+          100,
+          100,
+          70
+        ],
+        "feature_lens_after_cnn": [
+          13,
+          13,
+          9
+        ],
+        "max_chunk_len": 100,
+        "max_len_after_cnn": 13,
+        "window_aftercnn": 104,
+        "cu_seqlens": [
+          0,
+          35
+        ],
+        "aftercnn_lens": [
+          35
+        ]
+      },
+      "files": {
+        "mel.f32": {
+          "shape": [
+            270,
+            128
+          ]
+        },
+        "stage_conv_front_end.f32": {
+          "shape": [
+            35,
+            1024
+          ]
+        },
+        "stage_layer_00.f32": {
+          "shape": [
+            35,
+            1024
+          ]
+        },
+        "stage_layer_01.f32": {
+          "shape": [
+            35,
+            1024
+          ]
+        },
+        "stage_layer_12.f32": {
+          "shape": [
+            35,
+            1024
+          ]
+        },
+        "stage_layer_23.f32": {
+          "shape": [
+            35,
+            1024
+          ]
+        },
+        "stage_final_projection.f32": {
+          "shape": [
+            35,
+            2048
+          ]
+        }
+      },
+      "sha256": {
+        "mel.f32": "e4026a1188723eddccc99a412e95fa713210288813bd572cb0ab7587cb326516",
+        "meta.json": "45fdeb379f76d62a622a6360a00d183d9daa48e8d0291ec3d93601a25b305f93",
+        "stage_conv_front_end.f32": "92d86fdf3974767b5f202b32bdec313b9ad1a1c04f1bf5a79154b2eb8c9c4fd1",
+        "stage_layer_00.f32": "d19bd9a3130d901a529250866f108eba433fe233af0b5014f29badf118f349a3",
+        "stage_layer_01.f32": "f09b5098b38a1e09519252dbfc23b6d5138511520623982c006807e7e1902871",
+        "stage_layer_12.f32": "47a03c743fbc52391871bfceb23a61eae324854b6a950d64079b4a7033a2d153",
+        "stage_layer_23.f32": "fd033616130b845eac9f199127eab4170a4d9791ce4d83064a94ce4cb828e2bf",
+        "stage_final_projection.f32": "1f67ad7ede8d661041628256054e5aa2280f39b54878b86e38eb01474e1a927d"
+      }
+    },
+    {
+      "name": "sine_9s",
+      "frames": 900,
+      "audio_pad_count": 117,
+      "geometry": {
+        "feature_lens": [
+          900
+        ],
+        "chunk_size": 100,
+        "chunk_lengths": [
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100
+        ],
+        "feature_lens_after_cnn": [
+          13,
+          13,
+          13,
+          13,
+          13,
+          13,
+          13,
+          13,
+          13
+        ],
+        "max_chunk_len": 100,
+        "max_len_after_cnn": 13,
+        "window_aftercnn": 104,
+        "cu_seqlens": [
+          0,
+          104,
+          117
+        ],
+        "aftercnn_lens": [
+          117
+        ]
+      },
+      "files": {
+        "mel.f32": {
+          "shape": [
+            900,
+            128
+          ]
+        },
+        "stage_conv_front_end.f32": {
+          "shape": [
+            117,
+            1024
+          ]
+        },
+        "stage_layer_00.f32": {
+          "shape": [
+            117,
+            1024
+          ]
+        },
+        "stage_layer_01.f32": {
+          "shape": [
+            117,
+            1024
+          ]
+        },
+        "stage_layer_12.f32": {
+          "shape": [
+            117,
+            1024
+          ]
+        },
+        "stage_layer_23.f32": {
+          "shape": [
+            117,
+            1024
+          ]
+        },
+        "stage_final_projection.f32": {
+          "shape": [
+            117,
+            2048
+          ]
+        }
+      },
+      "sha256": {
+        "mel.f32": "ff4d52938adf78c28fcdc1523b356f36031a6a8d0e9766dbd5748ebef2bbb57e",
+        "meta.json": "98f5fedd500a790680aba600fd3f005beb2ba0e65eb8cd3a1be5a06de2ef8817",
+        "stage_conv_front_end.f32": "fb71e56f958579ef819f10b2f4451871e790bf2191bc8f45fe9918aa5d94af8e",
+        "stage_layer_00.f32": "d032138998bb04d1ea64816f68a6604b20bb01a2c92651d60b14588e3213e0e6",
+        "stage_layer_01.f32": "4d4f8e6c83601e106910e3b94adb288e197605a32ff617eef6e8272cb68ecbaf",
+        "stage_layer_12.f32": "a9dfca33875e262d355b4fe742ad988969a159b11e14a07eea874699dfea052b",
+        "stage_layer_23.f32": "e5fcb67ce658a674ac32e7232cdc3718994187ae09ff4800578673cd0fffbde4",
+        "stage_final_projection.f32": "efdc4b8a617da5dc08163c7a69c5c1bfaf27d922c159d3e2704b8b77e7e53431"
+      }
+    }
+  ]
+}

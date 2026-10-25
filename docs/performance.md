@@ -43,6 +43,35 @@ Operational policy from these measurements:
 - Passing `--model Qwen/Qwen3-ASR-0.6B-hf` or `--model Qwen/Qwen3-ASR-1.7B-hf` (legacy non-`-hf` IDs still work) explicitly opts into the native Transformers backend, including on MPS.
 - Dependency upgrades that affect Transformers should run the opt-in Qwen3-ASR integration smoke below before release.
 
+## Native Rust engine (WS-06, CPU baseline)
+
+First measurements of the hand-written CPU engine (spec 002 WS-06) vs
+mlx-audio on the same machine (Apple M2 Pro, 19-core GPU, 32 GB). Native
+numbers are `cargo run --release` of `native/crates/aimd-engine/examples/bench_asr.rs`
+(2026-10-25; un-optimized scalar/blocked CPU kernels, no NEON yet).
+
+| Date | Backend | Input | Load (cold) | Warm latency | Realtime | Notes |
+|------|---------|-------|-------------|--------------|----------|-------|
+| 2026-10-25 | native CPU (release) | `mlx-community/Qwen3-ASR-1.7B-4bit` | 10.85 s (mmap + eager dequant to f16 caches; tokenizer 0.13 s) | zh 8.56 s TTS: ~61 s; en 3.75 s: ~43 s | ~0.1x | Text token-identical to MLX on both clips (incl. the same 上下文忠诚 mishearing). No first-run JIT penalty (flat across rounds). |
+| 2026-10-25 | mlx-audio (Metal) | same checkpoints/clips | 10.01 s | zh 8.56 s: 0.43 s; en 3.75 s: 0.25 s | 19.9x / 15x | First round carries Metal warm-up (1.19 s -> 0.43 s). |
+
+Interpretation:
+
+- Startup is at parity with MLX (~11 s); the eager f16 dequant cache does
+  not regress cold start on this machine.
+- Warm CPU inference is ~0.1x realtime — far below the >= 5x CPU gate and
+  ~150x behind MLX's Metal path. This is the expected un-optimized
+  baseline (scalar f16 kernels, naive tied-embedding logits matmul over
+  the 152k vocab per step). Performance remains the job of the MLX shim
+  variant (WS-11) and the GPU phases per the v0.4 design; obvious CPU
+  headroom exists (NEON, blocked+rayon logits matmul) if we want the
+  default CPU wheel to be interactive.
+- Behavioral parity: identical transcription text (including identical
+  errors) vs MLX on both benchmark clips is the strongest end-to-end
+  fidelity signal so far.
+
+| 2026-10-25 | native CPU (release, SIMD pass) | same | 10.12 s | zh 8.56 s TTS: ~39 s (0.2x); en 3.75 s: ~30 s | 0.2x | "Obvious wins" pass: vocab-axis rayon for small-m matmul + transposed-B blocked logits + stable NEON f32x4 FMA kernels (fp16 vector loads are nightly-only) + AVX2/F16C/FMA on x86_64. 1.4-1.6x vs the naive pass; outputs still token-identical to MLX. Per v0.5 the CPU path stays the correctness baseline — further CPU tuning is not planned; perf rides the MLX/Metal variant. |
+
 ## Current smoke-test record
 
 The following are functional smoke tests, not benchmarks. They verify that heavyweight model paths can load and execute in development environments.

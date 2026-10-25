@@ -30,7 +30,11 @@
 //!     special handling).
 //!   - [`ops::swiglu`] (`silu(gate) * up`).
 //!   - [`ops::matmul_f16_f32acc`] `[m,k] x [k,n]`, cache-blocked, rayon
-//!     over output row panels, deterministic accumulation order.
+//!     over output row panels (column blocks when `m` is small),
+//!     deterministic accumulation order, SIMD inner loops
+//!     ([`simd`]: NEON / AVX2+F16C+FMA with runtime detection).
+//!   - [`ops::matmul_bt_f16_f32out`] transposed-B variant (f32 out) for the
+//!     tied-embedding logits path.
 //!   - [`ops::gqa_decode_attention`]: single new query token against cache
 //!     slices with contiguous `q_heads -> kv_heads` mapping and optional
 //!     last-`window` rows visibility.
@@ -48,6 +52,7 @@ pub mod error;
 pub mod kv;
 pub mod ops;
 pub mod shape;
+pub mod simd;
 pub mod tensor;
 
 #[cfg(test)]

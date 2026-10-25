@@ -29,3 +29,7 @@
 //! encoder -> decoder -> generate) is coordinator-owned in a later file.
 
 pub mod config;
+pub mod decoder;
+pub mod encoder;
+pub mod generate;
+pub mod pipeline;

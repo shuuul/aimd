@@ -1,14 +1,17 @@
-# aimd 原生化重构设计（v0.4，决策已定）
+# aimd 原生化重构设计（v0.5，决策已定）
 
 > 状态：**设计定稿，已立项执行**。执行跟踪见 `specs/002-native-engine.md`。
 > 事实来源：模型结构取自本机缓存的 `mlx-community/Qwen3-ASR-1.7B-4bit` 与
 > `mlx-community/Unlimited-OCR-4bit` 的 `config.json`；性能基线取自
 > `docs/performance.md`；体积数据为本机实测（2026-10-25）。
 >
-> v0.4 变更：**双 wheel 分层**（默认小 wheel = 手写 CPU 引擎；
-> `aimd-tool[mlx]` extra = 链接 MLX C++ 的变体 wheel，提供完整 Metal
-> 性能）；CUDA 维持自写 .cu + CUTLASS，`mlx[cuda]` 作 metacube 上的兜底
-> 与对照；手写 MSL 内核降为后期"替换 MLX 变体"的可选阶段。
+> v0.5 变更：**CPU 性能路线降级**（CPU 只做正确性基线与兜底，无性能
+> 门槛）；**MLX/Metal 提为主性能路线**（WS-11 提前，brew mlx 0.32.4 为
+> shim 链接目标）；**新增 ANE 可行性调研**（Core ML 是唯一通道，预期
+> 甜点位是"音频/视觉编码器上 ANE + 解码器留 Metal"，见
+> `docs/ane-feasibility.md`）。首次基准（2026-10-25）：native CPU 加载
+> 10.85s 与 MLX 打平、转写行为与 MLX 逐 token 一致，但 CPU 稳态仅
+> ~0.1× 实时 —— 促成本次优先级调整。
 
 ## 0. 一句话结论
 
@@ -240,7 +243,10 @@ Python 文件的阶段用 worktree。
 | 分发形态 | 继续 PyPI；Python 接口层保留；`aimd._native` 注入 |
 | **打包分层** | **双 wheel**：默认 = 手写 CPU（~10–20 MB）；`[mlx]` extra = MLX 变体（+~60–90 MB）；CUDA 变体内嵌 cubin/PTX |
 | **Mac 性能路径** | 近期 MLX C++ shim（C ABI，`--features mlx` 变体）；远期手写 MSL 替换（降级为可选阶段） |
+| **CPU 性能定位（v0.5）** | 正确性基线 + 小 wheel 兜底，无性能门槛（首次实测 ~0.1× 实时，不投入 NEON 冲刺） |
+| **ANE（v0.5）** | 经 Core ML 调研可行路径（无公开 API；fp16 无量化）；候选甜点位：音频/视觉编码器上 ANE + 解码器留 Metal；调研报告 `docs/ane-feasibility.md` 决定去留 |
+| MLX shim 链接目标 | brew `mlx` 0.32.4（bottled，与 wheel 0.32.2 同线）优先；源码构建为后备 |
 | CUDA | 自写 .cu + CUTLASS 主路径；`mlx[cuda]` metacube 兜底/对照；不用 torch |
-| Metal 手写内核 | 保留为 P5 可选阶段（M2 Pro 调优目标不变），解除 urgency |
-| 阶段顺序 | CPU → MLX 变体 → CUDA →（可选）手写 MSL；ASR → OCR |
+| Metal 手写内核 | 保留为后期可选阶段（M2 Pro 调优目标不变），解除 urgency |
+| **阶段顺序（v0.5）** | ~~CPU 性能~~ → **MLX shim（WS-11，ASR 先行）→ ANE 调研（并行）** → OCR 引擎（WS-07）→ CUDA →（可选）手写 MSL |
 | 权重分发 | hf-hub 直拉 mlx-community 4-bit（+ASR 8-bit） |

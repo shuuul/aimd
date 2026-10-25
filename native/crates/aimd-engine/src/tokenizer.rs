@@ -45,13 +45,94 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
-    /// Load `tokenizer.json` from a checkpoint snapshot directory.
+    /// Load a tokenizer from a checkpoint snapshot directory.
+    ///
+    /// Prefers `tokenizer.json` (fast path, e.g. the `-hf` repos). MLX
+    /// quantized repos (e.g. `mlx-community/Qwen3-ASR-1.7B-4bit`) ship the
+    /// legacy `vocab.json` + `merges.txt` + `tokenizer_config.json` form
+    /// instead — exactly what `transformers.AutoTokenizer` consumes — so we
+    /// reconstruct the byte-level BPE from those, mirroring mlx-audio's
+    /// `post_load_hook`.
     pub fn from_checkpoint(dir: &Path) -> Result<Self, TokenizerError> {
         let file = dir.join("tokenizer.json");
-        let inner = tokenizers::Tokenizer::from_file(&file).map_err(|e| TokenizerError::Load {
-            path: file,
-            reason: e.to_string(),
-        })?;
+        if file.is_file() {
+            let inner =
+                tokenizers::Tokenizer::from_file(&file).map_err(|e| TokenizerError::Load {
+                    path: file,
+                    reason: e.to_string(),
+                })?;
+            return Ok(Self { inner });
+        }
+        Self::from_vocab_merges(dir)
+    }
+
+    /// Reconstruct a byte-level BPE tokenizer from `vocab.json` +
+    /// `merges.txt` + special tokens from `tokenizer_config.json`
+    /// (`added_tokens_decoder`). Equivalence with the `tokenizer.json`
+    /// fast path is locked by the `tokenizer_vocab_merges_equivalence`
+    /// test.
+    fn from_vocab_merges(dir: &Path) -> Result<Self, TokenizerError> {
+        let load_err = |reason: String| TokenizerError::Load {
+            path: dir.to_path_buf(),
+            reason,
+        };
+        let vocab_path = dir.join("vocab.json");
+        let merges_path = dir.join("merges.txt");
+        if !vocab_path.is_file() || !merges_path.is_file() {
+            return Err(load_err(
+                "neither tokenizer.json nor vocab.json+merges.txt present".to_string(),
+            ));
+        }
+        let bpe = tokenizers::models::bpe::BPE::from_file(
+            vocab_path
+                .to_str()
+                .ok_or_else(|| load_err("non-utf8 vocab path".to_string()))?,
+            merges_path
+                .to_str()
+                .ok_or_else(|| load_err("non-utf8 merges path".to_string()))?,
+        )
+        .build()
+        .map_err(|e| load_err(format!("bpe build: {e}")))?;
+        let mut inner = tokenizers::Tokenizer::new(bpe);
+        // Qwen byte-level tokenization: regex split + byte alphabet,
+        // no prefix-space injection (verified by the equivalence test).
+        let pre: tokenizers::PreTokenizerWrapper =
+            tokenizers::pre_tokenizers::byte_level::ByteLevel::new(false, true, true).into();
+        let dec: tokenizers::DecoderWrapper =
+            tokenizers::decoders::byte_level::ByteLevel::default().into();
+        inner.with_pre_tokenizer(Some(pre)).with_decoder(Some(dec));
+
+        // Special tokens live in tokenizer_config.json `added_tokens_decoder`
+        // (id -> {content, special}); register them so <|...|> markers in
+        // chat strings encode to their fixed ids.
+        let cfg_path = dir.join("tokenizer_config.json");
+        if cfg_path.is_file() {
+            let cfg_raw = std::fs::read(&cfg_path)
+                .map_err(|e| load_err(format!("tokenizer_config.json: {e}")))?;
+            let cfg: serde_json::Value = serde_json::from_slice(&cfg_raw)
+                .map_err(|e| load_err(format!("tokenizer_config.json: {e}")))?;
+            if let Some(map) = cfg.get("added_tokens_decoder").and_then(|v| v.as_object()) {
+                let mut specials: Vec<tokenizers::AddedToken> = Vec::new();
+                for entry in map.values() {
+                    let content = entry.get("content").and_then(|c| c.as_str());
+                    let special = entry
+                        .get("special")
+                        .and_then(|s| s.as_bool())
+                        .unwrap_or(false);
+                    if let Some(content) = content {
+                        specials.push(tokenizers::AddedToken {
+                            content: content.to_string(),
+                            special,
+                            single_word: false,
+                            lstrip: false,
+                            rstrip: false,
+                            normalized: false,
+                        });
+                    }
+                }
+                inner.add_special_tokens(&specials);
+            }
+        }
         Ok(Self { inner })
     }
 
@@ -335,6 +416,35 @@ mod tests {
             let c = load_ocr_case(case);
             let ids = build_ocr_prompt_ids(&tok, &c.user_text, c.image_pad_count).expect("build");
             assert_eq!(ids, c.prompt_ids, "id mismatch for {case}");
+        }
+    }
+
+    #[test]
+    fn tokenizer_vocab_merges_equivalence() {
+        // The MLX 4-bit repo ships vocab.json+merges.txt; the -hf repo ships
+        // tokenizer.json. Both must encode identically.
+        let Some(hf_dir) = checkpoint_dir(ASR_REPO) else {
+            eprintln!("skipping: {ASR_REPO} not in HF cache");
+            return;
+        };
+        let Some(mlx_dir) = checkpoint_dir("models--mlx-community--Qwen3-ASR-1.7B-4bit") else {
+            eprintln!("skipping: Qwen3-ASR-1.7B-4bit not in HF cache");
+            return;
+        };
+        let json_tok = Tokenizer::from_checkpoint(&hf_dir).expect("tokenizer.json path");
+        let vm_tok = Tokenizer::from_checkpoint(&mlx_dir).expect("vocab+merges path");
+        for sample in [
+            "<|im_start|>system\n你好，世界！这是上下文工程的一小步。<|im_end|>\n",
+            "<|im_start|>assistant\nlanguage Chinese<asr_text>",
+            "高频词汇： bluesky、ZCode；话题：上下文工程",
+            "mixed 中英 ab旷🎉 emoji と日本語",
+            "<|audio_start|><|audio_pad|><|audio_end|>",
+        ] {
+            let a = json_tok.encode(sample).expect("json encode");
+            let b = vm_tok.encode(sample).expect("vocab+merges encode");
+            assert_eq!(a, b, "encoding mismatch for {sample:?}");
+            let back = vm_tok.decode(&b, false).expect("decode");
+            assert_eq!(back, sample);
         }
     }
 

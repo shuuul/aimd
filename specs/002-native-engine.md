@@ -44,10 +44,11 @@ supporting exactly two models on CPU, Metal (M2 Pro), and CUDA (metacube).
       current MLX backend; 4-bit repetition-loop 8-bit retry still works.
 - [ ] OCR: text similarity >= MLX baseline - 2% on the golden corpus; healthy
       pages end with `finish=stop` at a rate no lower than today.
-- [ ] Perf gates: ASR >= 5x realtime (CPU), >= MLX baseline on M2 Pro (Metal),
-      >= 10x realtime on metacube (CUDA); OCR healthy pages <= 30s (CPU),
-      <= 15s (CUDA), MLX-comparable (Metal). Results recorded in
-      `docs/performance.md`.
+- [ ] Perf gates (v0.5): ASR >= MLX baseline on M2 Pro via the MLX variant
+      and >= 10x realtime on metacube (CUDA); OCR healthy pages <= 15s
+      (CUDA), MLX-comparable (MLX variant). The CPU path has no perf gate —
+      it is the correctness baseline and small-wheel fallback. Results
+      recorded in `docs/performance.md`.
 - [ ] `aimd-tool` wheels publish to PyPI with the native engine embedded
       (macOS arm64 CPU+Metal, manylinux CPU, CUDA cubin/PTX embedded);
       interfaces (CLI/API/MCP) unchanged behaviorally.
@@ -101,6 +102,10 @@ Not in scope:
 | 2026-10-25 | Dual-wheel packaging: default `aimd-tool` wheel ships only the hand-written CPU engine (~10-20 MB); `aimd-tool[mlx]` extra installs an `aimd-tool-mlx` variant built `--features mlx` linking MLX C++ (runtime measured: libmlx.dylib 21 MB + mlx.metallib 174 MB, ~+60-90 MB compressed) | Measured sizes: hand-written kernels keep the default CLI small; MLX reuse removes the highest-risk MSL tuning from the critical path; Mac perf parity with the MLX baseline holds by construction | WS-08, WS-10, WS-11 |
 | 2026-10-25 | Mac performance path: near-term MLX via a C-ABI C++ shim crate (pattern identical to the CUTLASS shim); hand-written MSL kernels demoted to an optional late phase that replaces/retires the MLX variant | MLX being a C++ library does not force a C++ engine; Rust constraints (PyO3/maturin, tokenizers, cudarc, memory safety) are unchanged; MSL tuning (4-8 weeks, highest risk) leaves the critical path | WS-08, WS-11 |
 | 2026-10-25 | CUDA: hand-written .cu + CUTLASS remains the primary path on metacube; `mlx[cuda]` (headers + libjaccl present in the installed MLX build) serves as emergency fallback and perf comparison | Explicit project requirement to own the CUDA kernels; upstream MLX CUDA backend is too young to depend on but useful as a cross-check | WS-09 |
+| 2026-10-25 | CPU path demoted to correctness baseline + small-wheel fallback: no perf gate, no NEON sprint | First benchmark (docs/performance.md 2026-10-25): CPU load at parity with MLX (10.85s vs 10.01s) and token-identical outputs, but warm inference ~0.1x realtime vs MLX 19.9x on Metal — optimization effort is better spent on the MLX/Metal route | WS-02, WS-03 |
+| 2026-10-25 | MLX/Metal route is the primary Mac performance path: WS-11 promoted to the next construction wave (ASR first); brew `mlx` 0.32.4 (bottled, same 0.32 line as the wheel) is the shim link target | User direction after the CPU benchmark; brew bottle removes the source-build risk | WS-11 |
+| 2026-10-25 | ANE exploration: feasibility spike only (WS-12). ANE has no public API (Core ML is the only path, fp16 unquantized); candidate sweet spot is encoder-on-ANE + decoder-on-Metal; go/no-go follows the report | User direction; unknowns (stateful LLM conversion for Qwen3-ASR, weight size at fp16, Rust/Core ML integration) must be resolved before committing | WS-12 |
+| 2026-10-25 | CPU "obvious wins only" optimization pass, quality bar = unit tests + parity tolerances (no full gate): vocab-axis rayon parallelism for small-m matmul (decode steps were serial under row-panel parallelism), transposed-B blocked logits matmul (no 600 MB embedding transpose, F32 out for argmax faithfulness), SIMD inner kernels (stable NEON f32x4 FMA on aarch64 — fp16 load intrinsics are nightly-only; fully vectorized AVX2+F16C+FMA on x86_64; scalar fallback; runtime detection) | User direction: strengthen MLX/Metal as primary, but land the obvious CPU wins in passing; kernel reordering stays within existing golden tolerances (verified: decoder golden logits parity + 16-token argmax stream green) | WS-03 |
 
 ## Workstreams
 
@@ -118,7 +123,8 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-08 | Hand-written Metal MSL kernels (optional late phase: replace/retire the MLX variant; M2 Pro tuning targets unchanged) | Unassigned | Pending | WS-11 | Small default wheel with Metal perf on this machine |
 | WS-09 | CUDA .cu kernels + CUTLASS shim (ASR then OCR) on metacube; `mlx[cuda]` as fallback/comparison | Unassigned | Pending | WS-06, WS-07 | CUDA perf gate + numeric parity harness |
 | WS-10 | `aimd-native` PyO3 binding, Python `native` backend default, dual-wheel matrix (default CPU + `[mlx]`/CUDA variants), old-backend deprecation + removal | Unassigned | Pending | WS-06, WS-07 | Wheel smoke installs (default small, variants functional); behavior tests on retained interfaces |
-| WS-11 | `aimd-mlx` C-ABI shim over `mlx::core` (array lifetime, `quantized_matmul`, GEMM/attention composition); model graphs on the MLX backend; `--features mlx` variant build | Unassigned | Pending | WS-06, WS-07 | Same-machine perf >= MLX baseline by construction; variant wheel builds |
+| WS-11 | `aimd-mlx` C-ABI shim over `mlx::core` (array lifetime, `quantized_matmul`, GEMM/attention composition); model graphs on the MLX backend; `--features mlx` variant build. Promoted to the active wave (ASR first); brew mlx 0.32.4 link target | Unassigned | In progress | WS-06 | Same-machine perf >= MLX baseline by construction; variant wheel builds |
+| WS-12 | ANE feasibility spike: Core ML routes (stateful LLM on ANE, encoder-on-ANE), fp16/weight-size constraints, mlx-or-torch conversion source, Rust integration path, expected gains vs Metal on M2 Pro; go/no-go recommendation in `docs/ane-feasibility.md` | Unassigned | In progress | None | Report reviewed; go/no-go decision recorded in this spec |
 
 ## Verification
 
@@ -255,6 +261,101 @@ Append entries rather than rewriting another worker's record.
   edits, or deferral).
 - Blockers: commit gate only; engineering unblocked.
 - Next action: integrate WS-06a/06b on completion; run workspace gate.
+
+### 2026-10-25 — agent-decoder/WS-06b complete — WS-06
+
+- Changed: `qwen3_asr/{decoder.rs, generate.rs}` landed: Qwen3 decoder over
+  4-bit affine weights (all weights via `dequantize_affine` only),
+  audio-pad embedding replacement (`audio_token_id` positions replaced
+  in order, `min(#pads, #features)`), prefill/step over the shared KV
+  cache, greedy loop with EOS-before-append semantics, repetition-loop
+  detector port (regex-free) reporting `loop_detected` for the 4-bit->8-bit
+  retry, `parse_qwen_output` port; `scripts/export_asr_decoder_reference.py`
+  + golden fixtures under `native/golden/asr_decoder/` (byte-identical rerun).
+- Evidence: forced 16-token greedy argmax stream + 5 prefill positions match
+  MLX exactly; logits max-abs 1.035 on ~±25 scale documented at tolerance
+  1.5 (bf16-reference vs f16-compute store rounding; weights bit-exact,
+  both accumulate f32); chunked prefill == full prefill bit-identically;
+  8-bit checkpoint load tested. 15 tests (`decoder_`x7, `generate_`x8).
+- Checkpoint facts recorded: layernorms and `q_norm`/`k_norm` are stored
+  UNQUANTIZED bf16 (MLX quantizes only Linear/Embedding); per-head
+  q/k RMSNorm applies before NeoX RoPE.
+- Remaining: WS-06a (encoder) still in progress (sibling observed an
+  E0277 in encoder.rs under active development); integration pass after it
+  lands: workspace gate, mod.rs fmt ordering, pipeline wiring, fold in the
+  stale `qwen3_asr.rs` deletion missed by the wave-1 commit (HEAD currently
+  has both module files; do not push HEAD).
+- Blockers: none (decoder-side).
+- Next action: await WS-06a completion; then integrate.
+
+### 2026-10-25 — shuuul/WS-06 integration — WS-06
+
+- Changed: coordinator pipeline landed (`qwen3_asr/pipeline.rs`): wav ->
+  mel (transpose to time-major) -> audio tower -> prompt/pads ->
+  `greedy_generate` -> `parse_qwen_output`, plus `transcribe_with_retry`
+  (4-bit -> 8-bit on loop detection, falls back to primary on retry
+  failure). AIMD_E2E=1-gated full-stack tests added. WS-06a encoder
+  delivered earlier this session (18 tests; staged parity 7.8e-5 interior /
+  8.5e-7 final projection; frames->pads formula locked vs all fixtures).
+- Key fix during integration: the mlx-community 4-bit repo ships
+  `vocab.json`+`merges.txt` (no `tokenizer.json`) — `Tokenizer::from_checkpoint`
+  now reconstructs the byte-level BPE (ByteLevel pretokenizer/decoder +
+  `added_tokens_decoder` specials), mirroring mlx-audio's
+  `AutoTokenizer` path; equivalence vs the `-hf` tokenizer.json locked by
+  test (`tokenizer_vocab_merges_equivalence`, identical ids incl. specials
+  and CJK).
+- Evidence: release-mode E2E 3/3 green — sine-noise input returns
+  `EmptyTranscription` as expected; macOS TTS clip transcribes correctly:
+  "Today's weather is great, and context engineering just got simpler."
+- Gate + perf recorded: workspace 134/134 tests green (68 engine incl.
+  checkpoint integration, 979s debug), fmt clean, clippy zero findings
+  after integration fixes; first benchmark numbers in
+  `docs/performance.md` (native CPU: load 10.85s at parity with MLX's
+  10.01s; warm inference ~0.1x realtime vs MLX 19.9x on Metal;
+  transcription text token-identical to MLX on both clips, including the
+  same mishearing). `examples/bench_asr.rs` is the reproducible harness.
+- Remaining for WS-06 Done: golden-corpus CER/WER comparison harness vs
+  the MLX backend (the two-clip identity result is promising evidence,
+  not the gate).
+- Blockers: none.
+- Next action: commit WS-06; corpus harness; then WS-07 (OCR) dispatch
+  decision.
+
+### 2026-10-25 — shuuul/v0.5 re-prioritization + wave dispatch — WS-11, WS-12
+
+- Changed: after the first CPU benchmark (load parity 10.85s vs 10.01s,
+  token-identical outputs, but ~0.1x realtime warm vs MLX 19.9x), the CPU
+  perf route is dropped (no gate, no NEON sprint); MLX/Metal is the
+  primary Mac performance path — WS-11 promoted into the active wave
+  (ASR first, brew mlx 0.32.4 link target). WS-12 ANE feasibility spike
+  dispatched in parallel (Core ML is the only ANE path; fp16 unquantized;
+  candidate sweet spot: encoder-on-ANE + decoder-on-Metal).
+- Evidence: benchmark rows in `docs/performance.md` (2026-10-25);
+  `brew info mlx` shows a bottled 0.32.4 formula on the installed wheel's
+  0.32 line.
+- Remaining: WS-11a shim bring-up + parity vs golden quant fixtures;
+  WS-12 report; WS-06 corpus harness still open.
+- Blockers: none.
+- Next action: integrate WS-11a/WS-12 on completion; decide WS-11b
+  (ASR graph on the MLX backend) and the ANE go/no-go.
+
+### 2026-10-25 — agent-ane/WS-12 report delivered — WS-12
+
+- Changed: `docs/ane-feasibility.md` landed (335 lines, sources cited,
+  verified facts vs inference separated). Recommendation: **skip ANE
+  (option a)**; encoder-on-ANE (option b) kept as a time-boxed 1-2
+  person-week spike ONLY if energy/long-recording prefill becomes a
+  product goal.
+- Evidence: ANE decode is bandwidth-starved (44-70% of GPU effective
+  bandwidth per MacPaw M2-Pro-inclusive measurements; Apple's own Llama
+  guide targets GPU for decode) and our workloads are decode-dominated;
+  fp16-only weights conflict with MLX 4-bit and the small default wheel;
+  MLX->CoreML has no official export path; Apple announced Core AI
+  (macOS 27) as Core ML's successor — build-then-freeze risk.
+- Remaining: user go/no-go decision on the report.
+- Blockers: none.
+- Next action: record the ANE decision; WS-11a integration when the shim
+  agent reports.
 
 ## Completion summary
 

@@ -1,0 +1,80 @@
+{
+  "name": "sine_9s",
+  "checkpoint": "mlx-community/Qwen3-ASR-1.7B-4bit",
+  "generator_recipe": {
+    "type": "sine",
+    "freq_hz": 440.0,
+    "amplitude": 0.5,
+    "duration_s": 9.0
+  },
+  "samples": 144000,
+  "frames": 900,
+  "audio_pad_count": 117,
+  "mel_layout": "row_major_[frames,128]_f32le (time-major, true frame region)",
+  "stage_layout": "row_major_f32le; activations are float32 (bf16 weights promoted)",
+  "stage_shapes": {
+    "conv_front_end": [
+      117,
+      1024
+    ],
+    "layer_00": [
+      117,
+      1024
+    ],
+    "layer_01": [
+      117,
+      1024
+    ],
+    "layer_12": [
+      117,
+      1024
+    ],
+    "layer_23": [
+      117,
+      1024
+    ],
+    "final_projection": [
+      117,
+      2048
+    ]
+  },
+  "geometry": {
+    "feature_lens": [
+      900
+    ],
+    "chunk_size": 100,
+    "chunk_lengths": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "feature_lens_after_cnn": [
+      13,
+      13,
+      13,
+      13,
+      13,
+      13,
+      13,
+      13,
+      13
+    ],
+    "max_chunk_len": 100,
+    "max_len_after_cnn": 13,
+    "window_aftercnn": 104,
+    "cu_seqlens": [
+      0,
+      104,
+      117
+    ],
+    "aftercnn_lens": [
+      117
+    ]
+  }
+}

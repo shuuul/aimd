@@ -29,6 +29,9 @@ const MC: usize = 32;
 const KC: usize = 256;
 /// Column-block width for the `matmul_f16_f32acc` panel blocking.
 const NC: usize = 128;
+/// At or below this many rows, matmul parallelism switches from row panels
+/// to per-row column blocks (decode steps run `m == 1`).
+const SMALL_M: usize = 8;
 
 /// Root-mean-square layer norm over the last dimension.
 ///
@@ -358,10 +361,12 @@ fn silu_f32(x: f32) -> f32 {
 ///
 /// Panel blocking (`MC x NC` output panels, `KC`-deep k slabs) keeps the
 /// f32 accumulator and the `b` panel L1/L2-resident; the inner loop is a
-/// plain axpy over contiguous rows. Row panels are parallelized with rayon;
-/// the per-element accumulation order is fixed, so results are
-/// deterministic. NEON microkernels replace the inner loops in the perf
-/// phase.
+/// plain axpy over contiguous rows. Work is parallelized with rayon over
+/// row panels when `m` is large, and over `NC` column blocks within each
+/// row when `m` is small (decode steps run `m == 1`, where row-panel
+/// parallelism would be serial). The per-element accumulation order is
+/// fixed either way, so results are deterministic. NEON microkernels
+/// replace the inner loops in the perf phase.
 pub fn matmul_f16_f32acc(a: &Tensor, b: &Tensor) -> Result<Tensor, TensorError> {
     for t in [a, b] {
         if t.dtype() != DType::F16 {
@@ -393,6 +398,37 @@ pub fn matmul_f16_f32acc(a: &Tensor, b: &Tensor) -> Result<Tensor, TensorError> 
     let a_s = a.as_f16()?;
     let b_s = b.as_f16()?;
     let mut out = vec![f16::ZERO; m * n];
+    if m <= SMALL_M {
+        // Decode-step regime (m == 1..SMALL_M): parallelize column blocks
+        // within each row instead of row panels. Same KC-slab accumulation
+        // order and single f32->f16 rounding as the panel path, so
+        // per-element results are identical.
+        for i in 0..m {
+            let orow = &mut out[i * n..(i + 1) * n];
+            orow.par_chunks_mut(NC)
+                .enumerate()
+                .for_each(|(blk, oblock)| {
+                    let jj = blk * NC;
+                    let jb = oblock.len();
+                    let a_off = i * k;
+                    let mut acc = vec![0f32; jb];
+                    for kk in (0..k).step_by(KC) {
+                        let kb = KC.min(k - kk);
+                        let a_row = &a_s[a_off + kk..a_off + kk + kb];
+                        for (t, &av) in a_row.iter().enumerate() {
+                            let avf = av.to_f32();
+                            let b_off = (kk + t) * n + jj;
+                            let b_row = &b_s[b_off..b_off + jb];
+                            crate::simd::axpy_f16_f32(avf, b_row, &mut acc);
+                        }
+                    }
+                    for (o, &v) in oblock.iter_mut().zip(&acc) {
+                        *o = f16::from_f32(v);
+                    }
+                });
+        }
+        return Tensor::from_f16_vec(out_shape, &out);
+    }
     out.par_chunks_mut(MC * n)
         .enumerate()
         .for_each(|(block, orows)| {
@@ -411,9 +447,7 @@ pub fn matmul_f16_f32acc(a: &Tensor, b: &Tensor) -> Result<Tensor, TensorError> 
                             let avf = av.to_f32();
                             let b_off = (kk + t) * n + jj;
                             let b_row = &b_s[b_off..b_off + jb];
-                            for (j, &bv) in b_row.iter().enumerate() {
-                                acc_row[j] += avf * bv.to_f32();
-                            }
+                            crate::simd::axpy_f16_f32(avf, b_row, acc_row);
                         }
                     }
                 }
@@ -427,6 +461,70 @@ pub fn matmul_f16_f32acc(a: &Tensor, b: &Tensor) -> Result<Tensor, TensorError> 
             }
         });
     Tensor::from_f16_vec(out_shape, &out)
+}
+
+/// Transposed-B matrix multiply for the tied-embedding logits path:
+/// `a [m, k] x bt^T` where `bt` is `F16 [n, k]` row-major (row `v` of `bt`
+/// is the `v`-th output column), returning `F32 [m, n]`.
+///
+/// This avoids materializing the `[k, n]` transpose of an embedding table
+/// (the Qwen3-ASR table would be a ~600 MB copy) and keeps full `f32`
+/// output precision for faithful argmax ties. Parallelized over `NC` row
+/// blocks of `bt` (the vocab axis) with rayon — the decode-time `m` is 1
+/// to a few rows. Deterministic: each output element is a single-task
+/// `KC`-blocked accumulation.
+pub fn matmul_bt_f16_f32out(a: &Tensor, bt: &Tensor) -> Result<Tensor, TensorError> {
+    for t in [a, bt] {
+        if t.dtype() != DType::F16 {
+            return Err(TensorError::DTypeMismatch {
+                expected: DType::F16,
+                actual: t.dtype(),
+            });
+        }
+        if t.shape().rank() != 2 {
+            return Err(TensorError::InvalidShape {
+                shape: t.shape().dims().to_vec(),
+                reason: "matmul_bt needs rank-2 inputs".to_string(),
+            });
+        }
+    }
+    let (m, k) = (a.shape().dims()[0], a.shape().dims()[1]);
+    let (n, k2) = (bt.shape().dims()[0], bt.shape().dims()[1]);
+    if k != k2 {
+        return Err(TensorError::ShapeMismatch {
+            expected: format!("bt cols = {k}"),
+            actual: format!("bt cols = {k2}"),
+        });
+    }
+    let out_shape = Shape::from_dims(&[m, n]);
+    if m == 0 || n == 0 || k == 0 {
+        return Tensor::from_f32_vec(out_shape, &[]);
+    }
+
+    let a_s = a.as_f16()?;
+    let bt_s = bt.as_f16()?;
+    let mut out = vec![0f32; m * n];
+    for i in 0..m {
+        let orow = &mut out[i * n..(i + 1) * n];
+        orow.par_chunks_mut(NC)
+            .enumerate()
+            .for_each(|(blk, oblock)| {
+                let jj = blk * NC;
+                let jb = oblock.len();
+                let a_off = i * k;
+                let mut acc = vec![0f32; jb];
+                for kk in (0..k).step_by(KC) {
+                    let kb = KC.min(k - kk);
+                    let a_row = &a_s[a_off + kk..a_off + kk + kb];
+                    for (v, ov) in acc.iter_mut().enumerate() {
+                        let bt_row = &bt_s[(jj + v) * k + kk..(jj + v) * k + kk + kb];
+                        *ov += crate::simd::dot_f16_f32(a_row, bt_row);
+                    }
+                }
+                oblock.copy_from_slice(&acc);
+            });
+    }
+    Tensor::from_f32_vec(out_shape, &out)
 }
 
 /// Single-token GQA decode attention against a contiguous KV cache.
