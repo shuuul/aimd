@@ -72,6 +72,8 @@ Interpretation:
 
 | 2026-10-25 | native CPU (release, SIMD pass) | same | 10.12 s | zh 8.56 s TTS: ~39 s (0.2x); en 3.75 s: ~30 s | 0.2x | "Obvious wins" pass: vocab-axis rayon for small-m matmul + transposed-B blocked logits + stable NEON f32x4 FMA kernels (fp16 vector loads are nightly-only) + AVX2/F16C/FMA on x86_64. 1.4-1.6x vs the naive pass; outputs still token-identical to MLX. Per v0.5 the CPU path stays the correctness baseline — further CPU tuning is not planned; perf rides the MLX/Metal variant. |
 
+| 2026-10-25 | native CPU (release, bit-trick cvt) | same | 10.44 s | zh 8.56 s TTS: ~33 s (0.3x); en 3.75 s: ~25 s (0.2x) | 0.2-0.3x | f16->f32 conversion now fully vectorized on stable NEON via the integer bit algorithm (exhaustively bit-exact over all 65536 f16 patterns). 1.2x over the prior SIMD pass; cumulative 1.75-1.9x over naive. Conversion is no longer the dominant cost — further CPU gains need register-tiled microkernels (real kernel work, out of the casual pass; CPU stays the fallback path per v0.5). |
+
 ## Current smoke-test record
 
 The following are functional smoke tests, not benchmarks. They verify that heavyweight model paths can load and execute in development environments.

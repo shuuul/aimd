@@ -102,14 +102,52 @@ fn dot_scalar(a: &[f16], b: &[f16], n: usize) -> f32 {
 // ---------------------------------------------------------------------------
 // aarch64 NEON (stable)
 
-/// Scalar-convert 8 f16 values into two f32 quartets.
+/// Vector-convert 4 f16 values to f32 on stable NEON via the classic
+/// integer bit algorithm (no `fp16` target feature needed):
+/// normals add the bias difference to the exponent field, denormals
+/// (and zeros) reinterpret the shifted mantissa as an f32 denormal and
+/// multiply by `2^125`, inf/NaN force the f32 exponent to 0xFF.
+/// Bit-exact for all 65536 f16 patterns (locked by the exhaustive test).
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn cvt4_neon(h: &[f16]) -> [f32; 4] {
+    use std::arch::aarch64::{
+        float32x4_t, uint32x4_t, vaddq_u32, vand_u16, vbslq_u32, vcgeq_u32, vcltq_u32, vdup_n_u16,
+        vdupq_n_u32, vld1_u16, vmulq_n_f32, vorrq_u32, vshll_n_u16,
+    };
+    unsafe {
+        let h4 = vld1_u16(h.as_ptr() as *const u16);
+        let em16 = vand_u16(h4, vdup_n_u16(0x7fff));
+        let sign = vshll_n_u16(vand_u16(h4, vdup_n_u16(0x8000)), 16);
+        let em_w = vshll_n_u16(em16, 13);
+        let em_full = vshll_n_u16(em16, 0);
+        let denorm_mask = vcltq_u32(em_full, vdupq_n_u32(0x0400));
+        let infnan_mask = vcgeq_u32(em_full, vdupq_n_u32(0x7c00));
+        let normal_bits = vaddq_u32(em_w, vdupq_n_u32(0x3800_0000));
+        let infnan_bits = vorrq_u32(em_w, vdupq_n_u32(0x7f80_0000));
+        // Denormal/zero lanes: bitcast(em_w) is the f32 denormal with
+        // mantissa field `mant << 13` = value `mant * 2^-136`; the true
+        // value is `mant * 2^-24` — multiply by 2^112 (exact power of two).
+        let denorm_f = vmulq_n_f32(
+            std::mem::transmute::<uint32x4_t, float32x4_t>(em_w),
+            2.0f32.powi(112),
+        );
+        let bits = vbslq_u32(
+            denorm_mask,
+            std::mem::transmute::<float32x4_t, uint32x4_t>(denorm_f),
+            vbslq_u32(infnan_mask, infnan_bits, normal_bits),
+        );
+        std::mem::transmute::<uint32x4_t, [f32; 4]>(vorrq_u32(bits, sign))
+    }
+}
+
+/// Convert 8 f16 values into two f32 quartets (vectorized on aarch64).
 #[cfg(target_arch = "aarch64")]
 #[inline]
 fn cvt8(b: &[f16]) -> ([f32; 4], [f32; 4]) {
-    (
-        [b[0].to_f32(), b[1].to_f32(), b[2].to_f32(), b[3].to_f32()],
-        [b[4].to_f32(), b[5].to_f32(), b[6].to_f32(), b[7].to_f32()],
-    )
+    // SAFETY: cvt4_neon only requires NEON (runtime-detected) and reads
+    // exactly 4 f16 words from the slice.
+    unsafe { (cvt4_neon(&b[0..]), cvt4_neon(&b[4..])) }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -131,12 +169,7 @@ unsafe fn axpy_neon(alpha: f32, b: &[f16], acc: &mut [f32], n: usize) {
         j += 8;
     }
     if j + 4 <= n {
-        let lo = [
-            b[j].to_f32(),
-            b[j + 1].to_f32(),
-            b[j + 2].to_f32(),
-            b[j + 3].to_f32(),
-        ];
+        let lo: [f32; 4] = cvt4_neon(&b[j..]);
         unsafe {
             let dst = acc[j..].as_mut_ptr();
             let lo_f: float32x4_t = std::mem::transmute(lo);
@@ -260,6 +293,33 @@ mod tests {
                 (want - got).abs() <= 1e-2 * (1.0 + want.abs()),
                 "n={n} scalar={want} simd={got}"
             );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn simd_f16_to_f32_exhaustive() {
+        // Every possible f16 bit pattern must convert to exactly what
+        // half's scalar path produces (bit-identical f32, NaN payload
+        // included; ±0 distinguished by sign).
+        let mut buf = [f16::ZERO; 4];
+        for base in (0..=0xffffusize).step_by(4) {
+            let patterns: Vec<usize> = (0..4).map(|i| base + i).collect();
+            for (i, &bits) in patterns.iter().enumerate() {
+                buf[i] = f16::from_bits(bits as u16);
+            }
+            let got = unsafe { super::cvt4_neon(&buf) };
+            for (i, &bits) in patterns.iter().enumerate() {
+                let want = f16::from_bits(bits as u16).to_f32();
+                let got_f = got[i];
+                let same_nan = want.is_nan() && got_f.is_nan();
+                assert!(
+                    same_nan || want.to_bits() == got_f.to_bits(),
+                    "bits={bits:#06x}: half={want:?} ({:#010x}) neon={got_f:?} ({:#010x})",
+                    want.to_bits(),
+                    got_f.to_bits()
+                );
+            }
         }
     }
 

@@ -357,6 +357,58 @@ Append entries rather than rewriting another worker's record.
 - Next action: record the ANE decision; WS-11a integration when the shim
   agent reports.
 
+### 2026-10-25 — shuuul/commit 2cc53a9 — WS-06
+
+- Changed: WS-06 + CPU SIMD pass + ANE report + v0.5 decisions committed
+  as `2cc53a9` (user-side terminal; mimosa gate still blocks agent
+  commits on the pre-existing test_url.py false positives).
+- Evidence: committed tree builds (mlx wiring excluded, lands with
+  WS-11a); benchmarks in `docs/performance.md` (SIMD pass 1.4-1.6x,
+  load parity, token-identical outputs).
+- Remaining: WS-11a (in flight), WS-06 corpus harness (open), ANE
+  go/no-go user decision.
+- Blockers: none.
+- Next action: WS-11a integration on completion.
+
+### 2026-10-25 — agent-mlx/WS-11a complete + feature wiring — WS-11
+
+- Changed: `aimd-mlx` shim landed: brew mlx 0.32.4 discovery + cc build
+  (C++20) + rpath linking; ~20-symbol C ABI (lifecycle with bit-exact
+  byte import/export, matmul, quantized_matmul — bf16 scales accepted
+  natively via mlx dtype promotion, no fp16 workaround — transpose,
+  reshape, elementwise, softmax, silu composed, native fused rms_norm);
+  `MlxArray` RAII wrapper. aimd-engine gained the optional `mlx` feature
+  (`--features mlx`, default CPU wheel stays mlx-free).
+- Evidence: 17/17 tests; quantized parity over all 25 golden fixtures
+  (worst 3.6e-3 relative = bf16 ulp); f16 matmul parity 2.2e-4 relative;
+  clean-env from-scratch run without DYLD env. Key finding recorded:
+  mlx transpose is a lazy strided view — readbacks must materialize via
+  contiguous()+eval() (a SIGSEGV taught us).
+- Remaining: WS-11b (ASR graph on the MLX backend) dispatched next;
+  mlx wiring still uncommitted (lands with WS-11b integration).
+- Blockers: none.
+- Next action: WS-11b integration + bench vs mlx-audio.
+
+### 2026-10-25 — shuuul/decisions + WS-12b dispatch — WS-12, WS-03
+
+- Changed: user decisions recorded — (1) ANE: run the time-boxed partial
+  spike (encoder-on-ANE per docs/ane-feasibility.md §最小 spike 设计;
+  WS-12b dispatched as a background agent: coremltools conversion of the
+  audio tower, fixed [1,128,3000] mel bucket, ANE dispatch >=90% gate,
+  >=2x encoder speedup go condition; coremltools installed into the
+  project venv spike-only); (2) CPU casual-optimization pack approved
+  (f16->f32 vectorized bit-trick + f32 cache option).
+- Evidence: the bit-trick NEON conversion landed first — stable integer
+  intrinsics only, exhaustively verified: all 65536 f16 bit patterns
+  bit-exact vs half's scalar conversion (denormals/±0/inf/NaN payloads
+  included); tensor suite 54/54. Bench + engine parity re-run in flight.
+- Remaining: WS-11b (ASR on MLX) and WS-12b (ANE spike) both in flight;
+  bench numbers for the bit-trick to be recorded in
+  docs/performance.md.
+- Blockers: none.
+- Next action: integrate both agents' results; record ANE go/no-go once
+  the spike reports.
+
 ## Completion summary
 
 (to complete before archiving)
