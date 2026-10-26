@@ -166,6 +166,7 @@ fn process(
         precision: cli.precision.clone(),
         context: cli.context.clone(),
         metadata_context: !cli.no_context,
+        anchors: true,
         asr_base_url: cli.asr_base_url.clone(),
         asr_model: cli.asr_model.clone(),
         asr_api_key: cli.asr_api_key.clone(),

@@ -164,6 +164,7 @@ mod tests {
             asset_base_uri: None,
             output_dir,
             platform: None,
+            segments: None,
         }
     }
 

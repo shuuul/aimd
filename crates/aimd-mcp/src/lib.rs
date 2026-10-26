@@ -128,6 +128,7 @@ impl ProcessArgs {
             precision,
             context,
             metadata_context,
+            anchors: true,
             asr_base_url,
             asr_model,
             asr_api_key,

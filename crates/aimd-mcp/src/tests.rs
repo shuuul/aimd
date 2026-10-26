@@ -245,6 +245,7 @@ fn text_content_keeps_python_key_order() {
             asset_base_uri: None,
             output_dir: None,
             platform: None,
+            segments: None,
         },
         None,
         None,

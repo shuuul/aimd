@@ -8,6 +8,7 @@
 //! `aimd-url`, `aimd-process`) return [`AimdError`]; interfaces map the
 //! [`ErrorKind`] onto user-facing messages and exit codes.
 
+pub mod anchors;
 pub mod error;
 pub mod ext;
 pub mod hooks;
@@ -22,7 +23,9 @@ pub mod url;
 
 pub use error::{AimdError, ErrorKind, Result};
 pub use hooks::{NoHooks, ProcessHooks};
-pub use model::{InputRoute, ProcessInput, ProcessResult, SourceKind, TaskType, TextContext};
+pub use model::{
+    InputRoute, ProcessInput, ProcessResult, Segment, SourceKind, TaskType, TextContext,
+};
 pub use precision::{Precision, normalize_precision};
 pub use remote::{RemoteBackendConfig, RemoteModality, resolve_remote_backend};
 pub use text::{MAX_CHUNK_SIZE, extract_title_from_content, text_context_from_markdown};

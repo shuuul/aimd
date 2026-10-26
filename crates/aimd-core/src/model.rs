@@ -90,6 +90,9 @@ pub struct ProcessInput {
     pub ocr_base_url: Option<String>,
     pub ocr_model: Option<String>,
     pub ocr_api_key: Option<String>,
+    /// Source anchors in `markdown` (OCR position comments, `[hh:mm:ss]`
+    /// transcript paragraphs) and forced alignment (default `true`).
+    pub anchors: bool,
 }
 
 impl Default for ProcessInput {
@@ -115,6 +118,7 @@ impl Default for ProcessInput {
             ocr_base_url: None,
             ocr_model: None,
             ocr_api_key: None,
+            anchors: true,
         }
     }
 }
@@ -128,9 +132,37 @@ impl ProcessInput {
     }
 }
 
+/// One located piece of the source: an OCR block or line (page + box) or
+/// a transcript sentence (start/end seconds). `None` fields are omitted on
+/// the wire.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Segment {
+    pub text: String,
+    /// OCR category (`title`, `text`, `table`, `line`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// 1-based page (1 for single images).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<usize>,
+    /// `[x0, y0, x1, y1]` normalized to the page image (0..1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bbox: Option<[f32; 4]>,
+    /// Rotated line corners, normalized like `bbox`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quad: Option<[[f32; 2]; 4]>,
+    /// Seconds from the start of the media.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+}
+
 /// Canonical process result. `markdown` is lossless; `text_context` holds
-/// the chunked view.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// the chunked view; `segments` locates the content in the source when the
+/// route can (OCR blocks/lines, timed transcripts).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProcessResult {
     pub task_type: TaskType,
     pub text_context: TextContext,
@@ -138,4 +170,6 @@ pub struct ProcessResult {
     pub asset_base_uri: Option<String>,
     pub output_dir: Option<PathBuf>,
     pub platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Vec<Segment>>,
 }

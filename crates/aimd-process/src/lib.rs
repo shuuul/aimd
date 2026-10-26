@@ -245,6 +245,7 @@ pub fn process_input_with(
             asset_base_uri: Some(request.input_source.clone()),
             output_dir: None,
             platform: Some(output.platform),
+            segments: None,
         });
     }
     process_local_file(request, task_type, hooks, rt)
@@ -323,6 +324,7 @@ fn process_local_file(
         asset_base_uri,
         output_dir,
         platform: None,
+        segments: None,
     })
 }
 

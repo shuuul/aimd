@@ -146,7 +146,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | `aimd_core`: `Segment`, `ProcessResult.segments`, `ProcessInput.anchors`, `anchors` module (loc comment, `[hh:mm:ss]`, sentences, paragraphs, SRT/VTT writers, SRT cue parser) | coordinator | Pending | None | hermetic unit tests |
+| WS-01 | `aimd_core`: `Segment`, `ProcessResult.segments`, `ProcessInput.anchors`, `anchors` module (loc comment, `[hh:mm:ss]`, sentences, paragraphs, SRT/VTT writers, SRT cue parser) | coordinator | Completed | None | hermetic unit tests |
 | WS-02 | `aimd-engine::models::qwen3_aligner` (Qwen3-ForcedAligner-0.6B on MLX, reuse Qwen3-ASR encoder/decoder code) + `Qwen3AsrPipeline::transcribe_detailed`; goldens via `scripts/export_aligner_reference.py` | agent ws02 | Pending | None | hermetic goldens; checkpoint parity; mean abs timestamp error vs reference <= 80 ms on corpus clips |
 | WS-03 | OCR engine positions: Unlimited-OCR `blocks`, PP-OCRv6 `width`/`height`, PaddleOCR-VL `Spotting` task + `spots` | agent ws03 | Pending | None | hermetic parse tests; checkpoint test that `blocks` join to `markdown`; spotting text/quads vs reference |
 | WS-04 | `aimd-process` + `aimd-url` wiring: OCR segments/anchors, ASR 300 s segments + alignment + paragraphs, URL subtitle cues and audio fallback, chunk-level fallback | coordinator | Pending | WS-01, WS-02/WS-03 API | hermetic tests with fake `Runtime`s |
@@ -177,6 +177,15 @@ cargo xtask check-specs
 ## Progress and handoff
 
 Append entries rather than rewriting another worker's record.
+
+- 2026-10-26 (coordinator, WS-01): Completed. `aimd_core::anchors` covers
+  `loc_comment`, `quad_bbox`, `located_markdown`, `clock`, `sentence_spans`,
+  `timed_sentences` (alignment units to sentences by alphanumeric matching),
+  `spread_sentences` (chunk-level fallback), `timed_paragraphs`,
+  `subtitle_cues`, `to_srt`/`to_vtt`, and `parse_srt` (rolling-caption dedupe).
+  `Segment`, `ProcessResult.segments` and `ProcessInput.anchors` (default true)
+  are in place; CLI/MCP set `anchors: true` until WS-05. Gates: clippy
+  `-D warnings`, `AIMD_MLX_DEVICE=cpu cargo test --workspace` green.
 
 ## Completion summary
 
