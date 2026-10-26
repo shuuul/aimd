@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [007-pipeline-throughput.md](007-pipeline-throughput.md) | Active | End-to-end throughput: host/GPU overlap, pipelining, CPU preprocessing |
 
 ## Archived specs
 
