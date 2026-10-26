@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [005-source-anchors.md](005-source-anchors.md) | Active | OCR positions, ASR timestamps (Qwen3-ForcedAligner), anchors and JSON/SRT/VTT output |
 
 ## Archived specs
 
