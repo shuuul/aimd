@@ -139,16 +139,51 @@ fn argsort_and_mean_match_numpy() {
     }
 }
 
-/// Checkpoint tier: every stage of the pipeline on each golden image.
+/// Checkpoint-tier bounds.
 ///
 /// The port is bit-exact with mlx4ocr on Metal for these images (identical
-/// probability maps, step maxima, scores and quads); the bounds only leave
-/// room for MLX kernel changes across versions.
+/// probability maps, step maxima, scores and quads); the Metal bounds only
+/// leave room for MLX kernel changes across versions. mlx's CUDA backend runs
+/// f32 convs and matmuls in TF32 by default (`MLX_ENABLE_TF32`), which moves
+/// the probability map by ~2e-2, rec step maxima by ~3e-2 (flipping the odd
+/// step argmax without changing the collapsed text) and box corners by a
+/// pixel, so off Metal these are noise bounds and the final lines' text must
+/// still match exactly.
+struct Bounds {
+    det_prob: f32,
+    rec_prob: f32,
+    rec_argmax_misses: usize,
+    score: f32,
+    quad_px: f32,
+}
+
+fn bounds() -> Bounds {
+    if aimd_mlx::metal_kernels_available().unwrap_or(false) {
+        Bounds {
+            det_prob: 1e-3,
+            rec_prob: 1e-4,
+            rec_argmax_misses: 0,
+            score: 1e-3,
+            quad_px: 0.0,
+        }
+    } else {
+        Bounds {
+            det_prob: 5e-2,
+            rec_prob: 1e-1,
+            rec_argmax_misses: 2,
+            score: 1e-2,
+            quad_px: 2.0,
+        }
+    }
+}
+
+/// Checkpoint tier: every stage of the pipeline on each golden image.
 #[test]
 fn checkpoint_pipeline_matches_mlx4ocr() {
     let Some(pipe) = shared_pipeline() else {
         return;
     };
+    let bound = bounds();
     let m = manifest();
     for entry in m["images"].as_array().unwrap() {
         let name = entry["name"].as_str().unwrap();
@@ -182,7 +217,10 @@ fn checkpoint_pipeline_matches_mlx4ocr() {
         }
         assert_eq!(k, want.len(), "{name}: prob sample count");
         eprintln!("{name}: det prob max abs diff {max_abs:.3e} over {k} samples");
-        assert!(max_abs < 1e-3, "{name}: det prob max abs diff {max_abs}");
+        assert!(
+            max_abs < bound.det_prob,
+            "{name}: det prob max abs diff {max_abs}"
+        );
 
         // Detections and the first recognition batch.
         let dets = pipe.detect(&image).unwrap();
@@ -228,8 +266,14 @@ fn checkpoint_pipeline_matches_mlx4ocr() {
         eprintln!(
             "{name}: rec batch 0 argmax mismatches {argmax_miss}, max-prob abs diff {max_abs:.3e}"
         );
-        assert_eq!(argmax_miss, 0, "{name}: rec argmax");
-        assert!(max_abs < 1e-4, "{name}: rec max prob diff {max_abs}");
+        assert!(
+            argmax_miss <= bound.rec_argmax_misses,
+            "{name}: rec argmax mismatches {argmax_miss}"
+        );
+        assert!(
+            max_abs < bound.rec_prob,
+            "{name}: rec max prob diff {max_abs}"
+        );
 
         // Final lines.
         let out = pipe.recognize_image(&image).unwrap();
@@ -238,11 +282,19 @@ fn checkpoint_pipeline_matches_mlx4ocr() {
         let mut worst_score = 0f32;
         for (got, want) in out.lines.iter().zip(want_lines) {
             assert_eq!(got.text, want["text"].as_str().unwrap(), "{name}: text");
-            assert_eq!(
-                got.quad,
-                quad_of(&want["quad"]),
-                "{name}: quad of {:?}",
-                got.text
+            let want_quad = quad_of(&want["quad"]);
+            let quad_diff = got
+                .quad
+                .iter()
+                .flatten()
+                .zip(want_quad.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0f32, f32::max);
+            assert!(
+                quad_diff <= bound.quad_px,
+                "{name}: quad of {:?}: {:?} vs {want_quad:?}",
+                got.text,
+                got.quad
             );
             worst_score =
                 worst_score.max((got.score - want["score"].as_f64().unwrap() as f32).abs());
@@ -251,7 +303,10 @@ fn checkpoint_pipeline_matches_mlx4ocr() {
             "{name}: {} lines, worst score diff {worst_score:.3e}",
             out.lines.len()
         );
-        assert!(worst_score < 1e-3, "{name}: score diff {worst_score}");
+        assert!(
+            worst_score < bound.score,
+            "{name}: score diff {worst_score}"
+        );
         let text: Vec<&str> = want_lines
             .iter()
             .map(|l| l["text"].as_str().unwrap())

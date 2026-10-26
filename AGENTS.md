@@ -215,7 +215,9 @@ flowchart TD
   `aimd-mlx`'s own targets, so dev runs of dependents need
   `LD_LIBRARY_PATH=$MLX_PREFIX/lib` (brew's linker shim adds the rpath for installs).
   The shim points `CUDA_HOME` at `/opt/cuda` when unset and `/usr/local/cuda` is
-  absent, because mlx's CUDA JIT needs the toolkit headers.
+  absent, because mlx's CUDA JIT needs the toolkit headers. It also caps mlx's memory
+  limit at 90% of the VRAM free at device selection. mlx sizes that limit from total
+  VRAM, so without the cap its buffer cache runs a shared GPU out of memory.
 - **Document tools**: Pandoc (brew) reads every supported document format; `.txt`/`.md`
   pass through; legacy `.doc`/`.ppt`/`.xls` and MOBI/AZW3 are unsupported. Text-layer
   PDFs use the `pdf-inspector` crate; scanned pages render with `mutool draw`.
@@ -376,7 +378,10 @@ Tests are lean by rule; weights are the expensive resource.
 - **Backend-specific bounds**: the Unlimited-OCR vision stage/final-feature goldens
   pin Metal mlx rounding (the tower amplifies any rounding change past them), so they
   are enforced only when `metal_kernels_available()`; on CUDA they print the drift and
-  the corpus gate is the accuracy check. Run the checkpoint tier and the corpus gate on
+  the corpus gate is the accuracy check. The same applies to the PaddleOCR-VL vision
+  stages. PP-OCRv6 is f32, so mlx's default TF32 convs/matmuls on CUDA move its
+  probability maps; off Metal its checkpoint test uses noise bounds and requires
+  exact text. Run the checkpoint tier and the corpus gate on
   a Linux GPU box (metacube, dspark) after changes that can move CUDA outputs.
 - **Never download in tests**: no hf-hub fetches, no network in tiers 1-2.
 - **No idle waits**: mock servers and job tests use short poll intervals; no

@@ -155,6 +155,21 @@ const mlx::core::Device& selected_device() {
     if (use_cpu) {
       mlx::core::set_default_device(mlx::core::Device::cpu);
     }
+#if defined(__linux__)
+    // mlx's CUDA allocator sizes its memory limit from total VRAM and only
+    // reclaims its buffer cache past that limit, so on a GPU another process
+    // already holds memory on, the cache grows until cudaMallocAsync fails.
+    // Cap the limit at the memory free when the device is first selected.
+    if (!use_cpu) {
+      const auto& info = mlx::core::gpu::device_info();
+      if (auto it = info.find("free_memory"); it != info.end()) {
+        const size_t limit = std::get<size_t>(it->second) / 10 * 9;
+        if (limit < mlx::core::get_memory_limit()) {
+          mlx::core::set_memory_limit(limit);
+        }
+      }
+    }
+#endif
   });
   return mlx::core::default_device();
 }
