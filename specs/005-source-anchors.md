@@ -149,8 +149,8 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-01 | `aimd_core`: `Segment`, `ProcessResult.segments`, `ProcessInput.anchors`, `anchors` module (loc comment, `[hh:mm:ss]`, sentences, paragraphs, SRT/VTT writers, SRT cue parser) | coordinator | Completed | None | hermetic unit tests |
 | WS-02 | `aimd-engine::models::qwen3_aligner` (Qwen3-ForcedAligner-0.6B on MLX, reuse Qwen3-ASR encoder/decoder code) + `Qwen3AsrPipeline::transcribe_detailed`; goldens via `scripts/export_aligner_reference.py` | agent ws02 | Pending | None | hermetic goldens; checkpoint parity; mean abs timestamp error vs reference <= 80 ms on corpus clips |
 | WS-03 | OCR engine positions: Unlimited-OCR `blocks`, PP-OCRv6 `width`/`height`, PaddleOCR-VL `Spotting` task + `spots` | agent ws03 | Pending | None | hermetic parse tests; checkpoint test that `blocks` join to `markdown`; spotting text/quads vs reference |
-| WS-04 | `aimd-process` + `aimd-url` wiring: OCR segments/anchors, ASR 300 s segments + alignment + paragraphs, URL subtitle cues and audio fallback, chunk-level fallback | coordinator | Pending | WS-01, WS-02/WS-03 API | hermetic tests with fake `Runtime`s |
-| WS-05 | CLI `--format`, `--no-anchors`, output suffixes; MCP `anchors` / `include_segments`; README, AGENTS.md, help texts | coordinator | Pending | WS-01, WS-04 | CLI/MCP tests; smoke runs |
+| WS-04 | `aimd-process` + `aimd-url` wiring: OCR segments/anchors, ASR 300 s segments + alignment + paragraphs, URL subtitle cues and audio fallback, chunk-level fallback | coordinator | In progress | WS-01, WS-02/WS-03 API | hermetic tests with fake `Runtime`s |
+| WS-05 | CLI `--format`, `--no-anchors`, output suffixes; MCP `anchors` / `include_segments`; README, AGENTS.md, help texts | coordinator | Completed | WS-01, WS-04 | CLI/MCP tests; smoke runs |
 | WS-06 | E2E check on a real podcast clip and scanned PDF; performance notes; corpus gate unchanged | coordinator | Pending | WS-02..05 | `docs/performance.md`; `corpus_gate` PASS |
 
 ## Verification
@@ -186,6 +186,19 @@ Append entries rather than rewriting another worker's record.
   `Segment`, `ProcessResult.segments` and `ProcessInput.anchors` (default true)
   are in place; CLI/MCP set `anchors: true` until WS-05. Gates: clippy
   `-D warnings`, `AIMD_MLX_DEVICE=cpu cargo test --workspace` green.
+- 2026-10-26 (coordinator, WS-04/WS-05): process, URL, and interface wiring
+  landed ahead of the engine merges, behind seams with no-op defaults:
+  `AsrModel::transcribe_aligned` (alignment units), `OcrModel::recognize_located`
+  (`LocatedOcr { markdown, blocks, lines }`), `AudioTranscriber::transcribe_timed`.
+  URL subtitles become cue-timed sentences. ASR uses 300 s segments when anchored
+  locally, and unaligned segments spread their sentences. OCR: per-block anchors
+  when the model returns layout blocks, else a page-level anchor (`kind=page`) with
+  lines as segments only (decision: PP-OCRv6 lines are not anchored in Markdown,
+  which avoids a comment per line). Added `ProcessInput.include_segments`. CLI
+  `-f/--format markdown|json|srt|vtt`, `--no-anchors`; MCP `anchors`,
+  `include_segments`; payload builder moved to `aimd_core::output`. README and
+  AGENTS.md updated. Remaining: implement the native seams once WS-02/WS-03
+  merge, then WS-06.
 
 ## Completion summary
 
