@@ -94,7 +94,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
 | WS-01 | Decode loops submit step k+1 before reading token k (Qwen3-ASR, PaddleOCR-VL, Unlimited-OCR with its n-gram guard) | coordinator | Done | None | bench tok/s; goldens; corpus gate identical |
-| WS-02 | PDF pages rendered in the background and fed to OCR as they finish; PNM instead of PNG | coordinator | Pending | None | multi-page PDF wall time; corpus gate identical; cancellation tests |
+| WS-02 | PDF pages rendered in the background and fed to OCR as they finish; PNM instead of PNG | coordinator | Done | None | multi-page PDF wall time; corpus gate identical; cancellation tests |
 | WS-03 | PP-OCRv6: async rec batches, threaded crop/warp/resize/normalize | coordinator | Pending | None | `ppocrv6` example; checkpoint test; corpus gate identical |
 | WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Pending | None | preprocess goldens; OCR page latency |
 | WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Pending | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
@@ -175,6 +175,33 @@ Append entries rather than rewriting another worker's record.
 - Remaining: WS-02..09.
 - Blockers: none.
 - Next action: WS-02 PDF render pipelining.
+
+### 2026-10-26 — coordinator — WS-02
+
+- Changed:
+  - `PdfRenderJob` (`aimd-process/src/ocr.rs`) renders one page per
+    `mutool draw` run on a scoped background thread.
+  - Pages go to OCR over a `sync_channel`, at most two pages ahead, and each
+    page image is deleted once consumed.
+  - Local models get binary PPM (`-F pnm`); remote servers still get PNG.
+  - A render failure stops the renderer at that page. A consumer error or a
+    cancellation drops the channel, and the scope joins the renderer.
+- Evidence (10-page PDF built from the corpus pages, 144 DPI):
+  - Rendering every page up front took 0.42 s before the first OCR (PNG,
+    42 ms/page). A per-page run costs about 16 ms of process start, which
+    the overlap hides.
+  - PPM renders in 23 ms/page and decodes in 0.4 ms vs PNG's 1.9 ms.
+    Decoded pixels are identical to PNG.
+  - Markdown is byte-identical to bf6c24b for pp-ocrv6, unlimited-ocr and
+    paddleocr-vl.
+  - CLI wall time on this machine varied 7-57 s for identical PP-OCRv6 runs,
+    all of it GPU waits; that noise is far larger than the saving (about
+    40-60 ms per page, about 7% of a PP-OCRv6 page), so wall time is not
+    quoted.
+  - Hermetic tests cover per-page PPM args, a mid-range render failure with
+    cleanup, and PNG for remote OCR.
+- Remaining: WS-03..09.
+- Next action: WS-03 PP-OCRv6 rec pipelining.
 
 ## Completion summary
 

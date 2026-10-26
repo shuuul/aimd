@@ -1264,24 +1264,54 @@ fn pdf_ocr_renders_with_mutool_and_assembles_pages() {
         result.markdown,
         "## Page 2\n\nsecond\n\n## Page 3\n\nthird\n\n## Page 4\n\nfourth"
     );
-    let args = &rt.runs()[0].1;
-    assert_eq!(args[0..3], ["draw", "-q", "-o"]);
-    assert!(args[3].ends_with("/page_%04d.png"));
-    assert_eq!(
-        args[4..],
-        [
-            "-F",
-            "png",
-            "-r",
-            "144",
-            "-c",
-            "rgb",
-            &pdf.to_string_lossy(),
-            "2-4"
-        ]
-    );
+    // One render per page; local models read PPM.
+    let runs = rt.runs();
+    assert_eq!(runs.len(), 3);
+    for (run, page) in runs.iter().zip(2..) {
+        let args = &run.1;
+        assert_eq!(args[0..3], ["draw", "-q", "-o"]);
+        assert!(args[3].ends_with("/page_%04d.ppm"));
+        assert_eq!(
+            args[4..],
+            [
+                "-F",
+                "pnm",
+                "-r",
+                "144",
+                "-c",
+                "rgb",
+                &pdf.to_string_lossy(),
+                &format!("{page}-{page}")
+            ]
+        );
+    }
+    let args = &runs[0].1;
     let rendered_dir = Path::new(&args[3]).parent().unwrap().to_path_buf();
     assert!(!rendered_dir.exists(), "rendered pages are cleaned up");
+
+    // A page that fails to render stops the job with mutool's error after
+    // the pages before it were recognized; nothing is left on disk.
+    let rt = make_rt(vec![Ok("second".into()), Ok("third".into())]).respond(|_, args| {
+        let range = args.last().unwrap();
+        if range == "3-3" {
+            return Ok(CommandOutput {
+                status: Some(1),
+                stdout: Vec::new(),
+                stderr: b"broken page".to_vec(),
+            });
+        }
+        let page = range.split_once('-').unwrap().0.parse::<u32>().unwrap();
+        std::fs::write(args[3].replace("%04d", &format!("{page:04}")), b"ppm").unwrap();
+        ok_output("")
+    });
+    let err = process_input_with(&req, &NoHooks, &rt).unwrap_err();
+    assert_eq!(
+        err.message,
+        format!("mutool draw failed for {}: broken page", pdf.display())
+    );
+    let runs = rt.runs();
+    assert_eq!(runs.len(), 2, "rendering stops at the failed page");
+    assert!(!Path::new(&runs[0].1[3]).parent().unwrap().exists());
 
     let mut req = request(&pdf);
     req.start = Some(2);
@@ -1500,6 +1530,8 @@ fn remote_ocr_posts_chat_completion_with_page_window() {
         err.message,
         "Remote OCR backend returned an invalid chat completion"
     );
+    // Remote servers get PNG pages.
+    assert_eq!(rt.runs()[0].1[5], "png");
     let recorded = server.join().unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&recorded[0].body).unwrap();
     assert_eq!(payload["window_size"], 1024);

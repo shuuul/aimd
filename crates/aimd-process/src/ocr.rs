@@ -1,6 +1,8 @@
 //! OCR for images and PDFs (ports `aimd.plugins.ocr._plugin` and
 //! `aimd.plugins.ocr.backends`). PDF pages are rendered with `mutool draw`
-//! at 144 DPI RGB (PyMuPDF `Matrix(2.0, 2.0)`, `alpha=False`).
+//! at 144 DPI RGB (PyMuPDF `Matrix(2.0, 2.0)`, `alpha=False`), one page per
+//! run on a background thread, so page N+1 renders while page N is
+//! recognized.
 
 use std::path::{Path, PathBuf};
 
@@ -192,16 +194,23 @@ pub fn recognize_file(
             text: place(1, ocr).trim().to_string(),
         }]
     } else if suffix == ".pdf" {
-        let rendered = render_pdf_pages(
+        // Local models decode PPM (lossless, no PNG deflate on either
+        // side); remote servers get PNG.
+        let format = match engine {
+            Engine::Remote(_) => PageFormat::Png,
+            Engine::Local(_) => PageFormat::Ppm,
+        };
+        let job = PdfRenderJob::new(
             rt,
             path,
             request.start,
             request.end,
             request.temp_dir.as_deref(),
+            format,
         )?;
-        let total = rendered.pages.len();
+        let total = job.len();
         let mut pages = Vec::with_capacity(total);
-        for (i, (page_index, image)) in rendered.pages.iter().enumerate() {
+        job.run(|i, page_index, image| {
             if i > 0 && hooks.is_cancelled() {
                 return Err(AimdError::cancelled("OCR cancelled between pages"));
             }
@@ -214,10 +223,11 @@ pub fn recognize_file(
                 Some(&format!("Processed OCR page {} of {total}", i + 1)),
             );
             pages.push(OcrPage {
-                page_index: Some(*page_index),
+                page_index: Some(page_index),
                 text,
             });
-        }
+            Ok(())
+        })?;
         pages
     } else {
         return Err(AimdError::failed(match engine {
@@ -265,78 +275,168 @@ fn recognize_one(
     }
 }
 
-/// Rendered page images (0-based page index, PNG path) in a temp dir.
-#[derive(Debug)]
-pub struct RenderedPages {
-    pub pages: Vec<(usize, PathBuf)>,
-    _dir: TempDir,
+/// Page image format written by `mutool draw`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PageFormat {
+    Png,
+    /// Binary PPM (`-F pnm` with `-c rgb`).
+    Ppm,
 }
 
-/// Render the requested 0-based inclusive range with `mutool draw`.
-pub fn render_pdf_pages(
-    rt: &dyn Runtime,
-    input: &Path,
-    start: Option<i64>,
-    end: Option<i64>,
-    temp_dir: Option<&Path>,
-) -> Result<RenderedPages> {
-    let page_count = i64::from(rt.pdf_page_count(input)?);
-    if page_count == 0 {
-        return Err(AimdError::failed(format!(
-            "PDF has no pages: {}",
-            input.display()
-        )));
+impl PageFormat {
+    fn mutool_name(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Ppm => "pnm",
+        }
     }
-    let first = start.unwrap_or(0);
-    let last = end.unwrap_or(page_count - 1);
-    if first < 0 || last < first || last >= page_count {
-        return Err(AimdError::failed(format!(
-            "Invalid OCR page range {first}-{last} for {} with {page_count} pages.",
-            input.display()
-        )));
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Ppm => "ppm",
+        }
     }
-    let Some(mutool) = rt.which("mutool") else {
-        return Err(AimdError::backend_unavailable(
-            "PDF OCR requires mutool (MuPDF). Install it with `brew install mupdf`, then retry.",
-        ));
-    };
-    let dir = TempDir::new(temp_dir, "aimd-mlx-vlm-pdf-")?;
-    let template = dir.path().join("page_%04d.png");
-    let args = vec![
-        "draw".to_string(),
-        "-q".to_string(),
-        "-o".to_string(),
-        template.to_string_lossy().into_owned(),
-        "-F".to_string(),
-        "png".to_string(),
-        "-r".to_string(),
-        RENDER_DPI.to_string(),
-        "-c".to_string(),
-        "rgb".to_string(),
-        input.to_string_lossy().into_owned(),
-        format!("{}-{}", first + 1, last + 1),
-    ];
-    let out = rt
-        .run(&mutool, &args, None)
-        .map_err(|e| AimdError::failed(format!("mutool draw failed: {e}")))?;
-    if !out.success() {
-        return Err(AimdError::failed(format!(
-            "mutool draw failed for {}: {}",
-            input.display(),
-            out.stderr_text().trim()
-        )));
+}
+
+/// A validated PDF page range rendered with `mutool draw`, one page per
+/// run, in a background thread that stays at most [`RENDER_AHEAD`] pages
+/// ahead of the consumer.
+pub(crate) struct PdfRenderJob<'a> {
+    rt: &'a dyn Runtime,
+    mutool: PathBuf,
+    input: &'a Path,
+    first: usize,
+    last: usize,
+    format: PageFormat,
+    dir: TempDir,
+}
+
+/// Rendered pages waiting for the consumer (bounds temp-dir size).
+pub(crate) const RENDER_AHEAD: usize = 2;
+
+impl<'a> PdfRenderJob<'a> {
+    /// Validates the requested 0-based inclusive range and finds `mutool`.
+    pub(crate) fn new(
+        rt: &'a dyn Runtime,
+        input: &'a Path,
+        start: Option<i64>,
+        end: Option<i64>,
+        temp_dir: Option<&Path>,
+        format: PageFormat,
+    ) -> Result<Self> {
+        let page_count = i64::from(rt.pdf_page_count(input)?);
+        if page_count == 0 {
+            return Err(AimdError::failed(format!(
+                "PDF has no pages: {}",
+                input.display()
+            )));
+        }
+        let first = start.unwrap_or(0);
+        let last = end.unwrap_or(page_count - 1);
+        if first < 0 || last < first || last >= page_count {
+            return Err(AimdError::failed(format!(
+                "Invalid OCR page range {first}-{last} for {} with {page_count} pages.",
+                input.display()
+            )));
+        }
+        let Some(mutool) = rt.which("mutool") else {
+            return Err(AimdError::backend_unavailable(
+                "PDF OCR requires mutool (MuPDF). Install it with `brew install mupdf`, then retry.",
+            ));
+        };
+        let dir = TempDir::new(temp_dir, "aimd-mlx-vlm-pdf-")?;
+        Ok(Self {
+            rt,
+            mutool,
+            input,
+            first: first as usize,
+            last: last as usize,
+            format,
+            dir,
+        })
     }
-    let mut pages = Vec::new();
-    for index in first..=last {
-        let image = dir.path().join(format!("page_{:04}.png", index + 1));
+
+    /// Number of pages in the range.
+    pub(crate) fn len(&self) -> usize {
+        self.last + 1 - self.first
+    }
+
+    /// Calls `consume(i, page_index, image)` for each page in order while
+    /// the next pages render. Each image is deleted once consumed. An error
+    /// from either side stops the renderer after its current page and is
+    /// returned (the consumer's first).
+    pub(crate) fn run(
+        self,
+        mut consume: impl FnMut(usize, usize, &Path) -> Result<()>,
+    ) -> Result<()> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(usize, PathBuf)>>(RENDER_AHEAD - 1);
+        let this = &self;
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                for index in this.first..=this.last {
+                    let page = this.render_page(index);
+                    let failed = page.is_err();
+                    // A closed channel means the consumer stopped.
+                    if tx.send(page).is_err() || failed {
+                        break;
+                    }
+                }
+            });
+            let mut result = Ok(());
+            for (i, page) in rx.iter().enumerate() {
+                result = page.and_then(|(index, image)| {
+                    let r = consume(i, index, &image);
+                    let _ = std::fs::remove_file(&image);
+                    r
+                });
+                if result.is_err() {
+                    break;
+                }
+            }
+            // Unblocks a renderer waiting to send; the scope then joins it.
+            drop(rx);
+            result
+        })
+    }
+
+    fn render_page(&self, index: usize) -> Result<(usize, PathBuf)> {
+        let ext = self.format.extension();
+        let template = self.dir.path().join(format!("page_%04d.{ext}"));
+        let page = (index + 1).to_string();
+        let args = vec![
+            "draw".to_string(),
+            "-q".to_string(),
+            "-o".to_string(),
+            template.to_string_lossy().into_owned(),
+            "-F".to_string(),
+            self.format.mutool_name().to_string(),
+            "-r".to_string(),
+            RENDER_DPI.to_string(),
+            "-c".to_string(),
+            "rgb".to_string(),
+            self.input.to_string_lossy().into_owned(),
+            format!("{page}-{page}"),
+        ];
+        let out = self
+            .rt
+            .run(&self.mutool, &args, None)
+            .map_err(|e| AimdError::failed(format!("mutool draw failed: {e}")))?;
+        if !out.success() {
+            return Err(AimdError::failed(format!(
+                "mutool draw failed for {}: {}",
+                self.input.display(),
+                out.stderr_text().trim()
+            )));
+        }
+        let image = self.dir.path().join(format!("page_{:04}.{ext}", index + 1));
         if !image.is_file() {
             return Err(AimdError::failed(format!(
                 "mutool draw did not render page {} of {}",
                 index + 1,
-                input.display()
+                self.input.display()
             )));
         }
-        pages.push((index as usize, image));
+        Ok((index, image))
     }
-    Ok(RenderedPages { pages, _dir: dir })
 }
