@@ -316,9 +316,9 @@ after a 2 s pause or about 300 characters), each with its start time:
 ```
 
 Local ASR runs Qwen3-ForcedAligner-0.6B (8-bit, downloaded on first use)
-on 5-minute segments for word-level times. It covers Chinese, English,
-Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian,
-and Spanish. Other languages and remote ASR get segment-level times, and
+on segments just under 5 minutes for word-level times. It covers Chinese,
+Cantonese, English, French, German, Italian, Korean, Portuguese, Russian, and
+Spanish. Japanese, other languages and remote ASR get segment-level times, and
 URL subtitles keep their cue times.
 
 ```bash

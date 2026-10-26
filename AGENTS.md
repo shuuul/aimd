@@ -161,7 +161,7 @@ flowchart TD
   paragraphs, and fills `ProcessResult.segments`. `anchors: false` must reproduce the
   pre-anchor output byte for byte and skip forced alignment. Positions come through the
   `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
-  local ASR aligns 300 s segments with Qwen3-ForcedAligner-0.6B-8bit, and anything
+  local ASR aligns 295 s segments (the aligner caps at 300 s) with Qwen3-ForcedAligner-0.6B-8bit, and anything
   unaligned (remote ASR, unsupported language, failed alignment) spreads its sentences
   over the segment span instead of failing. `include_segments` (MCP; CLI `--format json`)
   returns `segments` and enables the PaddleOCR-VL `Spotting:` pass. MCP response fields

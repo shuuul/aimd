@@ -21,8 +21,9 @@ use crate::{AlignedTranscript, AsrFailure, LocalModality, Runtime, TimedText, au
 
 /// Python segments inputs longer than 10 minutes.
 pub const SEGMENT_SECONDS: f64 = 600.0;
-/// Segment length when local ASR is force-aligned (the aligner's limit).
-pub const ALIGNED_SEGMENT_SECONDS: f64 = 300.0;
+/// Segment length when local ASR is force-aligned: under the aligner's 300 s
+/// limit, with margin for ffmpeg segment rounding.
+pub const ALIGNED_SEGMENT_SECONDS: f64 = 295.0;
 
 /// ASR options shared by local files and the URL audio fallback.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -191,10 +192,7 @@ pub fn transcribe_timed(
         timed.push(&piece, 0.0, duration);
         return Ok(timed.finish(piece.text));
     }
-    log_info!(
-        "Audio/video duration exceeds {} minutes. Segmenting for transcription...",
-        segment_seconds / 60.0
-    );
+    log_info!("Audio/video duration exceeds {segment_seconds} s. Segmenting for transcription...",);
     let segments = audio::segment_audio(rt, file_path, segment_seconds, temp_dir)?;
     let total = segments.paths.len();
     let mut results = Vec::new();

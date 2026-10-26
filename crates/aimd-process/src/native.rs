@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use aimd_core::{AimdError, Result, Segment, anchors, log_info};
+use aimd_core::{AimdError, Result, Segment, anchors, log_info, log_warn};
 use aimd_engine::models::paddleocr_vl::pipeline::{
     PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest, VlTask,
 };
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpPipelineError, PpOcrV6Pipeline};
+use aimd_engine::models::qwen3_aligner::pipeline::ForcedAlignerPipeline;
 use aimd_engine::models::qwen3_asr::pipeline::{
-    PipelineError as AsrPipelineError, Qwen3AsrPipeline, TranscriptionRequest,
+    PipelineError as AsrPipelineError, Qwen3AsrPipeline, Transcription, TranscriptionRequest,
 };
 use aimd_engine::models::unlimited_ocr::pipeline::{
     OcrRequest, PipelineError as OcrPipelineError, UnlimitedOcrPipeline,
@@ -20,7 +21,8 @@ use aimd_engine::models::unlimited_ocr::pipeline::{
 
 use crate::models::{OcrFamily, PADDLEOCR_VL_REPO, ocr_family};
 use crate::{
-    AsrFailure, AsrModel, CommandOutput, LocalModality, LocatedOcr, OcrFailure, OcrModel, Runtime,
+    AlignedTranscript, AsrFailure, AsrModel, CommandOutput, LocalModality, LocatedOcr, OcrFailure,
+    OcrModel, Runtime,
 };
 
 /// Native runtime (real system, cached pipelines).
@@ -144,6 +146,57 @@ impl Runtime for NativeRuntime {
 
 struct NativeAsr(Qwen3AsrPipeline);
 
+/// Forced-aligner checkpoint for transcript timestamps (spec 005).
+pub const ALIGNER_MODEL: &str = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit";
+
+/// The process-wide aligner, loaded on first use; `None` (logged once)
+/// when it cannot be loaded, so transcripts fall back to segment times.
+fn aligner() -> Option<&'static ForcedAlignerPipeline> {
+    static ALIGNER: OnceLock<Option<ForcedAlignerPipeline>> = OnceLock::new();
+    ALIGNER
+        .get_or_init(|| {
+            let rt = NativeRuntime;
+            let loaded = crate::hf::resolve_checkpoint(ALIGNER_MODEL, &|k| rt.env(k))
+                .map_err(|e| e.message)
+                .and_then(|dir| {
+                    log_info!(
+                        "Loading forced aligner {ALIGNER_MODEL} from {}",
+                        dir.display()
+                    );
+                    ForcedAlignerPipeline::load(&dir).map_err(|e| e.to_string())
+                });
+            match loaded {
+                Ok(pipeline) => Some(pipeline),
+                Err(e) => {
+                    log_warn!(
+                        "Forced aligner unavailable ({e}); transcript times are segment-level."
+                    );
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+impl NativeAsr {
+    fn detailed(
+        &self,
+        wav_path: &Path,
+        language: Option<&str>,
+        context: Option<&str>,
+    ) -> std::result::Result<Transcription, AsrFailure> {
+        let request = TranscriptionRequest {
+            language,
+            context: context.filter(|c| !c.is_empty()),
+        };
+        match self.0.transcribe_detailed(wav_path, request) {
+            Ok(t) => Ok(t),
+            Err(AsrPipelineError::EmptyTranscription) => Err(AsrFailure::Empty),
+            Err(e) => Err(AsrFailure::Other(e.to_string())),
+        }
+    }
+}
+
 impl AsrModel for NativeAsr {
     fn transcribe(
         &self,
@@ -151,15 +204,40 @@ impl AsrModel for NativeAsr {
         language: Option<&str>,
         context: Option<&str>,
     ) -> std::result::Result<String, AsrFailure> {
-        let request = TranscriptionRequest {
-            language,
-            context: context.filter(|c| !c.is_empty()),
+        self.detailed(wav_path, language, context).map(|t| t.text)
+    }
+
+    fn transcribe_aligned(
+        &self,
+        wav_path: &Path,
+        language: Option<&str>,
+        context: Option<&str>,
+    ) -> std::result::Result<AlignedTranscript, AsrFailure> {
+        let t = self.detailed(wav_path, language, context)?;
+        // The forced language, else the one Qwen3-ASR detected.
+        let units = match language.or(t.language.as_deref()) {
+            None => {
+                log_info!("No ASR language detected; transcript times are segment-level.");
+                None
+            }
+            Some(lang) => aligner().and_then(|a| match a.align_path(wav_path, &t.text, lang) {
+                Ok(units) if !units.is_empty() => Some(
+                    units
+                        .into_iter()
+                        .map(|u| (u.text, f64::from(u.start), f64::from(u.end)))
+                        .collect(),
+                ),
+                Ok(_) => None,
+                Err(e) => {
+                    log_info!("Forced alignment skipped ({e}); using segment-level times.");
+                    None
+                }
+            }),
         };
-        match self.0.transcribe(wav_path, request) {
-            Ok(text) => Ok(text),
-            Err(AsrPipelineError::EmptyTranscription) => Err(AsrFailure::Empty),
-            Err(e) => Err(AsrFailure::Other(e.to_string())),
-        }
+        Ok(AlignedTranscript {
+            text: t.text,
+            units,
+        })
     }
 }
 

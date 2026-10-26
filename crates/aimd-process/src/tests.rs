@@ -967,7 +967,7 @@ fn long_audio_is_segmented_with_progress_and_cancellation() {
         "ASR produced empty transcription for all segments"
     );
 
-    // Anchors: 300 s segments; unaligned text is spread over its segment.
+    // Anchors: 295 s segments; unaligned text is spread over its segment.
     let anchored = ProcessInput {
         anchors: true,
         ..req.clone()
@@ -979,12 +979,12 @@ fn long_audio_is_segmented_with_progress_and_cancellation() {
     ]);
     let (result, _) = capture(|| process_input_with(&anchored, &NoHooks, &rt));
     let result = result.unwrap();
-    assert_eq!(result.markdown, "[00:00:00] one\n\n[00:10:00] three");
-    assert_eq!(rt.runs()[1].1[6], "300.0");
+    assert_eq!(result.markdown, "[00:00:00] one\n\n[00:09:50] three");
+    assert_eq!(rt.runs()[1].1[6], "295.0");
     let segments = result.segments.unwrap();
     assert_eq!(
         (segments[1].start, segments[1].end),
-        (Some(600.0), Some(900.0))
+        (Some(590.0), Some(885.0))
     );
 
     let rt = make_rt(vec![Ok("one".into()), Ok("two".into()), Ok("three".into())]);
