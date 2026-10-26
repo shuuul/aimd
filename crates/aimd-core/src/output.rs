@@ -319,6 +319,31 @@ mod tests {
     }
 
     #[test]
+    fn segment_payload_rounds_float_noise() {
+        let mut r = result(TaskType::Ocr, "a", None);
+        r.segments = Some(vec![crate::model::Segment {
+            text: "a".into(),
+            bbox: Some([1.0 / 27.0, 0.026_026, 0.255_255, 0.053_053]),
+            quad: Some([
+                [1.0 / 27.0, 0.5],
+                [0.25, 0.5],
+                [0.25, 0.75],
+                [1.0 / 27.0, 0.75],
+            ]),
+            start: Some(2.880_000_114),
+            score: Some(0.999_742_2),
+            ..Default::default()
+        }]);
+        let value = result_payload(&r, None, None, true);
+        assert_eq!(
+            value["segments"][0],
+            serde_json::json!({"text": "a", "bbox": [0.037, 0.026, 0.255, 0.053],
+                "quad": [[0.037, 0.5], [0.25, 0.5], [0.25, 0.75], [0.037, 0.75]],
+                "start": 2.88, "score": 0.9997})
+        );
+    }
+
+    #[test]
     fn empty_transcript_is_rejected() {
         // test_cli.py::test_cli_rejects_empty_transcript_output
         let err = build_output_text(TaskType::Transcript, "").unwrap_err();

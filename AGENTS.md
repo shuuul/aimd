@@ -37,7 +37,7 @@ gitignored.
 crates/
 ├── aimd-weights/   # safetensors mmap; MLX affine 4/8-bit unpack (test-only bit-exact oracle); tests/golden/quant
 ├── aimd-mlx/       # C-ABI shim over MLX C++ (build.rs + shim/); device selection; needs brew mlx
-├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,unlimited_ocr,paddleocr_vl,pp_ocrv6})
+├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6})
 ├── aimd-core/      # models, AimdError/ErrorKind, ProcessHooks, text shaping, precision, remote config,
 │                   # extension tables, output persistence + shared help texts, logging; no heavy deps
 ├── aimd-doc/       # Pandoc conversion, EPUB (hand-written zip + OPF/spine), cleanup, pdf-inspector PDFs
@@ -119,7 +119,7 @@ flowchart TD
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
 | Document conversion | `crates/aimd-doc/src/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
-| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
+| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
 | MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. |
 | Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. |
 | Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
@@ -161,9 +161,12 @@ flowchart TD
   paragraphs, and fills `ProcessResult.segments`. `anchors: false` must reproduce the
   pre-anchor output byte for byte and skip forced alignment. Positions come through the
   `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
-  local ASR aligns 295 s segments (the aligner caps at 300 s) with Qwen3-ForcedAligner-0.6B-8bit, and anything
-  unaligned (remote ASR, unsupported language, failed alignment) spreads its sentences
-  over the segment span instead of failing. `include_segments` (MCP; CLI `--format json`)
+  local ASR aligns 295 s segments (the aligner caps at 300 s; ffmpeg overshoots a 300 s
+  cut by milliseconds) with Qwen3-ForcedAligner-0.6B-8bit, loaded lazily once per process.
+  It covers zh, yue, en, de, es, fr, it, pt, ru and ko (not Japanese). Anything unaligned
+  (remote ASR, unsupported language, failed alignment) spreads its sentences over the
+  segment span instead of failing. JSON segment coordinates round to 3 decimals, times
+  to ms. `include_segments` (MCP; CLI `--format json`)
   returns `segments` and enables the PaddleOCR-VL `Spotting:` pass. MCP response fields
   are additive (`segments` last).
 - **Wire compatibility**: MCP JSON field names, error bodies, and tool
@@ -361,8 +364,8 @@ Tests are lean by rule; weights are the expensive resource.
 - **Golden fixtures**: live in the owning crate's `tests/golden/<set>/`, located via
   `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-weights` (`aimd-mlx` reads it
   via `../aimd-weights/tests/golden/quant`). `mel`, `tokenizer`, `asr_encoder`,
-  `asr_decoder`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `paddleocr_vl`, and `ppocrv6`
-  belong to `aimd-engine`.
+  `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `paddleocr_vl`, and
+  `ppocrv6` belong to `aimd-engine`.
   `aimd-url/tests/golden/subtitles` is frozen: its Python oracle was deleted, so update it
   only with a reviewed, intentional behavior change. Regenerate the others with
   `uv run scripts/export_*_reference.py` (PEP 723 standalone scripts). Never hand-edit
@@ -453,6 +456,10 @@ uv run scripts/corpus_baseline.py
 uv run scripts/corpus_baseline_paddle.py
 cargo run --release -p aimd-engine --example corpus_gate
 cargo run --release -p aimd-engine --example corpus_gate -- --only ocr --ocr-model pp-ocrv6
+
+# Forced-aligner parity (gated clips: mean abs timestamp error <= 80 ms)
+uv run scripts/export_aligner_reference.py --corpus --corpus-dir target/corpus
+cargo run --release -p aimd-engine --example aligner_parity
 ```
 
 ## BEFORE EVERY COMMIT

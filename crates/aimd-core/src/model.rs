@@ -150,18 +150,73 @@ pub struct Segment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<usize>,
     /// `[x0, y0, x1, y1]` normalized to the page image (0..1).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "wire::coords"
+    )]
     pub bbox: Option<[f32; 4]>,
     /// Rotated line corners, normalized like `bbox`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "wire::quad"
+    )]
     pub quad: Option<[[f32; 2]; 4]>,
     /// Seconds from the start of the media.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "wire::seconds"
+    )]
     pub start: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "wire::seconds"
+    )]
     pub end: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "wire::score"
+    )]
     pub score: Option<f32>,
+}
+
+/// Wire rounding for `Segment`: coordinates to 3 decimals (as in the anchor
+/// comments), seconds to milliseconds, scores to 4 decimals, so f32 values
+/// do not leak float noise into JSON.
+mod wire {
+    use serde::Serializer;
+    use serde::ser::SerializeSeq;
+
+    fn round(value: f64, places: i32) -> f64 {
+        let scale = 10f64.powi(places);
+        (value * scale).round() / scale
+    }
+
+    pub fn coords<S: Serializer>(v: &Option<[f32; 4]>, s: S) -> Result<S::Ok, S::Error> {
+        let v = v.expect("skipped when None");
+        s.collect_seq(v.iter().map(|&x| round(x.into(), 3)))
+    }
+
+    pub fn quad<S: Serializer>(v: &Option<[[f32; 2]; 4]>, s: S) -> Result<S::Ok, S::Error> {
+        let v = v.expect("skipped when None");
+        let mut seq = s.serialize_seq(Some(4))?;
+        for [x, y] in v {
+            seq.serialize_element(&[round(x.into(), 3), round(y.into(), 3)])?;
+        }
+        seq.end()
+    }
+
+    pub fn seconds<S: Serializer>(v: &Option<f64>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_f64(round(v.expect("skipped when None"), 3))
+    }
+
+    pub fn score<S: Serializer>(v: &Option<f32>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_f64(round(v.expect("skipped when None").into(), 4))
+    }
 }
 
 /// Canonical process result. `markdown` is lossless; `text_context` holds

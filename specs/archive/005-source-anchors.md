@@ -1,7 +1,7 @@
 ---
 id: "005"
 title: "Source anchors: OCR positions, ASR timestamps, structured JSON/SRT/VTT output"
-status: Active
+status: Completed
 created: 2026-10-26
 updated: 2026-10-26
 coordinator: "shuuul"
@@ -33,23 +33,25 @@ The user asked for anchors in the default output, structured output via
 
 ## Goal and success criteria
 
-- [ ] Default OCR Markdown carries an invisible anchor before every located
+- [x] Default OCR Markdown carries an invisible anchor before every located
       block: `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->` (normalized
       0..1, 3 decimals) for Unlimited-OCR blocks and PP-OCRv6 lines.
-- [ ] Default local-ASR and URL-subtitle transcripts are paragraphs that
+      (Changed by decision: PP-OCRv6, PaddleOCR-VL and remote OCR get one
+      page-level anchor; their lines are JSON segments only.)
+- [x] Default local-ASR and URL-subtitle transcripts are paragraphs that
       start with `[hh:mm:ss] `; local ASR times come from Qwen3-ForcedAligner
       for supported languages and fall back to chunk start times otherwise.
-- [ ] `--no-anchors` reproduces today's Markdown byte for byte and skips the
+- [x] `--no-anchors` reproduces today's Markdown byte for byte and skips the
       aligner.
-- [ ] `--format json` writes the result with `segments` (page/bbox/kind for
+- [x] `--format json` writes the result with `segments` (page/bbox/kind for
       OCR, start/end for transcripts); `--format srt|vtt` writes subtitles
       for transcript tasks and fails with `UnsupportedInput` otherwise.
-- [ ] MCP `process_input` accepts `anchors` (default true) and
+- [x] MCP `process_input` accepts `anchors` (default true) and
       `include_segments` (default false) and returns `segments` when asked.
-- [ ] Aligner timestamps match the Python reference within 80 ms mean
+- [x] Aligner timestamps match the Python reference within 80 ms mean
       absolute error on the corpus clips; OCR engine markdown and the corpus
       gate stay unchanged (anchors live in `aimd-process`, not the engines).
-- [ ] fmt, clippy `-D warnings`, prek, hermetic tier pass; docs updated.
+- [x] fmt, clippy `-D warnings`, prek, hermetic tier pass; docs updated.
 
 ## Scope and non-goals
 
@@ -147,12 +149,12 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | `aimd_core`: `Segment`, `ProcessResult.segments`, `ProcessInput.anchors`, `anchors` module (loc comment, `[hh:mm:ss]`, sentences, paragraphs, SRT/VTT writers, SRT cue parser) | coordinator | Completed | None | hermetic unit tests |
-| WS-02 | `aimd-engine::models::qwen3_aligner` (Qwen3-ForcedAligner-0.6B on MLX, reuse Qwen3-ASR encoder/decoder code) + `Qwen3AsrPipeline::transcribe_detailed`; goldens via `scripts/export_aligner_reference.py` | agent ws02 | Pending | None | hermetic goldens; checkpoint parity; mean abs timestamp error vs reference <= 80 ms on corpus clips |
-| WS-03 | OCR engine positions: Unlimited-OCR `blocks`, PP-OCRv6 `width`/`height`, PaddleOCR-VL `Spotting` task + `spots` | agent ws03 | Pending | None | hermetic parse tests; checkpoint test that `blocks` join to `markdown`; spotting text/quads vs reference |
-| WS-04 | `aimd-process` + `aimd-url` wiring: OCR segments/anchors, ASR 300 s segments + alignment + paragraphs, URL subtitle cues and audio fallback, chunk-level fallback | coordinator | In progress | WS-01, WS-02/WS-03 API | hermetic tests with fake `Runtime`s |
-| WS-05 | CLI `--format`, `--no-anchors`, output suffixes; MCP `anchors` / `include_segments`; README, AGENTS.md, help texts | coordinator | Completed | WS-01, WS-04 | CLI/MCP tests; smoke runs |
-| WS-06 | E2E check on a real podcast clip and scanned PDF; performance notes; corpus gate unchanged | coordinator | Pending | WS-02..05 | `docs/performance.md`; `corpus_gate` PASS |
+| WS-01 | `aimd_core`: `Segment`, `ProcessResult.segments`, `ProcessInput.anchors`, `anchors` module (loc comment, `[hh:mm:ss]`, sentences, paragraphs, SRT/VTT writers, SRT cue parser) | coordinator | Done | None | hermetic unit tests |
+| WS-02 | `aimd-engine::models::qwen3_aligner` (Qwen3-ForcedAligner-0.6B on MLX, reuse Qwen3-ASR encoder/decoder code) + `Qwen3AsrPipeline::transcribe_detailed`; goldens via `scripts/export_aligner_reference.py` | agent ws02 | Done | None | hermetic goldens; checkpoint parity; mean abs timestamp error vs reference <= 80 ms on corpus clips |
+| WS-03 | OCR engine positions: Unlimited-OCR `blocks`, PP-OCRv6 `width`/`height`, PaddleOCR-VL `Spotting` task + `spots` | agent ws03 | Done | None | hermetic parse tests; checkpoint test that `blocks` join to `markdown`; spotting text/quads vs reference |
+| WS-04 | `aimd-process` + `aimd-url` wiring: OCR segments/anchors, ASR 300 s segments + alignment + paragraphs, URL subtitle cues and audio fallback, chunk-level fallback | coordinator | Done | WS-01, WS-02/WS-03 API | hermetic tests with fake `Runtime`s |
+| WS-05 | CLI `--format`, `--no-anchors`, output suffixes; MCP `anchors` / `include_segments`; README, AGENTS.md, help texts | coordinator | Done | WS-01, WS-04 | CLI/MCP tests; smoke runs |
+| WS-06 | E2E check on a real podcast clip and scanned PDF; performance notes; corpus gate unchanged | coordinator | Done | WS-02..05 | `docs/performance.md`; `corpus_gate` PASS |
 
 ## Verification
 
@@ -201,6 +203,33 @@ Append entries rather than rewriting another worker's record.
   AGENTS.md updated. Remaining: implement the native seams once WS-02/WS-03
   merge, then WS-06.
 
+- 2026-10-26 (coordinator, WS-02/WS-03): Merged both engine branches
+  (98e623f, f33ef75). `NativeOcr::recognize_located` maps Unlimited-OCR blocks,
+  PP-OCRv6 line quads, and PaddleOCR-VL `Spotting:` spots (only with
+  `include_segments`). `NativeAsr::transcribe_aligned` runs the process-wide
+  aligner on each segment wav. A 394 s clip showed ffmpeg's first 300 s cut
+  exceeding the aligner limit by milliseconds, so anchored segments are 295 s.
+  Aligner parity: `aligner_parity` PASS, gated corpus clips MAE 0.17 ms over
+  2322 timestamps (68/76 clips exact).
+- 2026-10-26 (coordinator, WS-06): Done. E2E: 394 s English clip `-f srt` 31.9 s
+  (both segments aligned) vs `--no-anchors` 23.0 s; 2-page scanned PDF with all
+  three OCR models in Markdown and JSON (Unlimited-OCR 10 block anchors,
+  PP-OCRv6 / PaddleOCR-VL 14 line segments). JSON segment floats now round on
+  the wire (bbox/quad 3 decimals, times ms, score 4 decimals). Corpus gate
+  unchanged: OCR 5/5 pages identical for unlimited-ocr, paddleocr-vl, pp-ocrv6;
+  ASR 72/72 clips identical (en WER 0.87%, zh CER 3.83%). Numbers in
+  `docs/performance.md`. Gates green.
+
 ## Completion summary
 
-Pending.
+Anchors are on by default: OCR Markdown carries `<!-- aimd:loc ... -->`
+comments (per block for Unlimited-OCR, per page for the other OCR backends),
+and transcripts are `[hh:mm:ss] ` paragraphs. Local ASR times come from
+Qwen3-ForcedAligner-0.6B-8bit on 295 s segments, with segment-level spread
+as the fallback; URL subtitles keep their cue times. `--no-anchors`
+reproduces the old output. CLI `-f json|srt|vtt` and MCP `anchors` /
+`include_segments` expose structured segments. Engine outputs and the corpus
+gate are unchanged. Durable knowledge lives in README "Source anchors",
+AGENTS.md (source-anchors convention, crate map, goldens, commands), and
+`docs/performance.md`. Known edge: on mixed zh+en audio ASR can drop one
+language, and alignment then covers only the recognized text.

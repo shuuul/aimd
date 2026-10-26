@@ -85,6 +85,23 @@ its own 6 of 64 experts. On six real OCR pages, n-gram drafts were accepted
 for only 1.01-1.15 tokens per verify, so simulated decode came out
 0.63-1.01x.
 
+### Source anchors (spec 005)
+
+Apple M2 Pro, release CLI, wall clock including model load.
+
+| Input | Default (anchored Markdown) | Other |
+|-------|-----------------------------|-------|
+| 394 s English clip, Qwen3-ASR-1.7B-4bit | `-f srt` 31.9 s (two 295 s segments, both aligned) | `--no-anchors` 23.0 s (unsegmented) |
+| 2-page scanned PDF, Unlimited-OCR | 9.1 s | `-f json` 5.5 s (warm cache) |
+| same, PP-OCRv6 | 1.6 s | `-f json` 1.3 s |
+| same, PaddleOCR-VL bf16 | 6.6 s | `-f json` 11.0 s (adds the `Spotting:` pass, ~2.2 s/page) |
+
+Forced alignment costs ~9 s on the 394 s clip: aligner load plus the first
+alignment take ~6 s, and segmenting adds a second ASR prefill. Unlimited-OCR
+blocks and PP-OCRv6 quads come from the existing forward pass, so OCR anchors
+are free; only PaddleOCR-VL line segments need the extra pass, and only when
+segments are requested.
+
 ### Decode-step kernel profile (Metal)
 
 `cargo run --release -p aimd-mlx --example bench_ops` times every
