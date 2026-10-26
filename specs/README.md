@@ -12,7 +12,6 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
-| [007-pipeline-throughput.md](007-pipeline-throughput.md) | Active | End-to-end throughput: host/GPU overlap, pipelining, CPU preprocessing |
 
 ## Archived specs
 
@@ -24,6 +23,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 | [004-ppocrv6-paddleocr-vl.md](archive/004-ppocrv6-paddleocr-vl.md) | 2026-10-26 | PP-OCRv6 medium and PaddleOCR-VL-1.6 native OCR; ASR language auto-detection |
 | [005-source-anchors.md](archive/005-source-anchors.md) | 2026-10-26 | Source anchors: OCR positions, ForcedAligner ASR timestamps, JSON/SRT/VTT output |
 | [006-new-model-fast-paths.md](archive/006-new-model-fast-paths.md) | 2026-10-26 | Bit-identical fast paths: PaddleOCR-VL fused rotary (+12% 4-bit decode), PP-OCRv6 fused conv epilogues, threaded mel (aligner ahead of mlx-audio) |
+| [007-pipeline-throughput.md](archive/007-pipeline-throughput.md) | 2026-10-26 | Early-submit decode with a 30 MB Metal buffer cap (Unlimited-OCR +15%, PaddleOCR-VL 4-bit +10-20%), background PPM PDF rendering, threaded host preprocessing; batched decoding measured and rejected |
 
 ## Lifecycle
 

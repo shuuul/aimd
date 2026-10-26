@@ -1,7 +1,7 @@
 ---
 id: "007"
 title: "End-to-end throughput: host/GPU overlap, pipelining, CPU preprocessing"
-status: Active
+status: Completed
 created: 2026-10-26
 updated: 2026-10-26
 coordinator: "shuuul"
@@ -43,18 +43,20 @@ the way.
 
 ## Goal and success criteria
 
-- [ ] Decode tok/s improves for Qwen3-ASR, Unlimited-OCR and PaddleOCR-VL
+- [x] Decode tok/s improves for Qwen3-ASR, Unlimited-OCR and PaddleOCR-VL
       (bf16 and 4-bit) with identical outputs.
-- [ ] Multi-page scanned PDF wall time improves for every OCR model
+- [x] Multi-page scanned PDF wall time improves for every OCR model
       (render/OCR overlap), with identical Markdown.
-- [ ] PP-OCRv6 per-page latency improves (rec pipelining, threaded host
+- [x] PP-OCRv6 per-page latency improves (rec pipelining, threaded host
       ops) with identical text.
-- [ ] Long-audio (>= 10 min) transcription wall time improves (streamed
+- [x] Long-audio (>= 10 min) transcription wall time improves (streamed
       segments, device-side features, single WAV load) with identical text.
-- [ ] Every tried change, kept or not, is recorded in `docs/performance.md`
+      Removed by the 2026-10-26 WS-05 decision: those items are under 1% of
+      a segment. Long audio still gains from the WS-01 decode loop.
+- [x] Every tried change, kept or not, is recorded in `docs/performance.md`
       with its measured effect; new findings get their own row here.
-- [ ] Batched decoding is measured; it ships only under the decision below.
-- [ ] Bit-identical changes: model goldens pass on Metal, `corpus_gate`
+- [x] Batched decoding is measured; it ships only under the decision below.
+- [x] Bit-identical changes: model goldens pass on Metal, `corpus_gate`
       identical for all OCR models and ASR, `aligner_parity` gated MAE
       unchanged. fmt, clippy `-D warnings`, prek, hermetic tier pass.
 
@@ -85,6 +87,8 @@ Not in scope:
 | 2026-10-26 | Batched decoding may change outputs; it is kept only if the corpus gate passes its accuracy thresholds for every affected model and it speeds up the multi-page/multi-segment case by >= 1.3x; otherwise it is recorded as not kept | Batched matmuls pick different kernels, so bit-identity is impossible; the corpus gate is the accuracy contract | WS-08 |
 | 2026-10-26 | Concurrency uses `std::thread` / `std::sync::mpsc` only; cancellation stays at page/segment boundaries and a cancelled pipeline joins its workers | Dependency policy; AGENTS.md cooperative cancellation | WS-02, WS-05 |
 | 2026-10-26 | One coordinator, workstreams in order, A/B runs interleaved on one GPU | Shared GPU skews parallel benchmarks | all |
+| 2026-10-26 | WS-05's ASR host items (device-side merge, single WAV parse, streamed segmentation) are not built; the long-audio criterion is removed | Profiled under 1% of a 600 s segment (merge 0.02-0.04 s, WAV 4 ms, segmentation 1.3 s per hour against ~49 s per segment) | WS-05 |
+| 2026-10-26 | Batched decoding is not kept | Microbenchmark caps decode at ~1.5x (B=2-4), and decode is 33-70% of a page/segment, so end-to-end is at or under the 1.3x bar before MoE expert divergence and stragglers | WS-08 |
 | 2026-10-26 | Builds on branch `fix/anchors-default-off` | It touches the same ASR/OCR orchestration code | all |
 
 ## Workstreams
@@ -99,10 +103,10 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Done | None | preprocess goldens; OCR page latency |
 | WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Done | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
 | WS-06 | Aligner `lm_head` at slots only (if argmax identical); PaddleOCR-VL batched quantize at load | coordinator | Done | None | aligner parity; load time |
-| WS-07 | New findings discovered during WS-01..06 (one row each when found) | coordinator | In progress | None | per finding |
+| WS-07 | New findings discovered during WS-01..06 (one row each when found) | coordinator | Done | None | per finding |
 | WS-07a | Metal command buffers capped at 30 MB (shim default) so early-submitted MoE steps keep KV-cache donation | coordinator | Done | WS-01 | Unlimited-OCR tok/s; all-model A/B; goldens |
-| WS-08 | Batched decoding across pages/segments: prototype, measure, decide | coordinator | Pending | WS-01..05 | corpus gate thresholds; speedup |
-| WS-09 | `docs/performance.md`, AGENTS.md, final gates, closeout | coordinator | Pending | WS-01..08 | `cargo xtask check-specs`; commit gates |
+| WS-08 | Batched decoding across pages/segments: prototype, measure, decide | coordinator | Done | WS-01..05 | corpus gate thresholds; speedup |
+| WS-09 | `docs/performance.md`, AGENTS.md, final gates, closeout | coordinator | Done | WS-01..08 | `cargo xtask check-specs`; commit gates |
 
 ## Verification
 
@@ -291,6 +295,65 @@ Append entries rather than rewriting another worker's record.
 - Next action: WS-07 findings, starting with PaddleOCR-VL vision + prefill
   (2.15 s for a 1253-token page).
 
+### 2026-10-26 — coordinator — WS-07
+
+- Findings beyond WS-07a, measured and left as is:
+  - PaddleOCR-VL vision is 1.83 s of a page with 4960 patches; LM prefill
+    of 1253 tokens is 0.26 s. That is about 7 TFLOP (27 layers with full
+    attention), close to M2 Pro peak, and attention already uses fused sdpa.
+  - Qwen3-ASR long-context decode is bandwidth-bound (WS-05 sweep), so there
+    is no KV-copy action.
+- Remaining: WS-08, WS-09.
+
+### 2026-10-26 — coordinator — WS-08
+
+- Evidence: a microbenchmark of a Qwen3-1.7B-shaped 4-bit decode step
+  (28 layers, fused sdpa over KV 2000, 152k-row head) at B sequences per
+  step. Median step times:
+  - B=1: 8.1 ms.
+  - B=2: 10.9 ms (5.4 ms per sequence).
+  - B=4: 19.4 ms (4.9 ms per sequence).
+  - B=8: 43.3 ms (5.4 ms per sequence).
+- Decision: not kept. Decode would gain at most about 1.5-1.7x. Decode is
+  about 70% of a 600 s ASR segment and about 33% of a PaddleOCR-VL page, so
+  end-to-end gains would be 1.29x and 1.1x. That is under the 1.3x bar even
+  before Unlimited-OCR's MoE (tokens in a batch route to different experts),
+  stragglers that finish early, and the loss of bit-identity. No
+  production code was written.
+- Remaining: WS-09.
+
+### 2026-10-26 — coordinator — WS-09
+
+- Changed:
+  - `docs/performance.md` has a "Pipeline throughput (spec 007)" table
+    covering every change, kept or not, plus notes on buffer donation, ASR
+    decode bandwidth and the vision roofline.
+  - Root `AGENTS.md` adds the "Host/GPU overlap" convention and the
+    background PDF renderer in "Where to look".
+- Evidence: `prek run --all-files`, `cargo fmt --all --check`,
+  `cargo clippy --workspace --all-targets -D warnings`,
+  `AIMD_MLX_DEVICE=cpu cargo test --workspace` and
+  `cargo xtask check-specs` pass.
+- Remaining: none.
+
 ## Completion summary
 
-Pending.
+The largest gain is the early-submit decode loop: Unlimited-OCR decode is up
+about 15%, PaddleOCR-VL 4-bit up 10-20% and bf16 up 5-10%, and ASR is up a
+few percent. It needed the shim's 30 MB Metal buffer cap, because mlx's
+50 MB buffers kept the previous step's KV arrays alive and forced the MoE
+model to copy its cache every layer.
+
+Other kept changes:
+
+- PDF pages render in the background as PPM.
+- PP-OCRv6 and the Unlimited-OCR Pillow resize thread their host work
+  (preprocess 0.11 -> 0.015 s).
+- PaddleOCR-VL decodes a spotting page once and quantizes at load
+  asynchronously (load -20%).
+- The aligner classifies only its timestamp slots.
+
+Every kept change is bit-identical. The ASR host items and batched decoding
+were measured and rejected with recorded numbers. Durable notes are in
+`docs/performance.md` ("Pipeline throughput (spec 007)") and the AGENTS.md
+"Host/GPU overlap" convention.
