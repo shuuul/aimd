@@ -31,6 +31,9 @@ Apple Silicon through MLX (Metal), with no Python runtime.
 - **Document conversion** through Pandoc. EPUB keeps spine order and extracts
   chapters and images. Text-layer PDFs are converted by
   [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
+- **Source anchors**: OCR blocks carry their page and position, and
+  transcripts are timed paragraphs (forced alignment with
+  Qwen3-ForcedAligner). Export JSON segments, SRT, or WebVTT.
 - **Remote backends**: optional OpenAI-compatible ASR/OCR servers.
 - **Two interfaces**: CLI (`aimd`) and MCP stdio server (`aimd-mcp`).
 
@@ -94,6 +97,8 @@ aimd [OPTIONS] INPUT_SOURCE
 |--------|-------------|
 | `--task TEXT` | Explicit task: `transcript`, `convert`, or `ocr`. Defaults to auto-routing. |
 | `-o, --output PATH` | Output file. Generated from the title when omitted. |
+| `-f, --format TEXT` | `markdown` (default), `json` (the MCP response with segments), `srt` or `vtt` (transcripts only). See [Source anchors](#source-anchors). |
+| `--no-anchors` | Plain output without OCR position comments or `[hh:mm:ss]` paragraphs; skips forced alignment. |
 | `-m, --model TEXT` | ASR or OCR model (see [Models and precision](#models-and-precision)). |
 | `--precision TEXT` | `4bit`, `6bit`, or `8bit` (dash variants such as `4-bit` are accepted). |
 | `-l, --language TEXT` | ASR language (`zh`, `en`, `ja`, `yue`, ...). Omit it to auto-detect. OCR ignores it. |
@@ -277,6 +282,58 @@ Which OCR model to use:
 
 OCR is multilingual and ignores `--language`.
 
+### Source anchors
+
+By default the Markdown records where each piece came from, so an LLM (or
+you) can cite the page region or the moment in the audio.
+
+OCR output puts an HTML comment before each block. Markdown viewers hide
+it; `chunk_list` keeps it. `page` is 1-based and `bbox` is
+`x0,y0,x1,y1`, normalized to the page (0..1):
+
+```markdown
+## Page 2
+
+<!-- aimd:loc page=2 bbox=0.081,0.062,0.912,0.104 kind=title -->
+# Quarterly Report
+
+<!-- aimd:loc page=2 bbox=0.081,0.130,0.912,0.402 kind=text -->
+Revenue grew 12% year over year...
+```
+
+Unlimited-OCR anchors each layout block. PaddleOCR-VL, PP-OCRv6, and remote
+OCR anchor the whole page. PP-OCRv6 line boxes, and PaddleOCR-VL line boxes
+from its `Spotting:` pass (run only with `--format json` or MCP
+`include_segments`), appear in the JSON `segments`.
+
+Transcripts are split into sentences and grouped into paragraphs (a new one
+after a 2 s pause or about 300 characters), each with its start time:
+
+```markdown
+[00:00:00] Welcome back to the show. Today we're talking about MLX.
+
+[00:00:14] So the first question is how the unified memory works...
+```
+
+Local ASR runs Qwen3-ForcedAligner-0.6B (8-bit, downloaded on first use)
+on 5-minute segments for word-level times. It covers Chinese, English,
+Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian,
+and Spanish. Other languages and remote ASR get segment-level times, and
+URL subtitles keep their cue times.
+
+```bash
+aimd interview.m4a -f srt          # interview_transcript.srt
+aimd "https://youtu.be/..." -f vtt
+aimd scan.pdf -f json              # Markdown + segments with page/bbox
+aimd audio.mp3 --no-anchors        # plain text, no alignment pass
+```
+
+`--format json` writes the `process_input` response (see
+[MCP server](#mcp-server)) with a `segments` list: `text`, plus `page`,
+`bbox`, `quad` (line corners), `kind` for OCR, or `start`/`end` seconds for
+transcripts. SRT/VTT cues are one sentence each, split at commas when longer
+than 7 s or 84 characters (42 for CJK).
+
 ## Models and precision
 
 The model (`--model`) and the precision (`--precision`) are separate options.
@@ -349,7 +406,9 @@ A stdio MCP server with two tools:
   (`input_source`, `task_type`, `model`, `precision`, `language`, `context`,
   `metadata_context`, `start`, `end`, `output_file`, `save_original`,
   `cookies`, `cookies_from_browser`, `raw_transcript`, and the remote backend
-  fields).
+  fields). `anchors` (default `true`) matches `--no-anchors`, and
+  `include_segments` (default `false`) adds the `segments` list described
+  in [Source anchors](#source-anchors).
 
 Example client configuration:
 

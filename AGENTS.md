@@ -112,7 +112,8 @@ flowchart TD
 | Errors | `crates/aimd-core/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
 | Cancellation/progress | `crates/aimd-core/src/hooks.rs` | `ProcessHooks` (`is_cancelled`, `progress`, `check_cancelled`), `NoHooks`. |
 | Text shaping | `crates/aimd-core/src/text.rs` | Title extraction and header/paragraph chunking (`MAX_CHUNK_SIZE`). |
-| Output persistence + help texts | `crates/aimd-core/src/output.rs` | `persist_result_output_if_requested`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
+| Source anchors | `crates/aimd-core/src/anchors.rs` | OCR `<!-- aimd:loc -->` comments, sentence split, unit-to-sentence timing, `[hh:mm:ss]` paragraphs, subtitle cues, SRT/VTT write/parse. |
+| Output persistence + help texts | `crates/aimd-core/src/output.rs` | `persist_result_output_if_requested`; `OutputFormat`, `result_payload`/`payload_text` (MCP response, CLI `--format json`), `subtitle_text`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
 | Extension tables | `crates/aimd-core/src/ext.rs` | Audio/video/image/OCR/asset extensions and the Pandoc reader map. |
 | CLI | `crates/aimd-cli/src/args.rs`, `app.rs` | Hand-written parser over the frozen flag surface; output naming; `.env` loading. |
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
@@ -150,9 +151,21 @@ flowchart TD
   (`output_dir` set) ignore `output_file`. Persisted files are `markdown`
   byte-for-byte, never rebuilt from `chunk_list`.
 - **Stable output contract**: `ProcessResult` keeps the lossless `markdown`, an optional
-  `asset_base_uri` (directory URIs end in `/`), an optional `output_dir`, and an optional
-  `platform`, alongside `TextContext { title, chunk_list, split_header_level }`. Viewers
-  consume `markdown`; context-window consumers use `chunk_list`.
+  `asset_base_uri` (directory URIs end in `/`), an optional `output_dir`, an optional
+  `platform`, and optional `segments`, alongside
+  `TextContext { title, chunk_list, split_header_level }`. Viewers consume `markdown`;
+  context-window consumers use `chunk_list`.
+- **Source anchors** (spec 005): `ProcessInput.anchors` (default `true`; CLI
+  `--no-anchors`, MCP `anchors`) adds OCR `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->`
+  comments (1-based page, bbox normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript
+  paragraphs, and fills `ProcessResult.segments`. `anchors: false` must reproduce the
+  pre-anchor output byte for byte and skip forced alignment. Positions come through the
+  `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
+  local ASR aligns 300 s segments with Qwen3-ForcedAligner-0.6B-8bit, and anything
+  unaligned (remote ASR, unsupported language, failed alignment) spreads its sentences
+  over the segment span instead of failing. `include_segments` (MCP; CLI `--format json`)
+  returns `segments` and enables the PaddleOCR-VL `Spotting:` pass. MCP response fields
+  are additive (`segments` last).
 - **Wire compatibility**: MCP JSON field names, error bodies, and tool
   schemas match the frozen Python contract. Change them only with an explicit decision.
 - **Fail-fast preflight**: resolve the model and check the backend (MLX GPU device,
