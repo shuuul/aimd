@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <mutex>
 #include <new>
 #include <optional>
@@ -126,9 +127,22 @@ void clear_last_error() {
 // is used when `AIMD_MLX_DEVICE=cpu` or when no Metal/GPU device is available
 // (virtualized CI runners); `AIMD_MLX_DEVICE=gpu` forces the default GPU.
 // Anything else keeps mlx's default (GPU when available).
+//
+// Linux: mlx's CUDA JIT finds the toolkit headers via CUDA_HOME / CUDA_PATH,
+// else /usr/local/cuda. Arch installs CUDA under /opt/cuda, so point
+// CUDA_HOME there when neither variable is set and /usr/local/cuda is absent.
 const mlx::core::Device& selected_device() {
   static std::once_flag once;
   std::call_once(once, [] {
+#if defined(__linux__)
+    auto has_include = [](const char* root) {
+      return std::filesystem::exists(std::filesystem::path(root) / "include" / "cuda.h");
+    };
+    if (!std::getenv("CUDA_HOME") && !std::getenv("CUDA_PATH") &&
+        !has_include("/usr/local/cuda") && has_include("/opt/cuda")) {
+      setenv("CUDA_HOME", "/opt/cuda", 0);
+    }
+#endif
     const char* env = std::getenv("AIMD_MLX_DEVICE");
     std::string want = env ? env : "";
     for (auto& c : want) {

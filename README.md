@@ -42,10 +42,15 @@ aimd --help
 ```
 
 The formula lives in [shuuul/homebrew-tap](https://github.com/shuuul/homebrew-tap).
-Bottles are built for macOS on Apple Silicon (arm64). Linux support depends on
-an MLX build with the CUDA backend and is still in progress.
+Bottles are built for macOS on Apple Silicon (arm64). On Linux (x86_64 or
+aarch64 with an NVIDIA GPU) the formula builds from source against the tap's
+`mlx-cuda`, MLX's CUDA backend. The NVIDIA driver, CUDA 13, cuDNN 9, and NCCL 2
+come from the system and must be on the dynamic loader path. Arch's
+`/opt/cuda` is found automatically; elsewhere set `CUDA_HOME` if the toolkit is
+not in `/usr/local/cuda`.
 
-Homebrew also installs the runtime tools aimd uses: `mlx`, `ffmpeg`, `mupdf`
+Homebrew also installs the runtime tools aimd uses: MLX (`mlx` on macOS,
+`mlx-cuda` on Linux), `ffmpeg`, `mupdf`
 (`mutool`, for rendering scanned PDF pages), `pandoc`, and `yt-dlp`. Sites
 change often, so keep yt-dlp current with `brew upgrade yt-dlp`. aimd suggests
 this when yt-dlp's error output looks like an outdated extractor.

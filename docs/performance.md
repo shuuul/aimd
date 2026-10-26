@@ -194,7 +194,7 @@ On Linux with the mlx CUDA backend (metacube, see below) the same corpus
 and the macOS-built baseline give identical results for all five
 checkpoints: 72/72 clips and 5/5 pages identical to the reference.
 
-## Linux, mlx CUDA backend (spec 003)
+## Linux, mlx CUDA backend
 
 metacube: RTX 5090 32 GB, Arch Linux, CUDA 13.4, cuDNN 9.27, NCCL 2.32,
 the `mlx-cuda-13` 0.32.4 wheel's `libmlx.so` (`MLX_PREFIX`). Release builds
@@ -208,11 +208,16 @@ ops.
 | 2026-10-26 | Unlimited-OCR-4bit | `page_text.png` (4x5 crops, 2327-token prompt) | 0.74 s | 0.72 s | Vision 0.12 s, prefill 0.24 s (~9.5k tok/s), decode 750-770 tok/s, finish=stop. Round 1 2.19 s (JIT). |
 | 2026-10-26 | Unlimited-OCR-4bit | `small_text.png` | — | 0.14 s | Decode ~850 tok/s. |
 
-Runtime needs: `CUDA_HOME` (mlx JIT-compiles kernels against the CUDA
-headers) and `libmlx.so` on the loader path. Vision-tower stage parity
-against the Metal goldens drifts past the bf16 bounds on CUDA (final
-features 4.6-5.3% rel rms vs 3%) while end-to-end markdown stays
-identical; see spec 003.
+mlx JIT-compiles kernels against the CUDA headers (`CUDA_HOME`, else
+`/usr/local/cuda`; the shim falls back to Arch's `/opt/cuda`). Vision-tower
+stage parity against the Metal goldens drifts past the bf16 bounds on CUDA
+(final features 4.6-5.3% rel rms vs 3%) while end-to-end markdown stays
+identical, so those bounds are enforced on Metal only
+(`specs/archive/003-linux-mlx-cuda.md`).
+
+dspark1 (DGX Spark GB10, aarch64, Ubuntu 24.04, CUDA 13.4) with the tap's
+brew `mlx-cuda`: the corpus gate matches the baseline for all five
+checkpoints. No benchmark was recorded there (shared GPU).
 
 ## Measurement guidance
 
