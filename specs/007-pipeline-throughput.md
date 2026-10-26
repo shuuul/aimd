@@ -97,8 +97,8 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-02 | PDF pages rendered in the background and fed to OCR as they finish; PNM instead of PNG | coordinator | Done | None | multi-page PDF wall time; corpus gate identical; cancellation tests |
 | WS-03 | PP-OCRv6: async rec batches, threaded crop/warp/resize/normalize | coordinator | Done | None | `ppocrv6` example; checkpoint test; corpus gate identical |
 | WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Done | None | preprocess goldens; OCR page latency |
-| WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Pending | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
-| WS-06 | Aligner `lm_head` at slots only (if argmax identical); PaddleOCR-VL batched quantize at load | coordinator | Pending | None | aligner parity; load time |
+| WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Done | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
+| WS-06 | Aligner `lm_head` at slots only (if argmax identical); PaddleOCR-VL batched quantize at load | coordinator | Done | None | aligner parity; load time |
 | WS-07 | New findings discovered during WS-01..06 (one row each when found) | coordinator | In progress | None | per finding |
 | WS-07a | Metal command buffers capped at 30 MB (shim default) so early-submitted MoE steps keep KV-cache donation | coordinator | Done | WS-01 | Unlimited-OCR tok/s; all-model A/B; goldens |
 | WS-08 | Batched decoding across pages/segments: prototype, measure, decide | coordinator | Pending | WS-01..05 | corpus gate thresholds; speedup |
@@ -248,6 +248,48 @@ Append entries rather than rewriting another worker's record.
     unlimited-ocr, paddleocr-vl bf16 and paddleocr-vl 4-bit.
 - Remaining: WS-05..09.
 - Next action: WS-05 ASR host pipeline.
+
+### 2026-10-26 — coordinator — WS-05
+
+- Evidence: phase profile of the Qwen3-ASR-1.7B 4-bit pipeline on a 600 s
+  segment (M2 Pro, 3 rounds):
+  - WAV load: 4 ms.
+  - Mel (already threaded): 0.19-0.23 s.
+  - Tower: 4.7 s.
+  - Host feature merge with readback and upload: 0.02-0.04 s.
+  - Prefill (7.8k tokens): 9.0 s.
+  - Decode (2427 tokens): 34-36 s.
+  - ffmpeg segmentation of a 1 h mp3 into 600 s WAVs: 1.3 s total.
+- Decision: the device-side merge, single WAV load and streamed
+  segmentation together address under 1% of a segment's wall time (about
+  0.3% of a 1 h job). They were dropped instead of adding concurrency to
+  the segment loop. Outputs are unchanged because no code changed.
+- Finding: long-context decode was checked for the WS-07a KV-donation
+  copy. Sweeping `MLX_MAX_MB_PER_BUFFER` over 10, 30, 60 and 1000 left 300 s
+  decode at 8.8-9.4 s (888 tokens). ASR decode is bound by weight and KV
+  reads, not copies, so there is no ASR-specific action.
+- Remaining: WS-06..09.
+
+### 2026-10-26 — coordinator — WS-06
+
+- Changed:
+  - The aligner gathers the timestamp-slot hidden rows before the 5000-class
+    `lm_head`, instead of projecting every prompt row and gathering after.
+  - PaddleOCR-VL quantize-at-load submits each `mx.quantize` with
+    `async_eval` instead of a blocking eval per tensor. The host reads the
+    next tensor while the GPU quantizes.
+- Evidence:
+  - `aligner_parity`: 68/76 exact, overall MAE 77.06 ms and gated MAE
+    0.17 ms, the same as before the change, so argmax is identical. The
+    aligner golden tests (12) pass. Latency is within noise; the gain is the
+    `[seq, 5000]` logits buffer that is no longer allocated.
+  - PaddleOCR-VL 4-bit warm load, interleaved x3: 0.52-0.54 -> 0.42-0.44 s.
+    The PaddleOCR-VL tests (16, including the bit-exact quantize fixture)
+    pass, and `corpus_gate --ocr-model paddleocr-vl --ocr-bits 4` matches
+    5/5.
+- Remaining: WS-07..09.
+- Next action: WS-07 findings, starting with PaddleOCR-VL vision + prefill
+  (2.15 s for a 1253-token page).
 
 ## Completion summary
 

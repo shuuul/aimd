@@ -128,8 +128,9 @@ impl<'a> Loader<'a> {
         dense(self.store, name, shape)
     }
 
-    /// `mx.quantize(w, 64, bits)` of a dense `[out, in]` weight, evaluated
-    /// so the dense copy can be freed.
+    /// `mx.quantize(w, 64, bits)` of a dense `[out, in]` weight, submitted
+    /// (`async_eval`) so the dense copy is freed once the GPU is done while
+    /// the host goes on reading the next tensor.
     fn quantize(
         &self,
         w: &MlxArray,
@@ -138,7 +139,7 @@ impl<'a> Loader<'a> {
     ) -> Result<QWeights, LoadError> {
         let shape = w.shape()?;
         let (qw, scales, biases) = w.quantize(QUANT_GROUP_SIZE as i32, bits as i32)?;
-        MlxArray::eval_many(&[&qw, &scales, &biases])?;
+        MlxArray::async_eval(&[&qw, &scales, &biases])?;
         Ok(QWeights {
             w: qw,
             scales,
