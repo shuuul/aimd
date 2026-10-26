@@ -41,9 +41,10 @@ use aimd_mlx::{MlxArray, MlxDtype, MlxError};
 use aimd_weights::{WeightsError, load_checkpoint};
 
 use super::config::{UnlimitedOcrConfig, parse_config};
+pub use super::generate::LayoutBlock;
 use super::generate::{
     FinishReason, GenerateError, OCR_IMAGE_TOKEN_ID, OcrGenerationSettings, greedy_ocr_generate,
-    normalize_unlimited_ocr_markdown, splice_image_features,
+    normalize_unlimited_ocr_markdown, parse_unlimited_ocr_blocks, splice_image_features,
 };
 use super::mlx_decoder::{DecoderError, OcrDecoder};
 use super::mlx_vision::{OcrVision, VisionError};
@@ -116,6 +117,10 @@ impl Default for OcrRequest<'_> {
 pub struct OcrResult {
     /// Normalized markdown (`normalize_unlimited_ocr_markdown`).
     pub markdown: String,
+    /// Located layout blocks parsed from the det protocol of `raw_text`
+    /// (bbox normalized to the original image); their texts joined by
+    /// `"\n\n"` equal `markdown`. Empty when the output has no det markers.
+    pub blocks: Vec<LayoutBlock>,
     /// Raw decoded generation (special tokens kept, stripped).
     pub raw_text: String,
     pub finish_reason: FinishReason,
@@ -351,8 +356,10 @@ impl UnlimitedOcrPipeline {
         if markdown.is_empty() {
             return Err(PipelineError::EmptyContent);
         }
+        let blocks = parse_unlimited_ocr_blocks(&raw_text);
         Ok(OcrResult {
             markdown,
+            blocks,
             raw_text,
             finish_reason: generation.finish_reason,
             tokens: generation.tokens,
@@ -509,6 +516,48 @@ mod tests {
         }
     }
 
+    /// The reference generations' det boxes parse into blocks that join to
+    /// the reference markdown and cover every ink pixel of the fixture
+    /// (global-view-only 560x180 and the 4x5 gundam-crop 900x1160 page):
+    /// evidence for the 0..999 whole-image grid.
+    #[test]
+    fn pipeline_reference_blocks_cover_fixture_text() {
+        for (name, want_blocks) in [("small_text", 3), ("page_text", 7)] {
+            let r = load_reference(name);
+            let blocks = parse_unlimited_ocr_blocks(r["raw_text"].as_str().unwrap());
+            assert_eq!(blocks.len(), want_blocks, "{name}");
+            let joined: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
+            assert_eq!(
+                joined.join("\n\n"),
+                r["markdown"].as_str().unwrap(),
+                "{name}"
+            );
+
+            let bytes = std::fs::read(fixture_dir().join(r["image"].as_str().unwrap())).unwrap();
+            let img = image::load_from_memory(&bytes).unwrap().to_luma8();
+            let (w, h) = (img.width() as f32, img.height() as f32);
+            // Antialiased glyph edges may poke a pixel or two past a box.
+            let margin = 3.0;
+            let (mut ink, mut outside) = (0usize, 0usize);
+            for (x, y, p) in img.enumerate_pixels() {
+                if p.0[0] >= 128 {
+                    continue;
+                }
+                ink += 1;
+                let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+                let covered = blocks.iter().any(|b| {
+                    x >= b.bbox[0] * w - margin
+                        && x <= b.bbox[2] * w + margin
+                        && y >= b.bbox[1] * h - margin
+                        && y <= b.bbox[3] * h + margin
+                });
+                outside += usize::from(!covered);
+            }
+            eprintln!("{name}: {outside}/{ink} ink pixels outside the blocks");
+            assert!(ink > 0 && outside == 0, "{name}: {outside}/{ink} outside");
+        }
+    }
+
     /// Tokenizer-backed prompt ids vs the reference processor's input_ids
     /// (head, tail, length). Needs only the tokenizer files.
     #[test]
@@ -641,6 +690,17 @@ mod tests {
                 );
             }
             assert_eq!(out.finish_reason, FinishReason::Stop, "{name}");
+            let joined: Vec<&str> = out.blocks.iter().map(|b| b.text.as_str()).collect();
+            assert_eq!(joined.join("\n\n"), out.markdown, "{name}: blocks");
+            let want_blocks = parse_unlimited_ocr_blocks(r["raw_text"].as_str().unwrap());
+            assert_eq!(out.blocks.len(), want_blocks.len(), "{name}: block count");
+            for (got, want) in out.blocks.iter().zip(&want_blocks) {
+                assert_eq!(got.kind, want.kind, "{name}");
+                let drift = (0..4)
+                    .map(|i| (got.bbox[i] - want.bbox[i]).abs())
+                    .fold(0f32, f32::max);
+                assert!(drift <= 0.02, "{name}: bbox {:?} vs {:?}", got, want);
+            }
             assert_eq!(
                 out.image_tokens as u64,
                 r["image_token_count"].as_u64().unwrap()

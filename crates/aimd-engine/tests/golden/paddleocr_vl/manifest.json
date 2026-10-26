@@ -14,6 +14,7 @@
   "page_text"
  ],
  "formatted_prompt": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>OCR:\nAssistant:\n",
+ "spotting_formatted_prompt": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Spotting:\nAssistant:\n",
  "bf16": {
   "repo": "PaddlePaddle/PaddleOCR-VL-1.6",
   "fixtures": {
@@ -665,10 +666,102 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 157,
-     "prompt_tps": 867.2493900178508,
-     "generation_tps": 212.74294726358573,
-     "elapsed_s": 0.2972916250000708,
+     "prompt_tps": 768.3578491269126,
+     "generation_tps": 160.7924391685901,
+     "elapsed_s": 0.3418131250073202,
      "markdown": "Hello PaddleOCR-VL 2026\nnative MLX in Rust."
+    },
+    "spotting": {
+     "text": "Hello PaddleOCR-VL 2026<|LOC_25|><|LOC_194|><|LOC_732|><|LOC_194|><|LOC_732|><|LOC_395|><|LOC_25|><|LOC_395|>\nnative MLX in Rust.<|LOC_25|><|LOC_563|><|LOC_533|><|LOC_563|><|LOC_533|><|LOC_765|><|LOC_25|><|LOC_765|>",
+     "tokens": [
+      16276,
+      393,
+      36612,
+      93972,
+      2497,
+      93942,
+      31358,
+      93919,
+      5,
+      3,
+      5,
+      9,
+      100322,
+      100491,
+      101029,
+      100491,
+      101029,
+      100692,
+      100322,
+      100692,
+      23,
+      13951,
+      30123,
+      94026,
+      307,
+      40579,
+      93937,
+      100322,
+      100860,
+      100830,
+      100860,
+      100830,
+      101062,
+      100322,
+      101062,
+      2
+     ],
+     "finish_reason": "stop",
+     "prompt_tokens": 319,
+     "prompt_tps": 693.4354231410399,
+     "generation_tps": 114.95548177416529,
+     "elapsed_s": 0.8007036659982987,
+     "markdown": "Hello PaddleOCR-VL 2026<|LOC_25|><|LOC_194|><|LOC_732|><|LOC_194|><|LOC_732|><|LOC_395|><|LOC_25|><|LOC_395|>\nnative MLX in Rust.<|LOC_25|><|LOC_563|><|LOC_533|><|LOC_563|><|LOC_533|><|LOC_765|><|LOC_25|><|LOC_765|>",
+     "plain": "Hello PaddleOCR-VL 2026\nnative MLX in Rust.",
+     "spots": [
+      {
+       "text": "Hello PaddleOCR-VL 2026",
+       "quad": [
+        [
+         0.025,
+         0.194
+        ],
+        [
+         0.732,
+         0.194
+        ],
+        [
+         0.732,
+         0.395
+        ],
+        [
+         0.025,
+         0.395
+        ]
+       ]
+      },
+      {
+       "text": "native MLX in Rust.",
+       "quad": [
+        [
+         0.025,
+         0.563
+        ],
+        [
+         0.533,
+         0.563
+        ],
+        [
+         0.533,
+         0.765
+        ],
+        [
+         0.025,
+         0.765
+        ]
+       ]
+      }
+     ]
     }
    },
    "page_text": {
@@ -878,10 +971,420 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 1261,
-     "prompt_tps": 594.1445896468275,
-     "generation_tps": 156.66472407695724,
-     "elapsed_s": 2.869576832978055,
+     "prompt_tps": 541.7708086054339,
+     "generation_tps": 113.02134036456484,
+     "elapsed_s": 3.383012583013624,
      "markdown": "Quarterly Engineering Report\n\nThe native OCR engine converts scanned pages into Markdown for language model workflows. It runs a vision transformer and a compact decoder on MLX.\n\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n\n文档解析将扫描页面转换为结构化文本。\n\nContact: platform team, building 7, room 210."
+    },
+    "spotting": {
+     "text": "Quarterly Engineering Report<|LOC_69|><|LOC_51|><|LOC_546|><|LOC_51|><|LOC_546|><|LOC_81|><|LOC_69|><|LOC_81|>\nThe native OCR engine converts scanned pages into<|LOC_68|><|LOC_116|><|LOC_669|><|LOC_116|><|LOC_669|><|LOC_138|><|LOC_68|><|LOC_138|>\nMarkdown for language model workflows. It runs a<|LOC_68|><|LOC_152|><|LOC_643|><|LOC_152|><|LOC_643|><|LOC_173|><|LOC_68|><|LOC_173|>\nvision transformer and a compact decoder on MLX.<|LOC_68|><|LOC_188|><|LOC_649|><|LOC_188|><|LOC_649|><|LOC_208|><|LOC_68|><|LOC_208|>\nKey results<|LOC_69|><|LOC_245|><|LOC_223|><|LOC_245|><|LOC_223|><|LOC_269|><|LOC_69|><|LOC_269|>\n1. Latency is measured per page at 144 dpi.<|LOC_70|><|LOC_282|><|LOC_564|><|LOC_282|><|LOC_564|><|LOC_306|><|LOC_70|><|LOC_306|>\n2. Output text matches the reference decoder.<|LOC_68|><|LOC_317|><|LOC_588|><|LOC_317|><|LOC_588|><|LOC_339|><|LOC_68|><|LOC_339|>\n3. Weights load once per process.<|LOC_69|><|LOC_353|><|LOC_455|><|LOC_353|><|LOC_455|><|LOC_376|><|LOC_69|><|LOC_376|>\n文档解析将扫描页面转换为结构化文本。<|LOC_69|><|LOC_406|><|LOC_557|><|LOC_406|><|LOC_557|><|LOC_432|><|LOC_69|><|LOC_432|>\nContact: platform team, building 7, room 210.<|LOC_69|><|LOC_468|><|LOC_580|><|LOC_468|><|LOC_580|><|LOC_492|><|LOC_69|><|LOC_492|>",
+     "tokens": [
+      2029,
+      5645,
+      394,
+      26290,
+      17129,
+      100366,
+      100348,
+      100843,
+      100348,
+      100843,
+      100378,
+      100366,
+      100378,
+      23,
+      700,
+      9956,
+      491,
+      2497,
+      5748,
+      44620,
+      54267,
+      9434,
+      1092,
+      100365,
+      100413,
+      100966,
+      100413,
+      100966,
+      100435,
+      100365,
+      100435,
+      23,
+      6859,
+      2300,
+      385,
+      3934,
+      1869,
+      36429,
+      93927,
+      93937,
+      1076,
+      11105,
+      274,
+      100365,
+      100449,
+      100940,
+      100449,
+      100940,
+      100470,
+      100365,
+      100470,
+      23,
+      28936,
+      61545,
+      326,
+      274,
+      16654,
+      32369,
+      400,
+      30123,
+      94026,
+      93937,
+      100365,
+      100485,
+      100946,
+      100485,
+      100946,
+      100505,
+      100365,
+      100505,
+      23,
+      1690,
+      2693,
+      100366,
+      100542,
+      100520,
+      100542,
+      100520,
+      100566,
+      100366,
+      100566,
+      23,
+      4,
+      93937,
+      14490,
+      2022,
+      357,
+      9974,
+      722,
+      2683,
+      488,
+      93919,
+      4,
+      7,
+      7,
+      310,
+      1779,
+      93937,
+      100367,
+      100579,
+      100861,
+      100579,
+      100861,
+      100603,
+      100367,
+      100603,
+      23,
+      5,
+      93937,
+      16617,
+      2286,
+      8863,
+      290,
+      4803,
+      32369,
+      93937,
+      100365,
+      100614,
+      100885,
+      100614,
+      100885,
+      100636,
+      100365,
+      100636,
+      23,
+      6,
+      93937,
+      1368,
+      4922,
+      4666,
+      4129,
+      722,
+      1739,
+      93937,
+      100366,
+      100650,
+      100752,
+      100650,
+      100752,
+      100673,
+      100366,
+      100673,
+      23,
+      18670,
+      20276,
+      94275,
+      24429,
+      12497,
+      65113,
+      3314,
+      94129,
+      15576,
+      93977,
+      100366,
+      100703,
+      100854,
+      100703,
+      100854,
+      100729,
+      100366,
+      100729,
+      23,
+      16963,
+      93963,
+      6751,
+      3719,
+      93938,
+      6471,
+      93919,
+      10,
+      93938,
+      5672,
+      93919,
+      5,
+      4,
+      3,
+      93937,
+      100366,
+      100765,
+      100877,
+      100765,
+      100877,
+      100789,
+      100366,
+      100789,
+      2
+     ],
+     "finish_reason": "stop",
+     "prompt_tokens": 2013,
+     "prompt_tps": 443.9874479728866,
+     "generation_tps": 137.12828489548426,
+     "elapsed_s": 5.987376833974849,
+     "markdown": "Quarterly Engineering Report<|LOC_69|><|LOC_51|><|LOC_546|><|LOC_51|><|LOC_546|><|LOC_81|><|LOC_69|><|LOC_81|>\nThe native OCR engine converts scanned pages into<|LOC_68|><|LOC_116|><|LOC_669|><|LOC_116|><|LOC_669|><|LOC_138|><|LOC_68|><|LOC_138|>\nMarkdown for language model workflows. It runs a<|LOC_68|><|LOC_152|><|LOC_643|><|LOC_152|><|LOC_643|><|LOC_173|><|LOC_68|><|LOC_173|>\nvision transformer and a compact decoder on MLX.<|LOC_68|><|LOC_188|><|LOC_649|><|LOC_188|><|LOC_649|><|LOC_208|><|LOC_68|><|LOC_208|>\nKey results<|LOC_69|><|LOC_245|><|LOC_223|><|LOC_245|><|LOC_223|><|LOC_269|><|LOC_69|><|LOC_269|>\n1. Latency is measured per page at 144 dpi.<|LOC_70|><|LOC_282|><|LOC_564|><|LOC_282|><|LOC_564|><|LOC_306|><|LOC_70|><|LOC_306|>\n2. Output text matches the reference decoder.<|LOC_68|><|LOC_317|><|LOC_588|><|LOC_317|><|LOC_588|><|LOC_339|><|LOC_68|><|LOC_339|>\n3. Weights load once per process.<|LOC_69|><|LOC_353|><|LOC_455|><|LOC_353|><|LOC_455|><|LOC_376|><|LOC_69|><|LOC_376|>\n文档解析将扫描页面转换为结构化文本。<|LOC_69|><|LOC_406|><|LOC_557|><|LOC_406|><|LOC_557|><|LOC_432|><|LOC_69|><|LOC_432|>\nContact: platform team, building 7, room 210.<|LOC_69|><|LOC_468|><|LOC_580|><|LOC_468|><|LOC_580|><|LOC_492|><|LOC_69|><|LOC_492|>",
+     "plain": "Quarterly Engineering Report\nThe native OCR engine converts scanned pages into\nMarkdown for language model workflows. It runs a\nvision transformer and a compact decoder on MLX.\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n文档解析将扫描页面转换为结构化文本。\nContact: platform team, building 7, room 210.",
+     "spots": [
+      {
+       "text": "Quarterly Engineering Report",
+       "quad": [
+        [
+         0.069,
+         0.051
+        ],
+        [
+         0.546,
+         0.051
+        ],
+        [
+         0.546,
+         0.081
+        ],
+        [
+         0.069,
+         0.081
+        ]
+       ]
+      },
+      {
+       "text": "The native OCR engine converts scanned pages into",
+       "quad": [
+        [
+         0.068,
+         0.116
+        ],
+        [
+         0.669,
+         0.116
+        ],
+        [
+         0.669,
+         0.138
+        ],
+        [
+         0.068,
+         0.138
+        ]
+       ]
+      },
+      {
+       "text": "Markdown for language model workflows. It runs a",
+       "quad": [
+        [
+         0.068,
+         0.152
+        ],
+        [
+         0.643,
+         0.152
+        ],
+        [
+         0.643,
+         0.173
+        ],
+        [
+         0.068,
+         0.173
+        ]
+       ]
+      },
+      {
+       "text": "vision transformer and a compact decoder on MLX.",
+       "quad": [
+        [
+         0.068,
+         0.188
+        ],
+        [
+         0.649,
+         0.188
+        ],
+        [
+         0.649,
+         0.208
+        ],
+        [
+         0.068,
+         0.208
+        ]
+       ]
+      },
+      {
+       "text": "Key results",
+       "quad": [
+        [
+         0.069,
+         0.245
+        ],
+        [
+         0.223,
+         0.245
+        ],
+        [
+         0.223,
+         0.269
+        ],
+        [
+         0.069,
+         0.269
+        ]
+       ]
+      },
+      {
+       "text": "1. Latency is measured per page at 144 dpi.",
+       "quad": [
+        [
+         0.07,
+         0.282
+        ],
+        [
+         0.564,
+         0.282
+        ],
+        [
+         0.564,
+         0.306
+        ],
+        [
+         0.07,
+         0.306
+        ]
+       ]
+      },
+      {
+       "text": "2. Output text matches the reference decoder.",
+       "quad": [
+        [
+         0.068,
+         0.317
+        ],
+        [
+         0.588,
+         0.317
+        ],
+        [
+         0.588,
+         0.339
+        ],
+        [
+         0.068,
+         0.339
+        ]
+       ]
+      },
+      {
+       "text": "3. Weights load once per process.",
+       "quad": [
+        [
+         0.069,
+         0.353
+        ],
+        [
+         0.455,
+         0.353
+        ],
+        [
+         0.455,
+         0.376
+        ],
+        [
+         0.069,
+         0.376
+        ]
+       ]
+      },
+      {
+       "text": "文档解析将扫描页面转换为结构化文本。",
+       "quad": [
+        [
+         0.069,
+         0.406
+        ],
+        [
+         0.557,
+         0.406
+        ],
+        [
+         0.557,
+         0.432
+        ],
+        [
+         0.069,
+         0.432
+        ]
+       ]
+      },
+      {
+       "text": "Contact: platform team, building 7, room 210.",
+       "quad": [
+        [
+         0.069,
+         0.468
+        ],
+        [
+         0.58,
+         0.468
+        ],
+        [
+         0.58,
+         0.492
+        ],
+        [
+         0.069,
+         0.492
+        ]
+       ]
+      }
+     ]
     }
    }
   }
@@ -1786,10 +2289,102 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 157,
-     "prompt_tps": 714.033275244899,
-     "generation_tps": 339.2643298536347,
-     "elapsed_s": 0.31622304196935147,
+     "prompt_tps": 665.665813293457,
+     "generation_tps": 316.5297801407203,
+     "elapsed_s": 0.33069545798934996,
      "markdown": "Hello PaddleOCR-VL 2026\nnative MLX in Rust."
+    },
+    "spotting": {
+     "text": "Hello PaddleOCR-VL 2026<|LOC_25|><|LOC_197|><|LOC_728|><|LOC_197|><|LOC_728|><|LOC_393|><|LOC_25|><|LOC_393|>\nnative MLX in Rust.<|LOC_25|><|LOC_563|><|LOC_532|><|LOC_563|><|LOC_532|><|LOC_763|><|LOC_25|><|LOC_763|>",
+     "tokens": [
+      16276,
+      393,
+      36612,
+      93972,
+      2497,
+      93942,
+      31358,
+      93919,
+      5,
+      3,
+      5,
+      9,
+      100322,
+      100494,
+      101025,
+      100494,
+      101025,
+      100690,
+      100322,
+      100690,
+      23,
+      13951,
+      30123,
+      94026,
+      307,
+      40579,
+      93937,
+      100322,
+      100860,
+      100829,
+      100860,
+      100829,
+      101060,
+      100322,
+      101060,
+      2
+     ],
+     "finish_reason": "stop",
+     "prompt_tokens": 319,
+     "prompt_tps": 624.0105666372223,
+     "generation_tps": 370.16567476866294,
+     "elapsed_s": 0.6217233749921434,
+     "markdown": "Hello PaddleOCR-VL 2026<|LOC_25|><|LOC_197|><|LOC_728|><|LOC_197|><|LOC_728|><|LOC_393|><|LOC_25|><|LOC_393|>\nnative MLX in Rust.<|LOC_25|><|LOC_563|><|LOC_532|><|LOC_563|><|LOC_532|><|LOC_763|><|LOC_25|><|LOC_763|>",
+     "plain": "Hello PaddleOCR-VL 2026\nnative MLX in Rust.",
+     "spots": [
+      {
+       "text": "Hello PaddleOCR-VL 2026",
+       "quad": [
+        [
+         0.025,
+         0.197
+        ],
+        [
+         0.728,
+         0.197
+        ],
+        [
+         0.728,
+         0.393
+        ],
+        [
+         0.025,
+         0.393
+        ]
+       ]
+      },
+      {
+       "text": "native MLX in Rust.",
+       "quad": [
+        [
+         0.025,
+         0.563
+        ],
+        [
+         0.532,
+         0.563
+        ],
+        [
+         0.532,
+         0.763
+        ],
+        [
+         0.025,
+         0.763
+        ]
+       ]
+      }
+     ]
     }
    },
    "page_text": {
@@ -1999,10 +2594,420 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 1261,
-     "prompt_tps": 540.932885162277,
-     "generation_tps": 221.00966317758298,
-     "elapsed_s": 2.9033319579903036,
+     "prompt_tps": 478.15449057432403,
+     "generation_tps": 281.365953562522,
+     "elapsed_s": 3.1055942910024896,
      "markdown": "Quarterly Engineering Report\n\nThe native OCR engine converts scanned pages into Markdown for language model workflows. It runs a vision transformer and a compact decoder on MLX.\n\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n\n文档解析将扫描页面转换为结构化文本。\n\nContact: platform team, building 7, room 210."
+    },
+    "spotting": {
+     "text": "Quarterly Engineering Report<|LOC_73|><|LOC_51|><|LOC_543|><|LOC_51|><|LOC_543|><|LOC_79|><|LOC_73|><|LOC_79|>\nThe native OCR engine converts scanned pages into<|LOC_72|><|LOC_117|><|LOC_664|><|LOC_117|><|LOC_664|><|LOC_139|><|LOC_72|><|LOC_139|>\nMarkdown for language model workflows. It runs a<|LOC_72|><|LOC_154|><|LOC_639|><|LOC_154|><|LOC_639|><|LOC_174|><|LOC_72|><|LOC_174|>\nvision transformer and a compact decoder on MLX.<|LOC_72|><|LOC_189|><|LOC_646|><|LOC_189|><|LOC_646|><|LOC_209|><|LOC_72|><|LOC_209|>\nKey results<|LOC_72|><|LOC_243|><|LOC_224|><|LOC_243|><|LOC_224|><|LOC_266|><|LOC_72|><|LOC_266|>\n1. Latency is measured per page at 144 dpi.<|LOC_74|><|LOC_278|><|LOC_563|><|LOC_278|><|LOC_563|><|LOC_301|><|LOC_74|><|LOC_301|>\n2. Output text matches the reference decoder.<|LOC_72|><|LOC_314|><|LOC_586|><|LOC_314|><|LOC_586|><|LOC_334|><|LOC_72|><|LOC_334|>\n3. Weights load once per process.<|LOC_72|><|LOC_350|><|LOC_454|><|LOC_350|><|LOC_454|><|LOC_372|><|LOC_72|><|LOC_372|>\n文档解析将扫描页面转换为结构化文本。<|LOC_72|><|LOC_404|><|LOC_555|><|LOC_404|><|LOC_555|><|LOC_428|><|LOC_72|><|LOC_428|>\nContact: platform team, building 7， room 210.<|LOC_72|><|LOC_467|><|LOC_578|><|LOC_467|><|LOC_578|><|LOC_489|><|LOC_72|><|LOC_489|>",
+     "tokens": [
+      2029,
+      5645,
+      394,
+      26290,
+      17129,
+      100370,
+      100348,
+      100840,
+      100348,
+      100840,
+      100376,
+      100370,
+      100376,
+      23,
+      700,
+      9956,
+      491,
+      2497,
+      5748,
+      44620,
+      54267,
+      9434,
+      1092,
+      100369,
+      100414,
+      100961,
+      100414,
+      100961,
+      100436,
+      100369,
+      100436,
+      23,
+      6859,
+      2300,
+      385,
+      3934,
+      1869,
+      36429,
+      93927,
+      93937,
+      1076,
+      11105,
+      274,
+      100369,
+      100451,
+      100936,
+      100451,
+      100936,
+      100471,
+      100369,
+      100471,
+      23,
+      28936,
+      61545,
+      326,
+      274,
+      16654,
+      32369,
+      400,
+      30123,
+      94026,
+      93937,
+      100369,
+      100486,
+      100943,
+      100486,
+      100943,
+      100506,
+      100369,
+      100506,
+      23,
+      1690,
+      2693,
+      100369,
+      100540,
+      100521,
+      100540,
+      100521,
+      100563,
+      100369,
+      100563,
+      23,
+      4,
+      93937,
+      14490,
+      2022,
+      357,
+      9974,
+      722,
+      2683,
+      488,
+      93919,
+      4,
+      7,
+      7,
+      310,
+      1779,
+      93937,
+      100371,
+      100575,
+      100860,
+      100575,
+      100860,
+      100598,
+      100371,
+      100598,
+      23,
+      5,
+      93937,
+      16617,
+      2286,
+      8863,
+      290,
+      4803,
+      32369,
+      93937,
+      100369,
+      100611,
+      100883,
+      100611,
+      100883,
+      100631,
+      100369,
+      100631,
+      23,
+      6,
+      93937,
+      1368,
+      4922,
+      4666,
+      4129,
+      722,
+      1739,
+      93937,
+      100369,
+      100647,
+      100751,
+      100647,
+      100751,
+      100669,
+      100369,
+      100669,
+      23,
+      18670,
+      20276,
+      94275,
+      24429,
+      12497,
+      65113,
+      3314,
+      94129,
+      15576,
+      93977,
+      100369,
+      100701,
+      100852,
+      100701,
+      100852,
+      100725,
+      100369,
+      100725,
+      23,
+      16963,
+      93963,
+      6751,
+      3719,
+      93938,
+      6471,
+      93919,
+      10,
+      93956,
+      5672,
+      93919,
+      5,
+      4,
+      3,
+      93937,
+      100369,
+      100764,
+      100875,
+      100764,
+      100875,
+      100786,
+      100369,
+      100786,
+      2
+     ],
+     "finish_reason": "stop",
+     "prompt_tokens": 2013,
+     "prompt_tps": 394.6724899646075,
+     "generation_tps": 226.29932771332108,
+     "elapsed_s": 6.011959499970544,
+     "markdown": "Quarterly Engineering Report<|LOC_73|><|LOC_51|><|LOC_543|><|LOC_51|><|LOC_543|><|LOC_79|><|LOC_73|><|LOC_79|>\nThe native OCR engine converts scanned pages into<|LOC_72|><|LOC_117|><|LOC_664|><|LOC_117|><|LOC_664|><|LOC_139|><|LOC_72|><|LOC_139|>\nMarkdown for language model workflows. It runs a<|LOC_72|><|LOC_154|><|LOC_639|><|LOC_154|><|LOC_639|><|LOC_174|><|LOC_72|><|LOC_174|>\nvision transformer and a compact decoder on MLX.<|LOC_72|><|LOC_189|><|LOC_646|><|LOC_189|><|LOC_646|><|LOC_209|><|LOC_72|><|LOC_209|>\nKey results<|LOC_72|><|LOC_243|><|LOC_224|><|LOC_243|><|LOC_224|><|LOC_266|><|LOC_72|><|LOC_266|>\n1. Latency is measured per page at 144 dpi.<|LOC_74|><|LOC_278|><|LOC_563|><|LOC_278|><|LOC_563|><|LOC_301|><|LOC_74|><|LOC_301|>\n2. Output text matches the reference decoder.<|LOC_72|><|LOC_314|><|LOC_586|><|LOC_314|><|LOC_586|><|LOC_334|><|LOC_72|><|LOC_334|>\n3. Weights load once per process.<|LOC_72|><|LOC_350|><|LOC_454|><|LOC_350|><|LOC_454|><|LOC_372|><|LOC_72|><|LOC_372|>\n文档解析将扫描页面转换为结构化文本。<|LOC_72|><|LOC_404|><|LOC_555|><|LOC_404|><|LOC_555|><|LOC_428|><|LOC_72|><|LOC_428|>\nContact: platform team, building 7， room 210.<|LOC_72|><|LOC_467|><|LOC_578|><|LOC_467|><|LOC_578|><|LOC_489|><|LOC_72|><|LOC_489|>",
+     "plain": "Quarterly Engineering Report\nThe native OCR engine converts scanned pages into\nMarkdown for language model workflows. It runs a\nvision transformer and a compact decoder on MLX.\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n文档解析将扫描页面转换为结构化文本。\nContact: platform team, building 7， room 210.",
+     "spots": [
+      {
+       "text": "Quarterly Engineering Report",
+       "quad": [
+        [
+         0.073,
+         0.051
+        ],
+        [
+         0.543,
+         0.051
+        ],
+        [
+         0.543,
+         0.079
+        ],
+        [
+         0.073,
+         0.079
+        ]
+       ]
+      },
+      {
+       "text": "The native OCR engine converts scanned pages into",
+       "quad": [
+        [
+         0.072,
+         0.117
+        ],
+        [
+         0.664,
+         0.117
+        ],
+        [
+         0.664,
+         0.139
+        ],
+        [
+         0.072,
+         0.139
+        ]
+       ]
+      },
+      {
+       "text": "Markdown for language model workflows. It runs a",
+       "quad": [
+        [
+         0.072,
+         0.154
+        ],
+        [
+         0.639,
+         0.154
+        ],
+        [
+         0.639,
+         0.174
+        ],
+        [
+         0.072,
+         0.174
+        ]
+       ]
+      },
+      {
+       "text": "vision transformer and a compact decoder on MLX.",
+       "quad": [
+        [
+         0.072,
+         0.189
+        ],
+        [
+         0.646,
+         0.189
+        ],
+        [
+         0.646,
+         0.209
+        ],
+        [
+         0.072,
+         0.209
+        ]
+       ]
+      },
+      {
+       "text": "Key results",
+       "quad": [
+        [
+         0.072,
+         0.243
+        ],
+        [
+         0.224,
+         0.243
+        ],
+        [
+         0.224,
+         0.266
+        ],
+        [
+         0.072,
+         0.266
+        ]
+       ]
+      },
+      {
+       "text": "1. Latency is measured per page at 144 dpi.",
+       "quad": [
+        [
+         0.074,
+         0.278
+        ],
+        [
+         0.563,
+         0.278
+        ],
+        [
+         0.563,
+         0.301
+        ],
+        [
+         0.074,
+         0.301
+        ]
+       ]
+      },
+      {
+       "text": "2. Output text matches the reference decoder.",
+       "quad": [
+        [
+         0.072,
+         0.314
+        ],
+        [
+         0.586,
+         0.314
+        ],
+        [
+         0.586,
+         0.334
+        ],
+        [
+         0.072,
+         0.334
+        ]
+       ]
+      },
+      {
+       "text": "3. Weights load once per process.",
+       "quad": [
+        [
+         0.072,
+         0.35
+        ],
+        [
+         0.454,
+         0.35
+        ],
+        [
+         0.454,
+         0.372
+        ],
+        [
+         0.072,
+         0.372
+        ]
+       ]
+      },
+      {
+       "text": "文档解析将扫描页面转换为结构化文本。",
+       "quad": [
+        [
+         0.072,
+         0.404
+        ],
+        [
+         0.555,
+         0.404
+        ],
+        [
+         0.555,
+         0.428
+        ],
+        [
+         0.072,
+         0.428
+        ]
+       ]
+      },
+      {
+       "text": "Contact: platform team, building 7， room 210.",
+       "quad": [
+        [
+         0.072,
+         0.467
+        ],
+        [
+         0.578,
+         0.467
+        ],
+        [
+         0.578,
+         0.489
+        ],
+        [
+         0.072,
+         0.489
+        ]
+       ]
+      }
+     ]
     }
    }
   }

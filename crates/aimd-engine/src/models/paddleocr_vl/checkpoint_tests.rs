@@ -5,7 +5,7 @@
 use aimd_mlx::{MlxArray, MlxDtype};
 
 use super::generate::greedy_stream;
-use super::pipeline::VlRequest;
+use super::pipeline::{VlRequest, VlTask};
 use super::preprocess::{OCR_TASK, build_prompt_text, image_token_count};
 use super::test_support::*;
 use crate::models::unlimited_ocr::mlx_weights::dense;
@@ -60,6 +60,14 @@ fn paddleocr_vl_prompt_ids_match_processor() {
         let ids = tok.encode(&build_prompt_text(OCR_TASK, n)).unwrap();
         assert_eq!(ids, u32s(&fx["prompt_ids"]), "{name} prompt ids");
     }
+    for (name, fx) in g["spotting"].as_object().unwrap() {
+        let grid = usizes(&fx["grid_thw"]);
+        let n = image_token_count([grid[0], grid[1], grid[2]], 2);
+        let ids = tok
+            .encode(&build_prompt_text(VlTask::Spotting.prompt(), n))
+            .unwrap();
+        assert_eq!(ids, u32s(&fx["prompt_ids"]), "{name} spotting prompt ids");
+    }
 }
 
 /// Vision stages (patch embed .. projector) vs mlx-vlm for bf16 and
@@ -75,7 +83,7 @@ fn paddleocr_vl_vision_stages_match_mlx_vlm() {
         let prec = prec_key(bits);
         for fx in ["small_text", "page_text"] {
             let (rgb, w, h) = fixture_image(fx);
-            let prompt = p.prepare(&rgb, w, h).unwrap();
+            let prompt = p.prepare(&rgb, w, h, VlTask::Ocr).unwrap();
             let pp = p.vision().config().patch_size;
             let pixels =
                 MlxArray::from_bf16(&[prompt.image.n_patches(), 3, pp, pp], &prompt.image.pixels)
@@ -128,7 +136,7 @@ fn paddleocr_vl_decoder_logprobs_match_mlx_vlm() {
         };
         let prec = prec_key(bits);
         let (rgb, w, h) = fixture_image("small_text");
-        let prompt = p.prepare(&rgb, w, h).unwrap();
+        let prompt = p.prepare(&rgb, w, h, VlTask::Ocr).unwrap();
         let v = &m[prec]["fixtures"]["small_text"]["vision"];
         let e = v["dumps"]
             .as_array()
@@ -342,6 +350,43 @@ fn paddleocr_vl_e2e_greedy_matches_mlx_vlm() {
                 "{prec} {fx} markdown"
             );
             assert_eq!(out.tokens, want.len());
+            assert!(out.spots.is_empty());
+
+            // `Spotting:` (README preprocessing): tokens, plain text and
+            // parsed quads equal the reference run.
+            let s = &m[prec]["fixtures"][fx]["spotting"];
+            let mut want = u32s(&s["tokens"]);
+            if want.last().is_some_and(|t| p.eos_ids().contains(t)) {
+                want.pop();
+            }
+            let req = VlRequest {
+                task: VlTask::Spotting,
+                ..VlRequest::default()
+            };
+            let t = std::time::Instant::now();
+            let (out, stats) = p.recognize_rgb8_with_stats(&rgb, w, h, req).unwrap();
+            eprintln!(
+                "{prec} {fx} spotting: prompt {} tok, gen {} tok, {} spots, {:.3} s \
+                 (vision {:.3} prefill {:.3} decode {:.3})",
+                stats.prompt_tokens,
+                out.tokens,
+                out.spots.len(),
+                t.elapsed().as_secs_f64(),
+                stats.vision.as_secs_f64(),
+                stats.prefill.as_secs_f64(),
+                stats.decode.as_secs_f64(),
+            );
+            assert_eq!(
+                stats.prompt_tokens as u64,
+                s["prompt_tokens"].as_u64().unwrap(),
+                "{prec} {fx} spotting prompt"
+            );
+            assert_eq!(out.tokens, want.len(), "{prec} {fx} spotting tokens");
+            let (stream, _) = p.generate_rgb8(&rgb, w, h, req, None).unwrap();
+            assert_eq!(stream.tokens, want, "{prec} {fx} spotting tokens");
+            assert_eq!(out.markdown, s["plain"].as_str().unwrap());
+            let reference = super::spotting::parse_spotting_output(s["markdown"].as_str().unwrap());
+            assert_eq!(out.spots, reference, "{prec} {fx} spots");
         }
     }
 }
