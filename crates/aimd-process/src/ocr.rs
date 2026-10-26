@@ -7,12 +7,13 @@ use std::path::{Path, PathBuf};
 use aimd_core::ext::{IMAGE_FILE_EXTENSIONS, suffix_lower};
 use aimd_core::remote::resolve_remote_backend_with;
 use aimd_core::{
-    AimdError, ProcessHooks, ProcessInput, RemoteBackendConfig, RemoteModality, Result, log_warn,
+    AimdError, ProcessHooks, ProcessInput, RemoteBackendConfig, RemoteModality, Result, Segment,
+    anchors, log_warn,
 };
 
 use crate::models::{OcrFamily, ensure_native_ocr, ocr_family, resolve_mlx_ocr_model};
 use crate::tempdir::TempDir;
-use crate::{LocalModality, OcrFailure, Runtime, remote};
+use crate::{LocalModality, LocatedOcr, OcrFailure, Runtime, remote};
 
 /// PyMuPDF `Matrix(2.0, 2.0)` = 2 x 72 DPI.
 pub const RENDER_DPI: u32 = 144;
@@ -25,11 +26,57 @@ pub struct OcrPage {
 }
 
 /// OCR output: the input stem and the assembled Markdown.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OcrOutput {
     pub title: String,
     pub pages: Vec<OcrPage>,
     pub markdown: String,
+    /// Located blocks/lines (or one page-level segment per page) when
+    /// `ProcessInput.anchors`.
+    pub segments: Option<Vec<Segment>>,
+}
+
+/// The whole page as a box.
+const FULL_PAGE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
+/// Anchored page Markdown and its segments (`page` is 1-based): layout
+/// blocks get one anchor each; otherwise the page gets a page-level
+/// anchor, and line positions (if any) are segments only.
+pub fn locate_page(page: usize, ocr: LocatedOcr) -> (String, Vec<Segment>) {
+    let at_page = |s: Segment| Segment {
+        page: Some(page),
+        ..s
+    };
+    let lines: Vec<Segment> = ocr
+        .lines
+        .unwrap_or_default()
+        .into_iter()
+        .map(at_page)
+        .collect();
+    match ocr.blocks.filter(|b| !b.is_empty()) {
+        Some(blocks) => {
+            let mut blocks: Vec<Segment> = blocks.into_iter().map(at_page).collect();
+            let text = anchors::located_markdown(&blocks);
+            blocks.extend(lines);
+            (text, blocks)
+        }
+        None => {
+            let text = ocr.markdown.trim().to_string();
+            let anchored = format!("{}\n{text}", anchors::loc_comment(page, FULL_PAGE, "page"));
+            let segments = if lines.is_empty() {
+                vec![Segment {
+                    text,
+                    kind: Some("page".into()),
+                    page: Some(page),
+                    bbox: Some(FULL_PAGE),
+                    ..Segment::default()
+                }]
+            } else {
+                lines
+            };
+            (anchored, segments)
+        }
+    }
 }
 
 enum Engine {
@@ -124,12 +171,23 @@ pub fn recognize_file(
     };
 
     let suffix = suffix_lower(path);
+    let spotting = request.include_segments;
+    let mut segments = request.anchors.then(Vec::new);
+    // Page text, anchored when requested (`page` is 1-based).
+    let mut place = |page: usize, ocr: LocatedOcr| match &mut segments {
+        Some(all) => {
+            let (text, located) = locate_page(page, ocr);
+            all.extend(located);
+            text
+        }
+        None => ocr.markdown,
+    };
     let pages = if IMAGE_FILE_EXTENSIONS.contains(&suffix.as_str()) {
-        let text = recognize_one(rt, &engine, path, false)?;
+        let ocr = recognize_one(rt, &engine, path, false, spotting)?;
         hooks.progress("ocr", Some(1), Some(1), Some("Processed OCR page 1 of 1"));
         vec![OcrPage {
             page_index: None,
-            text: text.trim().to_string(),
+            text: place(1, ocr).trim().to_string(),
         }]
     } else if suffix == ".pdf" {
         let rendered = render_pdf_pages(
@@ -145,7 +203,8 @@ pub fn recognize_file(
             if i > 0 && hooks.is_cancelled() {
                 return Err(AimdError::cancelled("OCR cancelled between pages"));
             }
-            let text = recognize_one(rt, &engine, image, true)?;
+            let ocr = recognize_one(rt, &engine, image, true, spotting)?;
+            let text = place(page_index + 1, ocr);
             hooks.progress(
                 "ocr",
                 Some(i as u64 + 1),
@@ -172,6 +231,7 @@ pub fn recognize_file(
         title: crate::file_stem(path),
         pages,
         markdown,
+        segments,
     })
 }
 
@@ -180,14 +240,18 @@ fn recognize_one(
     engine: &Engine,
     image: &Path,
     multi_page: bool,
-) -> Result<String> {
+    spotting: bool,
+) -> Result<LocatedOcr> {
     match engine {
-        Engine::Remote(config) => remote::recognize_image(config, image, multi_page),
+        Engine::Remote(config) => Ok(LocatedOcr {
+            markdown: remote::recognize_image(config, image, multi_page)?,
+            ..LocatedOcr::default()
+        }),
         Engine::Local(model_id) => {
             let model = rt.load_ocr(model_id)?;
             let family = ocr_family(model_id).name();
-            match model.recognize(image) {
-                Ok(text) if !text.trim().is_empty() => Ok(text),
+            match model.recognize_located(image, spotting) {
+                Ok(ocr) if !ocr.markdown.trim().is_empty() => Ok(ocr),
                 Ok(_) | Err(OcrFailure::Empty) => Err(AimdError::failed(format!(
                     "{family} produced empty content"
                 ))),

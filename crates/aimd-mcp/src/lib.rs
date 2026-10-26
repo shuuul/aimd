@@ -136,6 +136,7 @@ impl ProcessArgs {
             context,
             metadata_context,
             anchors,
+            include_segments,
             asr_base_url,
             asr_model,
             asr_api_key,

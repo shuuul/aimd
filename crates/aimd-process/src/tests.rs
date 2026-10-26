@@ -1379,6 +1379,41 @@ fn ocr_page_range_and_model_validation() {
             .message,
         "Unlimited-OCR inference failed: bad"
     );
+    // Located OCR: one anchor per layout block; lines are segments only.
+    let seg = |text: &str, kind: &str, bbox: [f32; 4]| aimd_core::Segment {
+        text: text.into(),
+        kind: Some(kind.into()),
+        bbox: Some(bbox),
+        ..aimd_core::Segment::default()
+    };
+    let (text, segments) = ocr::locate_page(
+        3,
+        crate::LocatedOcr {
+            markdown: "# T\n\nbody".into(),
+            blocks: Some(vec![
+                seg("# T", "title", [0.1, 0.1, 0.9, 0.2]),
+                seg("body", "text", [0.1, 0.3, 0.9, 0.8]),
+            ]),
+            lines: Some(vec![seg("body", "line", [0.1, 0.3, 0.9, 0.35])]),
+        },
+    );
+    assert_eq!(
+        text,
+        "<!-- aimd:loc page=3 bbox=0.100,0.100,0.900,0.200 kind=title -->\n# T\n\n\
+         <!-- aimd:loc page=3 bbox=0.100,0.300,0.900,0.800 kind=text -->\nbody"
+    );
+    assert_eq!(segments.len(), 3);
+    assert!(segments.iter().all(|s| s.page == Some(3)));
+    let (text, segments) = ocr::locate_page(
+        1,
+        crate::LocatedOcr {
+            markdown: "a b".into(),
+            blocks: None,
+            lines: Some(vec![seg("a", "line", [0.0, 0.0, 0.5, 0.1])]),
+        },
+    );
+    assert!(text.ends_with("kind=page -->\na b"));
+    assert_eq!(segments[0].kind.as_deref(), Some("line"));
     assert_eq!(
         ocr::pages_to_markdown(&[ocr::OcrPage {
             page_index: Some(0),

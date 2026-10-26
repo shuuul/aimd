@@ -93,6 +93,10 @@ pub struct ProcessInput {
     /// Source anchors in `markdown` (OCR position comments, `[hh:mm:ss]`
     /// transcript paragraphs) and forced alignment (default `true`).
     pub anchors: bool,
+    /// The caller returns `segments` (MCP `include_segments`, CLI
+    /// `--format json`): enables extra passes such as PaddleOCR-VL
+    /// `Spotting:` line positions (default `false`).
+    pub include_segments: bool,
 }
 
 impl Default for ProcessInput {
@@ -119,6 +123,7 @@ impl Default for ProcessInput {
             ocr_model: None,
             ocr_api_key: None,
             anchors: true,
+            include_segments: false,
         }
     }
 }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use aimd_core::ext::{DOCUMENT_ASSET_EXTENSIONS, suffix_lower};
 use aimd_core::url::path_to_file_uri;
 use aimd_core::{
-    AimdError, ProcessHooks, ProcessInput, ProcessResult, Result, SourceKind, TaskType,
+    AimdError, ProcessHooks, ProcessInput, ProcessResult, Result, Segment, SourceKind, TaskType,
     text_context_from_markdown,
 };
 
@@ -108,6 +108,33 @@ pub enum OcrFailure {
 pub trait OcrModel: Send + Sync {
     /// Recognize one image file; returns normalized Markdown.
     fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure>;
+
+    /// [`Self::recognize`] plus positions (spec 005). `spotting` asks for
+    /// extra line positions that cost another pass (PaddleOCR-VL
+    /// `Spotting:`). The default has none.
+    fn recognize_located(
+        &self,
+        image_path: &Path,
+        spotting: bool,
+    ) -> std::result::Result<LocatedOcr, OcrFailure> {
+        let _ = spotting;
+        self.recognize(image_path).map(|markdown| LocatedOcr {
+            markdown,
+            ..LocatedOcr::default()
+        })
+    }
+}
+
+/// OCR Markdown with positions; `bbox`/`quad` are normalized to the page
+/// image (0..1) and `page` is left unset.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocatedOcr {
+    pub markdown: String,
+    /// Layout blocks whose texts, joined by blank lines, are `markdown`;
+    /// each gets an anchor comment.
+    pub blocks: Option<Vec<Segment>>,
+    /// Text lines (segments only; the page gets a page-level anchor).
+    pub lines: Option<Vec<Segment>>,
 }
 
 /// Converted document (re-export of the doc crate output).
@@ -357,6 +384,7 @@ fn process_local_file(
         }
         TaskType::Ocr => {
             let out = ocr::recognize_file(rt, input_path, request, hooks)?;
+            segments = out.segments;
             (out.markdown, Some(out.title))
         }
         TaskType::Convert => {

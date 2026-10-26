@@ -246,10 +246,9 @@ fn ocr_default_output_lands_next_to_input() {
     let o = invoke(&[&png.to_string_lossy()], &Fake::default());
     assert_eq!(o.code, 0, "{:?}", o.logs);
     let expected = dir.join("scan_ocr.md");
-    assert_eq!(
-        std::fs::read_to_string(&expected).unwrap(),
-        "# Scanned Page\n\ntext"
-    );
+    let anchored =
+        "<!-- aimd:loc page=1 bbox=0.000,0.000,1.000,1.000 kind=page -->\n# Scanned Page\n\ntext";
+    assert_eq!(std::fs::read_to_string(&expected).unwrap(), anchored);
     assert_eq!(
         o.stdout,
         format!(
@@ -263,7 +262,7 @@ fn ocr_default_output_lands_next_to_input() {
     assert_eq!(o.code, 0, "{:?}", o.logs);
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("scan_ocr.json")).unwrap()).unwrap();
-    assert_eq!(json["markdown"], "# Scanned Page\n\ntext");
+    assert_eq!(json["markdown"], anchored);
     assert!(json["segments"].is_array());
     assert!(
         json["output_file"]
