@@ -1,0 +1,25 @@
+{
+ "checkpoint": "mlx-community/Qwen3-ForcedAligner-0.6B-8bit",
+ "reference": "mlx_audio.stt.models.qwen3_asr.qwen3_forced_aligner.ForcedAlignerModel",
+ "unit_splitting": "qwen-asr 0.0.6 Qwen3ForceAlignProcessor (Chinese via tokenize_space_lang, Korean LTokenizer with korean_dict_jieba.dict)",
+ "versions": {
+  "mlx": "0.32.4",
+  "mlx-audio": "0.6.1",
+  "numpy": "2.5.4",
+  "soynlp": "0.0.493",
+  "qwen-asr wheel sha256": "b9c55a38413298f3a990a4475467399daec6e8f4172363053fc42e2166c2dfd3"
+ },
+ "korean_dict_sha256": "902edae214a711f7153be5eb275c445c57e17d03371f2de7345360b40732338d",
+ "sha256": {
+  "cases/en01/audio.wav": "bbb13747162346e3ade7740f9f45e2f02bf7d1375924c1e71feee26d32a5ddcf",
+  "cases/en01/audio_features.f32": "f5d7e9afa8b045d2101d8a5bfd3cb08e75e10b28f155ef2704c8cd4ae27ef7e0",
+  "cases/en01/meta.json": "9b4e6db21afc052aa18b2d1f3ada2675af37b32557f6e414b230c45575e0575c",
+  "cases/en01/ts_logits.bf16": "e7eb430b2f4f2af534a51d24132fd3cdcc4d6fe75a90dfccc8f3105e73695d20",
+  "cases/zh08/audio.wav": "fbf524068918a0a873f98ec899e8b7dae09f50fd1b78c1ee0646954cd656e726",
+  "cases/zh08/audio_features.f32": "edebad1084d9ca88cbddb0c79cea79b8c814872a552475750c312ea4143935c4",
+  "cases/zh08/meta.json": "485a3ce70560911be3d77a45774cd86586b3fb58b0195fc764725fcf630d9518",
+  "cases/zh08/ts_logits.bf16": "a7119686d9b8372780d4e4a61678ab9a0cb041d09a72d485db356dd75b7df934",
+  "units.json": "4880860406ec0afa8372c106a6456b2d7d93fb005543187f6bf6d12e45b9b68e",
+  "fix_timestamp.json": "b15b9452dfe2f8b742841b5a8353c8269c5882daf05b6c5707a8367626520373"
+ }
+}

@@ -83,7 +83,7 @@ use crate::models::qwen3_asr::config::{
 };
 use crate::models::qwen3_asr::generate::{
     FinishReason, GenerationOutcome, GenerationSettings, TokenStream, detect_repetition_loop,
-    parse_qwen_output, resolve_eos_ids,
+    parse_qwen_language, parse_qwen_output, resolve_eos_ids,
 };
 use crate::models::qwen3_asr::layout::frames_to_audio_pads;
 use crate::tokenizer::{Tokenizer, TokenizerError, build_asr_prompt, resolve_language};
@@ -161,7 +161,7 @@ struct MlxTowerLayer {
 
 /// The audio tower: conv front-end + 24 windowed encoder layers + head,
 /// all on MLX.
-struct MlxTower {
+pub(crate) struct MlxTower {
     cfg: AudioTowerConfig,
     conv2d1_w: MlxArray,
     conv2d1_b: MlxArray,
@@ -186,7 +186,10 @@ struct MlxTower {
 }
 
 impl MlxTower {
-    fn from_store(cfg: &AudioTowerConfig, store: &WeightStore) -> Result<Self, PipelineError> {
+    pub(crate) fn from_store(
+        cfg: &AudioTowerConfig,
+        store: &WeightStore,
+    ) -> Result<Self, PipelineError> {
         if cfg.activation_function != "gelu" {
             return Err(PipelineError::ConfigMismatch(format!(
                 "activation_function {:?}, only exact-erf \"gelu\" is implemented",
@@ -301,7 +304,11 @@ impl MlxTower {
     /// Runs the tower over a frequency-major mel (`[n_mels, frames]`,
     /// exactly the layout `mel_spectrogram` emits) and returns the
     /// row-major `[pads, output_dim]` f32 features plus the pad count.
-    fn forward(&self, mel_fm: &[f32], frames: usize) -> Result<(Vec<f32>, usize), PipelineError> {
+    pub(crate) fn forward(
+        &self,
+        mel_fm: &[f32],
+        frames: usize,
+    ) -> Result<(Vec<f32>, usize), PipelineError> {
         let cfg = &self.cfg;
         let n_mels = cfg.num_mel_bins;
         let d = cfg.d_model;
@@ -455,7 +462,7 @@ impl MlxTower {
 
 /// One affine-quantized module: the packed u32 payload plus bf16 (or f16)
 /// scales/biases, fed DIRECTLY to `quantized_matmul` (no eager dequant).
-struct MlxQuantWeights {
+pub(crate) struct MlxQuantWeights {
     w: MlxArray,
     scales: MlxArray,
     biases: MlxArray,
@@ -467,7 +474,7 @@ impl MlxQuantWeights {
     /// Assembles the module's `{base}.weight` / `.scales` / `.biases` triple
     /// from the checkpoint store. Logical shape `[out, in]`; payload
     /// `[out, in*bits/32]` u32; scales/biases `[out, in/group_size]`.
-    fn from_store(store: &WeightStore, module: &str) -> Result<Self, PipelineError> {
+    pub(crate) fn from_store(store: &WeightStore, module: &str) -> Result<Self, PipelineError> {
         let quant = store.quantized_tensor(module)?;
         let cols = *quant
             .shape
@@ -498,7 +505,7 @@ impl MlxQuantWeights {
     }
 
     /// `x @ deq(w).T` with `x` rank-2 `[rows, in]` -> `[rows, out]`.
-    fn matmul(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+    pub(crate) fn matmul(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
         x.quantized_matmul(
             &self.w,
             &self.scales,
@@ -531,25 +538,29 @@ struct MlxDecoderLayer {
 #[derive(Clone, Copy)]
 enum Pass {
     Prefill,
-    Step { position: u32 },
+    Step {
+        position: u32,
+    },
+    /// Full causal forward without a KV cache (the aligner's single pass).
+    Full,
 }
 
 impl Pass {
     fn seq_len(self, x: &MlxArray) -> Result<usize, MlxError> {
         match self {
-            Pass::Prefill => x.dim(1),
+            Pass::Prefill | Pass::Full => x.dim(1),
             Pass::Step { .. } => Ok(1),
         }
     }
     fn rope_offset(self) -> i32 {
         match self {
-            Pass::Prefill => 0,
+            Pass::Prefill | Pass::Full => 0,
             Pass::Step { position } => position as i32,
         }
     }
     fn mask<'a>(self) -> SdpaMask<'a> {
         match self {
-            Pass::Prefill => SdpaMask::Causal,
+            Pass::Prefill | Pass::Full => SdpaMask::Causal,
             Pass::Step { .. } => SdpaMask::None,
         }
     }
@@ -557,8 +568,8 @@ impl Pass {
 
 /// Qwen3 dense text decoder over MLX quantized weights. Immutable after
 /// load; the KV caches are caller-owned [`KvCache`]s (one per layer).
-struct MlxDecoder {
-    cfg: TextDecoderConfig,
+pub(crate) struct MlxDecoder {
+    pub(crate) cfg: TextDecoderConfig,
     embed: MlxQuantWeights,
     layers: Vec<MlxDecoderLayer>,
     final_norm: MlxArray,
@@ -575,6 +586,16 @@ impl MlxDecoder {
                     .to_string(),
             ));
         }
+        Self::from_store_body(cfg, store)
+    }
+
+    /// The decoder body (embeddings, layers, final norm) without the tied
+    /// head check: callers with their own `lm_head` (the forced aligner's
+    /// time classifier) load it separately and never call [`Self::logits`].
+    pub(crate) fn from_store_body(
+        cfg: &TextDecoderConfig,
+        store: &WeightStore,
+    ) -> Result<Self, PipelineError> {
         let hidden = cfg.hidden_size;
         let head_dim = cfg.head_dim;
 
@@ -669,6 +690,69 @@ impl MlxDecoder {
         Ok(x.rms_norm(Some(&self.final_norm), self.cfg.rms_norm_eps)?)
     }
 
+    /// Cache-free causal forward over `[seq, hidden]` bf16 embeds (mlx-audio
+    /// `TextModel(inputs_embeds, cache=None)`); returns the final-normed
+    /// hidden states `[1, seq, hidden]` bf16.
+    pub(crate) fn forward_full(&self, embeds: MlxArray) -> Result<MlxArray, PipelineError> {
+        let hidden = self.cfg.hidden_size;
+        if embeds.ndim()? != 2 || embeds.dim(1)? != hidden {
+            return Err(PipelineError::Layout(format!(
+                "forward embeds must be rank-2 [seq, {hidden}]"
+            )));
+        }
+        let seq = embeds.dim(0)?;
+        let mut x = embeds.reshape(&[1, seq, hidden])?;
+        for (i, lw) in self.layers.iter().enumerate() {
+            x = self.layer_forward(i, lw, x, &mut [], Pass::Full)?;
+        }
+        Ok(x.rms_norm(Some(&self.final_norm), self.cfg.rms_norm_eps)?)
+    }
+
+    /// Prompt embeddings with the audio features merged in
+    /// (`_build_inputs_embeds`): every `audio_token_id` position takes the
+    /// next feature row (cast f32 -> bf16, round-to-nearest-even) while
+    /// features remain; surplus pads keep their embedding. The merge runs on
+    /// the host over a readback of the dequantized prompt rows. Returns
+    /// `[prompt_ids.len(), hidden]` bf16.
+    pub(crate) fn merged_prompt_embeds(
+        &self,
+        prompt_ids: &[u32],
+        features: &[f32],
+        audio_token_id: u32,
+        output_dim: usize,
+    ) -> Result<MlxArray, PipelineError> {
+        if prompt_ids.is_empty() {
+            return Err(PipelineError::EmptyPrompt);
+        }
+        let hidden = self.cfg.hidden_size;
+        if output_dim != hidden {
+            return Err(PipelineError::Layout(format!(
+                "tower output_dim {output_dim} != decoder hidden_size {hidden}"
+            )));
+        }
+        if !features.len().is_multiple_of(output_dim) {
+            return Err(PipelineError::Layout(
+                "tower features are not a multiple of output_dim".to_string(),
+            ));
+        }
+        let n_audio = features.len() / output_dim;
+        let feature_rows: Vec<bf16> = features.iter().map(|&v| bf16::from_f32(v)).collect();
+        let dequantized = self.embed_rows(prompt_ids)?.to_bf16_vec()?;
+        let mut merged: Vec<bf16> = Vec::with_capacity(prompt_ids.len() * hidden);
+        let mut audio_idx = 0usize;
+        for (row, &id) in prompt_ids.iter().enumerate() {
+            if id == audio_token_id && audio_idx < n_audio {
+                merged.extend_from_slice(
+                    &feature_rows[audio_idx * output_dim..(audio_idx + 1) * output_dim],
+                );
+                audio_idx += 1;
+            } else {
+                merged.extend_from_slice(&dequantized[row * hidden..(row + 1) * hidden]);
+            }
+        }
+        Ok(MlxArray::from_bf16(&[prompt_ids.len(), hidden], &merged)?)
+    }
+
     /// Single-token forward at absolute `position`; `embed` is
     /// `[1, hidden]` bf16. Returns the final-normed hidden row
     /// `[1, 1, hidden]` bf16.
@@ -726,7 +810,10 @@ impl MlxDecoder {
         let offset = pass.rope_offset();
         let q = q.rope(head_dim, cfg.rope_theta, 1.0, offset)?;
         let k = k.rope(head_dim, cfg.rope_theta, 1.0, offset)?;
-        let (k_cached, v_cached) = cache[index].update_and_fetch(&k, &v)?;
+        let (k_cached, v_cached) = match pass {
+            Pass::Full => (k, v),
+            _ => cache[index].update_and_fetch(&k, &v)?,
+        };
         let attn = if self.sdpa_decode && seq == 1 {
             q.sdpa_decode(&k_cached, &v_cached, scale)?
         } else {
@@ -814,12 +901,23 @@ impl Qwen3AsrPipeline {
         wav_path: &Path,
         request: TranscriptionRequest<'_>,
     ) -> Result<String, PipelineError> {
+        Ok(self.transcribe_detailed(wav_path, request)?.text)
+    }
+
+    /// Transcribe one 16 kHz mono wav file and report the language: the
+    /// forced one (canonical name) when the request sets it, otherwise the
+    /// one the model emitted before `<asr_text>` ([`parse_qwen_language`]).
+    pub fn transcribe_detailed(
+        &self,
+        wav_path: &Path,
+        request: TranscriptionRequest<'_>,
+    ) -> Result<Transcription, PipelineError> {
         let language = match request.language {
             None => None,
             Some(input) => Some(resolved_language(input)?),
         };
         let outcome = self.generate(wav_path, language.as_deref(), request.context)?;
-        finish_transcription(outcome)
+        finish_detailed(outcome, language)
     }
 
     /// Mel -> tower -> prompt -> greedy generation outcome.
@@ -866,42 +964,13 @@ impl Qwen3AsrPipeline {
         eos_ids: Option<&BTreeSet<u32>>,
         settings: GenerationSettings,
     ) -> Result<TokenStream, PipelineError> {
-        if prompt_ids.is_empty() {
-            return Err(PipelineError::EmptyPrompt);
-        }
         let hidden = self.decoder.cfg.hidden_size;
-        let n_audio = features.len() / self.output_dim;
-        if !features.len().is_multiple_of(self.output_dim) {
-            return Err(PipelineError::Layout(
-                "tower features are not a multiple of output_dim".to_string(),
-            ));
-        }
-
-        // Audio features cast f32 -> bf16, exactly `audio_features
-        // .astype(inputs_embeds.dtype)` (round-to-nearest-even on both
-        // sides).
-        let feature_rows: Vec<bf16> = features.iter().map(|&v| bf16::from_f32(v)).collect();
-
-        // Prompt embedding rows (dequantized on device), merged with the
-        // feature rows on the host: every `<|audio_pad|>` position takes the
-        // next feature row while features remain; surplus pads keep their
-        // embedding (`_build_inputs_embeds`).
-        let embed_rows = self.decoder.embed_rows(prompt_ids)?;
-        let dequantized = embed_rows.to_bf16_vec()?;
-        let mut merged: Vec<bf16> = Vec::with_capacity(prompt_ids.len() * hidden);
-        let mut audio_idx = 0usize;
-        for (row, &id) in prompt_ids.iter().enumerate() {
-            if id == self.audio_token_id && audio_idx < n_audio {
-                merged.extend_from_slice(
-                    &feature_rows[audio_idx * self.output_dim..(audio_idx + 1) * self.output_dim],
-                );
-                audio_idx += 1;
-            } else {
-                let src = row * hidden..(row + 1) * hidden;
-                merged.extend_from_slice(&dequantized[src]);
-            }
-        }
-        let embeds = MlxArray::from_bf16(&[prompt_ids.len(), hidden], &merged)?;
+        let embeds = self.decoder.merged_prompt_embeds(
+            prompt_ids,
+            features,
+            self.audio_token_id,
+            self.output_dim,
+        )?;
 
         // Prefill + first-token argmax at the last prompt position.
         let mut cache: Vec<KvCache> = (0..self.decoder.cfg.num_hidden_layers)
@@ -957,6 +1026,27 @@ impl Qwen3AsrPipeline {
     }
 }
 
+/// A transcription plus the language it was decoded in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transcription {
+    pub text: String,
+    /// Canonical language name (`"Chinese"`): the forced language, or the
+    /// one the model reported; `None` when the model reported none
+    /// (`language None`, or no `<asr_text>` tag).
+    pub language: Option<String>,
+}
+
+/// [`finish_transcription`] plus the language: `forced` wins, otherwise the
+/// model-reported one.
+fn finish_detailed(
+    outcome: GenerationOutcome,
+    forced: Option<String>,
+) -> Result<Transcription, PipelineError> {
+    let language = forced.or_else(|| parse_qwen_language(&outcome.text));
+    let text = finish_transcription(outcome)?;
+    Ok(Transcription { text, language })
+}
+
 /// Turn a generation outcome into final transcription text.
 fn finish_transcription(outcome: GenerationOutcome) -> Result<String, PipelineError> {
     let text = parse_qwen_output(&outcome.text).trim().to_string();
@@ -981,20 +1071,31 @@ pub fn transcribe_with_retry(
     wav_path: &Path,
     request: TranscriptionRequest<'_>,
 ) -> Result<String, PipelineError> {
+    Ok(transcribe_detailed_with_retry(primary, retry, wav_path, request)?.text)
+}
+
+/// [`transcribe_with_retry`] returning the [`Transcription`] (text +
+/// language) of whichever pass is kept.
+pub fn transcribe_detailed_with_retry(
+    primary: &Qwen3AsrPipeline,
+    retry: Option<&Qwen3AsrPipeline>,
+    wav_path: &Path,
+    request: TranscriptionRequest<'_>,
+) -> Result<Transcription, PipelineError> {
     let language = match request.language {
         None => None,
         Some(input) => Some(resolved_language(input)?),
     };
     let outcome = primary.generate(wav_path, language.as_deref(), request.context)?;
     if !should_retry(&outcome) {
-        return finish_transcription(outcome);
+        return finish_detailed(outcome, language);
     }
     match retry {
-        Some(p8) => match p8.transcribe(wav_path, request) {
-            Ok(text) => Ok(text),
-            Err(_) => finish_transcription(outcome),
+        Some(p8) => match p8.transcribe_detailed(wav_path, request) {
+            Ok(transcription) => Ok(transcription),
+            Err(_) => finish_detailed(outcome, language),
         },
-        None => finish_transcription(outcome),
+        None => finish_detailed(outcome, language),
     }
 }
 

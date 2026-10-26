@@ -228,10 +228,69 @@ pub fn parse_qwen_output(output: &str) -> String {
     text.to_string()
 }
 
+/// Extracts the language the model reported before `<asr_text>`.
+///
+/// Port of the metadata half of `qwen_asr.inference.utils.parse_asr_output`
+/// (qwen-asr 0.0.6): no `<asr_text>` tag -> `None`; `language None` in the
+/// metadata (empty audio) -> `None`; otherwise the first metadata line
+/// starting with `language ` (case-insensitive) gives the value,
+/// normalized like `normalize_language_name` (first character upper, rest
+/// lower), then mapped to its [`crate::tokenizer::ASR_LANGUAGES`] canonical
+/// name when it is one.
+pub fn parse_qwen_language(output: &str) -> Option<String> {
+    const MARKER: &str = "<asr_text>";
+    const PREFIX: &str = "language ";
+    let (meta, _) = output.trim().split_once(MARKER)?;
+    if meta.to_lowercase().contains("language none") {
+        return None;
+    }
+    let line = meta.lines().map(str::trim).find(|l| {
+        l.get(..PREFIX.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(PREFIX))
+    })?;
+    let value = line[PREFIX.len()..].trim();
+    let mut chars = value.chars();
+    let first = chars.next()?;
+    let normalized: String = first
+        .to_uppercase()
+        .chain(chars.as_str().to_lowercase().chars())
+        .collect();
+    Some(crate::tokenizer::resolve_language(&normalized).unwrap_or(normalized))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn generate_parse_qwen_language_matches_python_cases() {
+        assert_eq!(
+            parse_qwen_language("language Chinese<asr_text>你好").as_deref(),
+            Some("Chinese")
+        );
+        assert_eq!(
+            parse_qwen_language("  LANGUAGE english\n<asr_text>hi").as_deref(),
+            Some("English")
+        );
+        assert_eq!(
+            parse_qwen_language("\nlanguage cantonese\nextra<asr_text>x").as_deref(),
+            Some("Cantonese")
+        );
+        // Not a known language: normalized name passes through.
+        assert_eq!(
+            parse_qwen_language("language klingon<asr_text>x").as_deref(),
+            Some("Klingon")
+        );
+        assert_eq!(parse_qwen_language("language None<asr_text>"), None);
+        assert_eq!(parse_qwen_language("plain text"), None);
+        assert_eq!(
+            parse_qwen_language("junk\nlanguage English<asr_text>x").as_deref(),
+            Some("English")
+        );
+        assert_eq!(parse_qwen_language("language <asr_text>x"), None);
+        assert_eq!(parse_qwen_language("<asr_text>x"), None);
+    }
 
     const ASR_HF_REPO: &str = "models--Qwen--Qwen3-ASR-1.7B-hf";
 
