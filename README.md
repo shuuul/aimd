@@ -26,7 +26,8 @@ Apple Silicon through MLX (Metal), with no Python runtime.
   yt-dlp sites). Subtitles are used first; without them, aimd downloads the
   audio and transcribes it locally.
 - **Local ASR** with Qwen3-ASR (1.7B or 0.6B) on MLX.
-- **Local OCR** with Unlimited-OCR on MLX, for images and scanned PDFs.
+- **Local OCR** on MLX for images and scanned PDFs: Unlimited-OCR (default),
+  PaddleOCR-VL-1.6, or the fast PP-OCRv6 line detector + recognizer.
 - **Document conversion** through Pandoc. EPUB keeps spine order and extracts
   chapters and images. Text-layer PDFs are converted by
   [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
@@ -250,6 +251,8 @@ aimd page.png
 aimd scan.pdf                      # OCR when the PDF has no usable text layer
 aimd scan.pdf --task ocr           # force OCR
 aimd scan.pdf --precision 8bit     # Unlimited-OCR 8-bit checkpoint
+aimd scan.pdf --model paddleocr-vl  # PaddleOCR-VL-1.6
+aimd photo.jpg --model pp-ocrv6    # PP-OCRv6: fast plain text lines
 aimd scan.pdf --start 0 --end 2    # 0-based inclusive page range
 ```
 
@@ -260,6 +263,20 @@ and runs OCR one page at a time. Unlimited-OCR uses single-image gundam mode
 (`document parsing.` prompt), a sliding-window no-repeat n-gram guard
 (n=35, window 128), and at most 8192 tokens per page.
 
+Which OCR model to use:
+
+- `unlimited-ocr` (default): full document parsing to Markdown, including
+  tables and formulas.
+- `paddleocr-vl`: PaddleOCR-VL-1.6 (0.9B) with its full-page `OCR:` prompt.
+  A smaller model that still produces layout-aware Markdown.
+- `pp-ocrv6`: PP-OCRv6 medium text detection + recognition. Well under a
+  second per page, multilingual, but it outputs plain text lines in reading
+  order with no tables or formatting. Good for photos, screenshots, and
+  signs. JPEG decoding differs slightly from PIL, so scores and boxes can
+  move a little against Python PaddleOCR; PNG and rendered PDF pages match.
+
+OCR is multilingual and ignores `--language`.
+
 ## Models and precision
 
 The model (`--model`) and the precision (`--precision`) are separate options.
@@ -268,16 +285,22 @@ The model (`--model`) and the precision (`--precision`) are separate options.
 |------|-----------|------------|--------------------|
 | Transcription | `qwen3-asr-1.7b` (default), `qwen3-asr-0.6b` | `4bit` (default), `6bit`, `8bit` | `mlx-community/Qwen3-ASR-1.7B-4bit` |
 | OCR | `unlimited-ocr` (default) | `4bit` (default), `6bit`, `8bit` | `mlx-community/Unlimited-OCR-4bit` |
+| OCR | `paddleocr-vl` | `bf16` (default), `4bit`, `6bit`, `8bit` | `PaddlePaddle/PaddleOCR-VL-1.6` |
+| OCR | `pp-ocrv6` | none (ignored with a warning) | `PaddlePaddle/PP-OCRv6_medium_{det,rec}_safetensors` |
 
 ```bash
 aimd audio.wav --model qwen3-asr-1.7b --precision 4bit
 aimd scan.pdf --model unlimited-ocr --precision 8bit
+aimd scan.pdf --model paddleocr-vl --precision 4bit
 ```
 
 Explicit `mlx-community/Qwen3-ASR-*` and `mlx-community/Unlimited-OCR-*`
 checkpoint IDs are also accepted. If a checkpoint ID already contains a
 precision, a different `--precision` is an error. Other models are rejected.
-bf16 (dense) checkpoints are not supported by the native engine yet.
+bf16 (dense) Qwen3-ASR and Unlimited-OCR checkpoints are not supported by the
+native engine yet. PaddleOCR-VL always downloads the official bf16 checkpoint;
+`4bit`/`6bit`/`8bit` quantize it at load time (4-bit is bit-identical to
+`mlx-community/PaddleOCR-VL-1.6-4bit`).
 
 Local inference needs the MLX GPU (Metal) device. With `AIMD_MLX_DEVICE=cpu`,
 or on a machine without a Metal GPU, local ASR/OCR fails early. Use a remote

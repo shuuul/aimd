@@ -10,6 +10,7 @@ use aimd_core::{AimdError, Result, log_info};
 use aimd_engine::models::paddleocr_vl::pipeline::{
     PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest,
 };
+use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpPipelineError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_asr::pipeline::{
     PipelineError as AsrPipelineError, Qwen3AsrPipeline, TranscriptionRequest,
 };
@@ -115,9 +116,23 @@ impl Runtime for NativeRuntime {
                 Arc::new(NativeOcr::PaddleVl(pipeline))
             }
             OcrFamily::PpOcrV6 => {
-                return Err(load_err(
-                    "PP-OCRv6 is not built into this binary".to_string(),
-                ));
+                let det =
+                    crate::hf::resolve_checkpoint(&format!("{model_id}_det_safetensors"), &|k| {
+                        self.env(k)
+                    })?;
+                let rec =
+                    crate::hf::resolve_checkpoint(&format!("{model_id}_rec_safetensors"), &|k| {
+                        self.env(k)
+                    })?;
+                log_info!(
+                    "Loading {} checkpoints {model_id} from {} and {}",
+                    family.name(),
+                    det.display(),
+                    rec.display()
+                );
+                let pipeline =
+                    PpOcrV6Pipeline::load(&det, &rec).map_err(|e| load_err(e.to_string()))?;
+                Arc::new(NativeOcr::PpOcr(pipeline))
             }
         };
         cache.insert(model_id.to_string(), model.clone());
@@ -149,6 +164,7 @@ impl AsrModel for NativeAsr {
 enum NativeOcr {
     Unlimited(UnlimitedOcrPipeline),
     PaddleVl(PaddleOcrVlPipeline),
+    PpOcr(PpOcrV6Pipeline),
 }
 
 impl OcrModel for NativeOcr {
@@ -162,6 +178,11 @@ impl OcrModel for NativeOcr {
             Self::PaddleVl(p) => match p.recognize_path(image_path, VlRequest::default()) {
                 Ok(result) => Ok(result.markdown),
                 Err(VlPipelineError::EmptyContent) => Err(OcrFailure::Empty),
+                Err(e) => Err(OcrFailure::Other(e.to_string())),
+            },
+            Self::PpOcr(p) => match p.recognize_path(image_path) {
+                Ok(result) => Ok(result.markdown),
+                Err(PpPipelineError::EmptyContent) => Err(OcrFailure::Empty),
                 Err(e) => Err(OcrFailure::Other(e.to_string())),
             },
         }
