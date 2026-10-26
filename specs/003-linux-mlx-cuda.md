@@ -67,6 +67,7 @@ Not in scope:
 | Date | Decision | Rationale | Affected workstreams |
 | --- | --- | --- | --- |
 | 2026-10-26 | Spec opened as Draft from spec 002 WS-09; the mlx-cuda formula strategy and the CI runner host are open decisions | Spec 002 closed on macOS; Linux work needs its own contract | WS-01 |
+| 2026-10-26 | The vision stage/final-feature parity tests keep their Metal bounds and enforce them only when `metal_kernels_available()`; other GPU backends print the drift without failing, and the corpus gate covers their accuracy | The tower amplifies any rounding change past the bounds (f32 attention on Metal fails the same way), so the bounds test Metal rounding, not accuracy; CUDA corpus output is identical | WS-01 |
 | 2026-10-26 | CI only packages (`release.yml`); `ci.yml` and its test jobs are removed, and no self-hosted runner is added. Tests (hermetic, checkpoint, corpus gate) run locally on the Mac and metacube | A self-hosted GPU runner is too much upkeep for this project; the GPU tiers need local weights anyway | WS-01 |
 | 2026-10-26 | The WS-08 custom kernels gate on `aimd_mlx::metal_kernels_available()` (GPU device and `metal::is_available()`), not `!device_is_cpu()`; CUDA runs plain mlx ops | `device_is_cpu` is false on CUDA, so the old gate dispatched Metal kernels there | WS-01 |
 
@@ -137,10 +138,9 @@ Append entries rather than rewriting another worker's record.
     absolute install name. Dev runs need `LD_LIBRARY_PATH`; the tap
     formula should place `libmlx.so` in the brew lib dir.
   - mlx's CUDA JIT needs `CUDA_HOME` at runtime (formula env / wrapper).
-- Remaining: vision-bound decision, tap mlx-cuda formula, Linux bottle,
-  dspark (aarch64).
+- Remaining: tap mlx-cuda formula, Linux bottle, dspark (aarch64).
 - Blockers: none.
-- Next action: decide the vision parity bounds, then the formula.
+- Next action: the tap mlx-cuda formula.
 
 ### 2026-10-26 — shuuul/vision parity investigation — WS-01
 
@@ -164,6 +164,17 @@ Append entries rather than rewriting another worker's record.
   backends (backend-specific bounds, or rely on the corpus gate there).
 - Blockers: none.
 - Next action: record that decision, then the formula.
+
+
+### 2026-10-26 — shuuul/vision bounds — WS-01
+
+- Changed: `mlx_vision.rs` tests enforce the vision parity bounds only on
+  Metal (`assert_vision_parity`); non-Metal backends print the drift.
+- Evidence: `cargo test -p aimd-engine --lib vision_` passes on the Mac
+  (Metal, enforced) and on metacube (CUDA, drift reported, 5 passed).
+- Remaining: tap mlx-cuda formula, Linux bottle, dspark (aarch64).
+- Blockers: none.
+- Next action: the tap mlx-cuda formula.
 
 ## Completion summary
 
