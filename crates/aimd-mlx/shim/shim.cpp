@@ -1709,4 +1709,185 @@ AimdMlxArray* mlx_sdpa_decode(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Ops for the PP-OCRv6 conv nets and the PaddleOCR-VL graph (spec 004).
+// ---------------------------------------------------------------------------
+
+/// `conv2d` with dilation and groups (depthwise when groups == channels).
+/// mlx: `conv2d(input, weight, stride, padding, dilation, groups)`; weight
+/// `[O, KH, KW, C / groups]`.
+AimdMlxArray* mlx_conv2d_ex(
+    AimdMlxArray* input,
+    AimdMlxArray* weight,
+    int32_t stride_h,
+    int32_t stride_w,
+    int32_t pad_h,
+    int32_t pad_w,
+    int32_t dil_h,
+    int32_t dil_w,
+    int32_t groups) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({input, weight});
+    return wrap(mlx::core::conv2d(
+        as_array(input),
+        as_array(weight),
+        {static_cast<int>(stride_h), static_cast<int>(stride_w)},
+        {static_cast<int>(pad_h), static_cast<int>(pad_w)},
+        {static_cast<int>(dil_h), static_cast<int>(dil_w)},
+        static_cast<int>(groups)));
+  });
+}
+
+/// Transposed 2-D convolution over NHWC; weight `[O, KH, KW, C / groups]`.
+AimdMlxArray* mlx_conv_transpose2d(
+    AimdMlxArray* input,
+    AimdMlxArray* weight,
+    int32_t stride_h,
+    int32_t stride_w,
+    int32_t pad_h,
+    int32_t pad_w,
+    int32_t groups) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({input, weight});
+    return wrap(mlx::core::conv_transpose2d(
+        as_array(input),
+        as_array(weight),
+        {static_cast<int>(stride_h), static_cast<int>(stride_w)},
+        {static_cast<int>(pad_h), static_cast<int>(pad_w)},
+        {1, 1},
+        {0, 0},
+        static_cast<int>(groups)));
+  });
+}
+
+/// Element-wise unary op by code (see `aimd_mlx::UnaryOp`).
+AimdMlxArray* mlx_unary(AimdMlxArray* a, int32_t op) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    const array& x = as_array(a);
+    switch (op) {
+      case 0: return wrap(mlx::core::sigmoid(x));
+      case 1: return wrap(mlx::core::tanh(x));
+      case 2: return wrap(mlx::core::exp(x));
+      case 3: return wrap(mlx::core::sin(x));
+      case 4: return wrap(mlx::core::cos(x));
+      case 5: return wrap(mlx::core::negative(x));
+      case 6: return wrap(mlx::core::abs(x));
+      case 7: return wrap(mlx::core::log(x));
+      case 8: return wrap(mlx::core::rsqrt(x));
+      case 9: return wrap(mlx::core::erf(x));
+      case 10: return wrap(mlx::core::square(x));
+      case 11: return wrap(mlx::core::maximum(x, array(0, x.dtype())));
+      default: throw std::invalid_argument("[aimd_mlx] unknown unary op");
+    }
+  });
+}
+
+/// Element-wise binary op by code (see `aimd_mlx::BinaryOp`); comparisons
+/// return `bool` arrays (only useful as `where` conditions).
+AimdMlxArray* mlx_binary(AimdMlxArray* a, AimdMlxArray* b, int32_t op) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a, b});
+    const array& x = as_array(a);
+    const array& y = as_array(b);
+    switch (op) {
+      case 0: return wrap(mlx::core::maximum(x, y));
+      case 1: return wrap(mlx::core::minimum(x, y));
+      case 2: return wrap(mlx::core::greater(x, y));
+      case 3: return wrap(mlx::core::less(x, y));
+      case 4: return wrap(mlx::core::equal(x, y));
+      default: throw std::invalid_argument("[aimd_mlx] unknown binary op");
+    }
+  });
+}
+
+/// Reduction over `axes` by code (see `aimd_mlx::ReduceOp`).
+AimdMlxArray* mlx_reduce(
+    AimdMlxArray* a,
+    const int32_t* axes,
+    int32_t n_axes,
+    int32_t keepdims,
+    int32_t op) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    std::vector<int> ax(axes, axes + n_axes);
+    const array& x = as_array(a);
+    const bool keep = keepdims != 0;
+    switch (op) {
+      case 0: return wrap(mlx::core::mean(x, ax, keep));
+      case 1: return wrap(mlx::core::max(x, ax, keep));
+      case 2: return wrap(mlx::core::min(x, ax, keep));
+      case 3: return wrap(mlx::core::sum(x, ax, keep));
+      default: throw std::invalid_argument("[aimd_mlx] unknown reduce op");
+    }
+  });
+}
+
+/// `where(cond, x, y)`.
+AimdMlxArray* mlx_where(AimdMlxArray* cond, AimdMlxArray* x, AimdMlxArray* y) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({cond, x, y});
+    return wrap(mlx::core::where(as_array(cond), as_array(x), as_array(y)));
+  });
+}
+
+/// `clip(a, lo, hi)` with scalar bounds in the input dtype.
+AimdMlxArray* mlx_clip(AimdMlxArray* a, float lo, float hi) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({a});
+    const array& x = as_array(a);
+    return wrap(mlx::core::clip(x, array(lo, x.dtype()), array(hi, x.dtype())));
+  });
+}
+
+std::vector<array> gelu_tanh_impl(const std::vector<array>& inputs) {
+  // mlx.nn.gelu_approx: 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
+  const array& x = inputs[0];
+  const Dtype t = x.dtype();
+  array inner = mlx::core::multiply(
+      array(std::sqrt(2.0 / M_PI), t),
+      mlx::core::add(
+          x,
+          mlx::core::multiply(array(0.044715, t), mlx::core::power(x, array(3, t)))));
+  return {mlx::core::multiply(
+      mlx::core::multiply(array(0.5, t), x),
+      mlx::core::add(array(1.0, t), mlx::core::tanh(inner)))};
+}
+
+/// Tanh-approximate GELU (`gelu_pytorch_tanh` / `mlx.nn.gelu_approx`),
+/// compiled into one kernel.
+AimdMlxArray* mlx_gelu_tanh(AimdMlxArray* x) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({x});
+    static const auto compiled = mlx::core::compile(gelu_tanh_impl, true);
+    return wrap(compiled({as_array(x)})[0]);
+  });
+}
+
+/// Affine `quantize(w, group_size, bits)` -> packed weight, scales, biases
+/// (the `mlx.core.quantize` / `nn.quantize` layout).
+int32_t mlx_quantize(
+    AimdMlxArray* w,
+    int32_t group_size,
+    int32_t bits,
+    AimdMlxArray** out_w,
+    AimdMlxArray** out_scales,
+    AimdMlxArray** out_biases) {
+  AimdMlxArray* first = guarded([&]() -> AimdMlxArray* {
+    require({w});
+    auto parts = mlx::core::quantize(as_array(w), group_size, bits, "affine");
+    if (parts.size() != 3) {
+      throw std::runtime_error("[aimd_mlx] affine quantize returned no biases");
+    }
+    *out_scales = wrap(parts[1]);
+    *out_biases = wrap(parts[2]);
+    return wrap(parts[0]);
+  });
+  if (first == nullptr) {
+    return 1;
+  }
+  *out_w = first;
+  return 0;
+}
+
 } // extern "C"

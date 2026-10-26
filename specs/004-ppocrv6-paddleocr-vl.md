@@ -1,0 +1,174 @@
+---
+id: "004"
+title: "PP-OCRv6 and PaddleOCR-VL-1.6 OCR engines; ASR language auto-detection"
+status: Active
+created: 2026-10-26
+updated: 2026-10-26
+coordinator: "shuuul"
+---
+
+# 004 — PP-OCRv6 and PaddleOCR-VL-1.6 OCR engines; ASR language auto-detection
+
+## Context
+
+The native engine (spec 002) ships one OCR family, Unlimited-OCR, and
+`resolve_mlx_ocr_model` rejects every other model. Two more local OCR
+families are requested:
+
+- **PP-OCRv6** (classic det + rec), largest tier only: `medium`.
+  Checkpoints: `PaddlePaddle/PP-OCRv6_medium_det_safetensors` (88 MB, f32)
+  and `PaddlePaddle/PP-OCRv6_medium_rec_safetensors` (77 MB, f32, 18710-class
+  multilingual CTC dict in `preprocessor_config.json`). Reference MLX port:
+  `shuuul/mlx4ocr` (Python, `src/mlx4ocr/{models,preprocess,postprocess,pipeline}`).
+  It uses OpenCV (`resize`, `findContours`, `minAreaRect`, `warpPerspective`)
+  and `pyclipper` for DB unclip.
+- **PaddleOCR-VL-1.6** (0.9B VLM: NaViT/SigLIP vision 27 layers + 2x2 merge
+  projector + ERNIE-4.5 0.3B decoder, 18 layers, GQA 16/2, 3-D mRoPE
+  `[16, 24, 24]`). Official checkpoint `PaddlePaddle/PaddleOCR-VL-1.6`
+  (bf16, 1.9 GB). mlx-community publishes only `-4bit` and `-5bit`. Reference
+  MLX port: `mlx_vlm/models/paddleocr_vl` (mlx-vlm 0.7.10).
+
+Also requested: `--language` stays, but omitting it must auto-detect.
+Today `aimd_process::models::resolve_asr_language(None)` returns `Chinese`,
+which forces the Qwen3-ASR prompt even though the engine already supports an
+unforced prompt (`build_asr_prompt(context, None, ..)` and
+`parse_qwen_output("language X<asr_text>...")`). OCR models here are all
+multilingual and take no language hint.
+
+Verified finding (2026-10-26): mlx4ocr downloads the 232 MB Paddle
+`*_rec_pretrained.pdparams` pickle to "repair" the HF `small`/`medium` rec
+heads. Comparing tensors shows the HF file is not corrupt: its
+`head.encoder.conv_block.0` is exactly `skip_conv` and `conv_block.1` is
+exactly `conv_reduce` (max abs diff 0.0, BN stats included). A key swap at
+load replaces the pickle download.
+
+## Goal and success criteria
+
+- [ ] `aimd scan.png --model pp-ocrv6` runs PP-OCRv6 medium det + rec natively
+      on MLX; det probability map and rec logits match mlx4ocr goldens
+      (hermetic slices + checkpoint tier), and DB boxes / final text match
+      the mlx4ocr e2e golden on its `examples/images`.
+- [ ] `aimd scan.png --model paddleocr-vl` runs PaddleOCR-VL-1.6 natively
+      (bf16 default; `4bit`/`6bit`/`8bit` quantize the decoder at load);
+      vision features, decoder logits, and greedy text match mlx-vlm goldens.
+- [ ] Omitting `--language` auto-detects for local ASR (no forced language
+      in the prompt), for every segment and for the URL audio fallback;
+      explicit `--language` still forces it. Accepted codes widen to the
+      engine's 30-language Qwen3-ASR table.
+- [ ] CLI help, MCP schema descriptions, README, and AGENTS.md list the new
+      aliases and the auto-detect default; no GLM-OCR/Transformers mentions.
+- [ ] Corpus gate: both new models score within the AGENTS.md bounds of
+      their Python reference (mlx4ocr / mlx-vlm) on `scripts/corpus` pages.
+- [ ] `prek`, fmt, clippy `-D warnings`, and the hermetic tier pass; hermetic
+      runtime stays about 2 minutes.
+
+## Scope and non-goals
+
+In scope:
+
+- `aimd-mlx` ops: grouped/dilated conv, transposed conv, unary/binary/reduce
+  families, `where`, `clip`, tanh GELU, affine `quantize`.
+- `aimd-engine::models::pp_ocrv6` and `aimd-engine::models::paddleocr_vl`.
+- Host-side image ops for PP-OCRv6 (cv2-exact bilinear resize, contour
+  tracing, min-area rect, rectangle unclip, perspective crop) hand-written.
+- Model resolution, `NativeRuntime::load_ocr` dispatch, CLI/MCP help, docs.
+- ASR language auto-detection.
+
+Not in scope:
+
+- PP-OCRv6 `tiny`/`small`, textline orientation or doc-unwarping models,
+  PP-DocLayout layout analysis, PaddleOCR-VL table/formula/chart task
+  prompts beyond full-page `OCR:`.
+- Changing the default OCR model (stays `unlimited-ocr`).
+- A language hint for OCR (all three families are multilingual; a local OCR
+  run ignores `--language`).
+
+## Decisions
+
+| Date | Decision | Rationale | Affected workstreams |
+| --- | --- | --- | --- |
+| 2026-10-26 | PP-OCRv6 ships `medium` only; alias `pp-ocrv6` (also `pp-ocrv6-medium`); internal model key `PaddlePaddle/PP-OCRv6_medium` resolves both `_det_safetensors` and `_rec_safetensors` repos | User asked for the largest size only | WS-02, WS-05 |
+| 2026-10-26 | Swap HF rec `head.encoder.conv_block.{0,1}` at load instead of downloading Paddle pretrained pickles | Tensor comparison shows an exact swap, not corruption; avoids a 232 MB non-HF download and a pickle parser | WS-02 |
+| 2026-10-26 | PP-OCRv6 has no precision: `--precision` is ignored with one warning (same pattern as remote backends) | Checkpoints are dense f32 conv nets; quantization does not apply | WS-05 |
+| 2026-10-26 | PaddleOCR-VL loads the official `PaddlePaddle/PaddleOCR-VL-1.6` bf16 checkpoint for every precision; omitted precision means bf16 (dense); `4bit`/`6bit`/`8bit` quantize at load (affine, group 64) with the mlx-vlm `convert` layer predicate | mlx-community has no 6/8-bit repos; one source keeps parity simple, and the 0.3B decoder gains little from 4-bit by default. 4-bit parity is checked against `mlx-community/PaddleOCR-VL-1.6-4bit` | WS-03, WS-05 |
+| 2026-10-26 | PaddleOCR-VL runs full-page `OCR:` with the checkpoint's image processor bounds (min 112896, max 1003520 pixels) | Matches mlx4ocr's VLM usage; layout analysis is out of scope | WS-03 |
+| 2026-10-26 | Omitted ASR language = auto-detect everywhere (local, retry, URL fallback); remote ASR already omits the field | User request; engine already supports the unforced prompt | WS-04 |
+| 2026-10-26 | Local OCR ignores `--language` silently (help text says it is a transcription hint) | All OCR families are multilingual | WS-05 |
+| 2026-10-26 | Engine API contracts (below) are frozen before WS-02/WS-03 start so WS-05 can wire against them | Parallel workers in separate worktrees | WS-02, WS-03, WS-05 |
+
+Engine API contracts:
+
+```rust
+// aimd_engine::models::pp_ocrv6::pipeline
+pub struct PpOcrV6Pipeline { .. }
+impl PpOcrV6Pipeline {
+    pub fn load(det_dir: &Path, rec_dir: &Path) -> Result<Self, PipelineError>;
+    pub fn recognize_path(&self, image: &Path) -> Result<PpOcrOutput, PipelineError>;
+}
+pub struct PpOcrOutput { pub lines: Vec<TextLine>, pub markdown: String }
+pub struct TextLine { pub text: String, pub score: f32, pub quad: [[f32; 2]; 4] }
+pub enum PipelineError { EmptyContent, /* load / image / mlx variants */ .. }
+
+// aimd_engine::models::paddleocr_vl::pipeline
+pub struct PaddleOcrVlPipeline { .. }
+impl PaddleOcrVlPipeline {
+    /// `quant_bits`: None = dense bf16; Some(4 | 6 | 8) quantizes at load.
+    pub fn load(dir: &Path, quant_bits: Option<u32>) -> Result<Self, PipelineError>;
+    pub fn recognize_path(&self, image: &Path, request: VlRequest) -> Result<VlOutput, PipelineError>;
+}
+#[derive(Default)] pub struct VlRequest { pub max_tokens: Option<usize> }
+pub struct VlOutput { pub markdown: String, pub tokens: usize }
+pub enum PipelineError { EmptyContent, .. }
+```
+
+## Workstreams
+
+Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
+
+| ID | Deliverable | Owner | Status | Dependencies | Verification |
+| --- | --- | --- | --- | --- | --- |
+| WS-01 | `aimd-mlx` shim ops for conv nets and the VL graph | coordinator | Done | None | `cargo test -p aimd-mlx --test mlx_ops_conv` (CPU and Metal) |
+| WS-02 | `aimd-engine::models::pp_ocrv6`: det (PPLCNetV4 + RepLKPAN + IntraCL + DB head), rec (PPLCNetV4 + LightSVTR + CTC), cv2-exact preprocessing, DB postprocess, crop, CTC decode, reading-order markdown; goldens via `scripts/export_ppocrv6_reference.py` (mlx4ocr) | agent ws02 | Claimed | WS-01 | hermetic golden tests; checkpoint parity tier; e2e text vs mlx4ocr on its examples |
+| WS-03 | `aimd-engine::models::paddleocr_vl`: image processor, vision tower, projector, ERNIE decoder with mRoPE + KV cache, greedy generation, load-time quantization; goldens via `scripts/export_paddleocr_vl_reference.py` (mlx-vlm 0.7.10) | agent ws03 | Claimed | WS-01 | hermetic golden tests; checkpoint parity tier (bf16 + 4-bit vs mlx-community 4bit); e2e text vs mlx-vlm |
+| WS-04 | ASR language auto-detection (process, Runtime trait, URL fallback, tests, help) | coordinator | Pending | None | hermetic tests in `aimd-process` |
+| WS-05 | Model resolution, `NativeRuntime` dispatch, CLI/MCP help, README/AGENTS docs | coordinator | Pending | WS-02/WS-03 API | hermetic tests; CLI smoke |
+| WS-06 | Corpus gate + performance notes for both models | coordinator | Pending | WS-02, WS-03, WS-05 | `corpus_gate` within bounds; `docs/performance.md` |
+
+## Verification
+
+```bash
+cargo test -p aimd-mlx --test mlx_ops_conv
+AIMD_MLX_DEVICE=cpu cargo test --workspace
+cargo test -p aimd-engine pp_ocrv6 paddleocr_vl     # checkpoint tier when cached
+AIMD_E2E=1 cargo test -p aimd-engine --lib pp_ocrv6 paddleocr_vl
+uv run scripts/corpus_baseline.py && cargo run --release -p aimd-engine --example corpus_gate
+cargo xtask check-specs
+```
+
+## Documentation sync
+
+- Durable product/developer docs: README (models, precision, language),
+  `docs/performance.md`.
+- Nearest local `AGENTS.md`: root `AGENTS.md` (crate map, model naming,
+  precision, golden sets, ASR language).
+- Parent/package guidance: none.
+- Root guidance and roadmap: root `AGENTS.md`.
+
+## Progress and handoff
+
+Append entries rather than rewriting another worker's record.
+
+### 2026-10-26 — coordinator — WS-01
+
+- Changed: `crates/aimd-mlx/shim/shim.cpp`, `crates/aimd-mlx/src/lib.rs`
+  (`conv2d_ex`, `conv_transpose2d`, `unary`/`binary`/`reduce` + `UnaryOp`/
+  `BinaryOp`/`ReduceOp`, `where_`, `clip`, `gelu_tanh`, `quantize`),
+  `crates/aimd-mlx/tests/mlx_ops_conv.rs`.
+- Evidence: 5/5 pass with `AIMD_MLX_DEVICE=cpu` and on Metal.
+- Remaining: none.
+- Blockers: none.
+- Next action: WS-02 and WS-03 start in parallel worktrees.
+
+## Completion summary
+
+Pending.

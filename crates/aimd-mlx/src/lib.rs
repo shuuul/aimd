@@ -368,6 +368,51 @@ mod ffi {
         pub fn mlx_metal_kernels_available() -> i32;
         pub fn mlx_clear_cache() -> i32;
         pub fn mlx_array_clone(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_conv2d_ex(
+            input: *mut AimdMlxArray,
+            weight: *mut AimdMlxArray,
+            stride_h: i32,
+            stride_w: i32,
+            pad_h: i32,
+            pad_w: i32,
+            dil_h: i32,
+            dil_w: i32,
+            groups: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_conv_transpose2d(
+            input: *mut AimdMlxArray,
+            weight: *mut AimdMlxArray,
+            stride_h: i32,
+            stride_w: i32,
+            pad_h: i32,
+            pad_w: i32,
+            groups: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_unary(a: *mut AimdMlxArray, op: i32) -> *mut AimdMlxArray;
+        pub fn mlx_binary(a: *mut AimdMlxArray, b: *mut AimdMlxArray, op: i32)
+        -> *mut AimdMlxArray;
+        pub fn mlx_reduce(
+            a: *mut AimdMlxArray,
+            axes: *const i32,
+            n_axes: i32,
+            keepdims: i32,
+            op: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_where(
+            cond: *mut AimdMlxArray,
+            x: *mut AimdMlxArray,
+            y: *mut AimdMlxArray,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_clip(a: *mut AimdMlxArray, lo: f32, hi: f32) -> *mut AimdMlxArray;
+        pub fn mlx_gelu_tanh(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_quantize(
+            w: *mut AimdMlxArray,
+            group_size: i32,
+            bits: i32,
+            out_w: *mut *mut AimdMlxArray,
+            out_scales: *mut *mut AimdMlxArray,
+            out_biases: *mut *mut AimdMlxArray,
+        ) -> i32;
     }
 }
 
@@ -816,6 +861,156 @@ impl MlxArray {
             )
         };
         Self::from_handle(ptr, "mlx_conv2d")
+    }
+
+    /// `conv2d` with per-axis dilation and channel `groups` (depthwise when
+    /// `groups` equals the input channels); weight `[O, KH, KW, C / groups]`.
+    pub fn conv2d_ex(
+        &self,
+        weight: &Self,
+        stride: [usize; 2],
+        padding: [usize; 2],
+        dilation: [usize; 2],
+        groups: usize,
+    ) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_conv2d_ex(
+                self.ptr.as_ptr(),
+                weight.ptr.as_ptr(),
+                stride[0] as i32,
+                stride[1] as i32,
+                padding[0] as i32,
+                padding[1] as i32,
+                dilation[0] as i32,
+                dilation[1] as i32,
+                groups as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_conv2d_ex")
+    }
+
+    /// Transposed 2-D convolution over NHWC; weight `[O, KH, KW, C / groups]`
+    /// (mlx `conv_transpose2d`).
+    pub fn conv_transpose2d(
+        &self,
+        weight: &Self,
+        stride: [usize; 2],
+        padding: [usize; 2],
+        groups: usize,
+    ) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_conv_transpose2d(
+                self.ptr.as_ptr(),
+                weight.ptr.as_ptr(),
+                stride[0] as i32,
+                stride[1] as i32,
+                padding[0] as i32,
+                padding[1] as i32,
+                groups as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_conv_transpose2d")
+    }
+
+    /// Element-wise unary op.
+    pub fn unary(&self, op: UnaryOp) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_unary(self.ptr.as_ptr(), op as i32) };
+        Self::from_handle(ptr, "mlx_unary")
+    }
+
+    /// `sigmoid(self)`.
+    pub fn sigmoid(&self) -> Result<Self, MlxError> {
+        self.unary(UnaryOp::Sigmoid)
+    }
+
+    /// `max(self, 0)`.
+    pub fn relu(&self) -> Result<Self, MlxError> {
+        self.unary(UnaryOp::Relu)
+    }
+
+    /// Element-wise binary op; comparisons yield `bool` arrays for [`Self::where_`].
+    pub fn binary(&self, rhs: &Self, op: BinaryOp) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_binary(self.ptr.as_ptr(), rhs.ptr.as_ptr(), op as i32) };
+        Self::from_handle(ptr, "mlx_binary")
+    }
+
+    /// Element-wise maximum.
+    pub fn maximum(&self, rhs: &Self) -> Result<Self, MlxError> {
+        self.binary(rhs, BinaryOp::Maximum)
+    }
+
+    /// Element-wise minimum.
+    pub fn minimum(&self, rhs: &Self) -> Result<Self, MlxError> {
+        self.binary(rhs, BinaryOp::Minimum)
+    }
+
+    /// Reduction over `axes` (negative indices count from the end).
+    pub fn reduce(&self, axes: &[i32], keepdims: bool, op: ReduceOp) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_reduce(
+                self.ptr.as_ptr(),
+                axes.as_ptr(),
+                axes.len() as i32,
+                i32::from(keepdims),
+                op as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_reduce")
+    }
+
+    /// Mean over `axes`.
+    pub fn mean_axes(&self, axes: &[i32], keepdims: bool) -> Result<Self, MlxError> {
+        self.reduce(axes, keepdims, ReduceOp::Mean)
+    }
+
+    /// Max over `axes`.
+    pub fn max_axes(&self, axes: &[i32], keepdims: bool) -> Result<Self, MlxError> {
+        self.reduce(axes, keepdims, ReduceOp::Max)
+    }
+
+    /// `where(self, x, y)` with `self` a boolean condition.
+    pub fn where_(&self, x: &Self, y: &Self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_where(self.ptr.as_ptr(), x.ptr.as_ptr(), y.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_where")
+    }
+
+    /// `clip(self, lo, hi)` with scalar bounds in the input dtype.
+    pub fn clip(&self, lo: f32, hi: f32) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_clip(self.ptr.as_ptr(), lo, hi) };
+        Self::from_handle(ptr, "mlx_clip")
+    }
+
+    /// Tanh-approximate GELU (`gelu_pytorch_tanh`, `mlx.nn.gelu_approx`),
+    /// one compiled kernel.
+    pub fn gelu_tanh(&self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_gelu_tanh(self.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_gelu_tanh")
+    }
+
+    /// Affine `quantize` along the last axis -> `(packed, scales, biases)`,
+    /// the `mlx.nn.quantize` layout consumed by [`Self::quantized_matmul`].
+    pub fn quantize(&self, group_size: i32, bits: i32) -> Result<(Self, Self, Self), MlxError> {
+        let mut w = std::ptr::null_mut();
+        let mut scales = std::ptr::null_mut();
+        let mut biases = std::ptr::null_mut();
+        let status = unsafe {
+            ffi::mlx_quantize(
+                self.ptr.as_ptr(),
+                group_size,
+                bits,
+                &raw mut w,
+                &raw mut scales,
+                &raw mut biases,
+            )
+        };
+        if status != 0 {
+            return Err(op_failed("mlx_quantize"));
+        }
+        Ok((
+            Self::from_handle(w, "mlx_quantize")?,
+            Self::from_handle(scales, "mlx_quantize")?,
+            Self::from_handle(biases, "mlx_quantize")?,
+        ))
     }
 
     /// Fused scaled dot product attention `softmax(Q @ K.T * scale) @ V`
@@ -1311,6 +1506,45 @@ pub fn clear_cache() -> Result<(), MlxError> {
     } else {
         Err(op_failed("mlx_clear_cache"))
     }
+}
+
+/// Element-wise unary ops behind [`MlxArray::unary`] (codes match the shim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum UnaryOp {
+    Sigmoid = 0,
+    Tanh = 1,
+    Exp = 2,
+    Sin = 3,
+    Cos = 4,
+    Negative = 5,
+    Abs = 6,
+    Log = 7,
+    Rsqrt = 8,
+    Erf = 9,
+    Square = 10,
+    Relu = 11,
+}
+
+/// Element-wise binary ops behind [`MlxArray::binary`] (codes match the shim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum BinaryOp {
+    Maximum = 0,
+    Minimum = 1,
+    Greater = 2,
+    Less = 3,
+    Equal = 4,
+}
+
+/// Reductions behind [`MlxArray::reduce`] (codes match the shim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum ReduceOp {
+    Mean = 0,
+    Max = 1,
+    Min = 2,
+    Sum = 3,
 }
 
 /// `None` maps to the shim's "keep result dtype" sentinel (-1).

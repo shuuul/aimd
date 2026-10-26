@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [004-ppocrv6-paddleocr-vl.md](004-ppocrv6-paddleocr-vl.md) | Active | PP-OCRv6 medium and PaddleOCR-VL-1.6 native OCR; ASR language auto-detection |
 
 ## Archived specs
 
