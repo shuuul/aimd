@@ -120,6 +120,18 @@ impl MlxDtype {
     }
 }
 
+/// Activation for [`MlxArray::bias_act`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Activation {
+    Identity = 0,
+    /// `maximum(x, 0)`.
+    Relu = 1,
+    /// `clip(maximum(x + 3, 0), 0, 6) / 6`.
+    HardSigmoid = 2,
+    /// Exact-erf GELU ([`MlxArray::gelu`]).
+    Gelu = 3,
+}
+
 /// Attention mask mode for [`MlxArray::scaled_dot_product_attention`].
 #[derive(Clone, Copy, Debug)]
 pub enum SdpaMask<'a> {
@@ -405,6 +417,12 @@ mod ffi {
         ) -> *mut AimdMlxArray;
         pub fn mlx_clip(a: *mut AimdMlxArray, lo: f32, hi: f32) -> *mut AimdMlxArray;
         pub fn mlx_gelu_tanh(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_bias_act(
+            y: *mut AimdMlxArray,
+            bias: *mut AimdMlxArray,
+            residual: *mut AimdMlxArray,
+            act: i32,
+        ) -> *mut AimdMlxArray;
         pub fn mlx_rope_half_split(
             x: *mut AimdMlxArray,
             cos: *mut AimdMlxArray,
@@ -990,6 +1008,21 @@ impl MlxArray {
     pub fn gelu_tanh(&self) -> Result<Self, MlxError> {
         let ptr = unsafe { ffi::mlx_gelu_tanh(self.ptr.as_ptr()) };
         Self::from_handle(ptr, "mlx_gelu_tanh")
+    }
+
+    /// `act(self + bias) + residual` as one compiled elementwise kernel
+    /// (bias and residual optional), matching the unfused ops value for
+    /// value.
+    pub fn bias_act(
+        &self,
+        bias: Option<&Self>,
+        act: Activation,
+        residual: Option<&Self>,
+    ) -> Result<Self, MlxError> {
+        let raw = |a: Option<&Self>| a.map_or(std::ptr::null_mut(), |a| a.ptr.as_ptr());
+        let ptr =
+            unsafe { ffi::mlx_bias_act(self.ptr.as_ptr(), raw(bias), raw(residual), act as i32) };
+        Self::from_handle(ptr, "mlx_bias_act")
     }
 
     /// Half-split rotary `astype(self * cos + rotate_half(self) * sin)` in

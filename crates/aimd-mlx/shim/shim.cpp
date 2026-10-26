@@ -22,6 +22,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <new>
 #include <optional>
@@ -311,6 +312,45 @@ std::vector<array> gelu_impl(const std::vector<array>& inputs) {
   array two = array(2, a.dtype());
   array t = mlx::core::erf(mlx::core::divide(a, sqrt2));
   return {mlx::core::divide(mlx::core::multiply(a, mlx::core::add(one, t)), two)};
+}
+
+// `act(y + b) + residual` (bias and residual optional), each op in the
+// unfused graph's order and dtype. Act: 0 identity, 1 relu
+// (`maximum(x, 0)`), 2 hard sigmoid (`clip(maximum(x + 3, 0), 0, 6) / 6`),
+// 3 `mlx.nn.gelu`. One instantiation per variant so mlx's compile cache
+// keys on a distinct function address.
+template <int Act, bool Bias, bool Residual>
+std::vector<array> bias_act_impl(const std::vector<array>& in) {
+  array x = Bias ? mlx::core::add(in[0], in[1]) : in[0];
+  const Dtype t = x.dtype();
+  if constexpr (Act == 1) {
+    x = mlx::core::maximum(x, array(0.0f, t));
+  } else if constexpr (Act == 2) {
+    x = mlx::core::maximum(mlx::core::add(x, array(3.0f, t)), array(0.0f, t));
+    x = mlx::core::clip(x, array(0.0f, t), array(6.0f, t));
+    x = mlx::core::divide(x, array(6.0f, t));
+  } else if constexpr (Act == 3) {
+    x = gelu_impl({x})[0];
+  }
+  if constexpr (Residual) {
+    x = mlx::core::add(in[Bias ? 2 : 1], x);
+  }
+  return {x};
+}
+
+template <int Act>
+array bias_act_dispatch(const array& y, const array* b, const array* r) {
+  using Fn = std::function<std::vector<array>(const std::vector<array>&)>;
+  static const Fn fns[4] = {
+      mlx::core::compile(bias_act_impl<Act, false, false>, true),
+      mlx::core::compile(bias_act_impl<Act, true, false>, true),
+      mlx::core::compile(bias_act_impl<Act, false, true>, true),
+      mlx::core::compile(bias_act_impl<Act, true, true>, true),
+  };
+  std::vector<array> in{y};
+  if (b) in.push_back(*b);
+  if (r) in.push_back(*r);
+  return fns[(b ? 1 : 0) + (r ? 2 : 0)](in)[0];
 }
 
 } // namespace
@@ -1920,6 +1960,31 @@ AimdMlxArray* mlx_rope_half_split(
     array out = compiled(
         {xr, xf, halves(as_array(cos)), halves(as_array(sin_signed))})[0];
     return wrap(mlx::core::reshape(out, xa.shape()));
+  });
+}
+
+/// `act(y + bias) + residual` as one compiled (shapeless) elementwise
+/// kernel; `bias` and `residual` may be null. `act`: 0 identity, 1 relu,
+/// 2 hard sigmoid, 3 exact-erf GELU. Values match the unfused ops.
+AimdMlxArray* mlx_bias_act(
+    AimdMlxArray* y, AimdMlxArray* bias, AimdMlxArray* residual, int32_t act) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({y});
+    const array* b = bias ? &as_array(bias) : nullptr;
+    const array* r = residual ? &as_array(residual) : nullptr;
+    const array& ya = as_array(y);
+    switch (act) {
+      case 0:
+        return wrap(bias_act_dispatch<0>(ya, b, r));
+      case 1:
+        return wrap(bias_act_dispatch<1>(ya, b, r));
+      case 2:
+        return wrap(bias_act_dispatch<2>(ya, b, r));
+      case 3:
+        return wrap(bias_act_dispatch<3>(ya, b, r));
+      default:
+        throw std::invalid_argument("[aimd_mlx] bias_act: unknown activation");
+    }
   });
 }
 

@@ -2,11 +2,11 @@
 //! with IntraCL blocks -> DB head (binarize branch), NHWC f32, op-for-op
 //! with mlx4ocr `models/det/{backbone,neck,intracl,head}.py`.
 
-use aimd_mlx::{MlxArray, MlxError};
+use aimd_mlx::{Activation, MlxArray, MlxError};
 use aimd_weights::WeightStore;
 
 use super::config::DetConfig;
-use super::layers::{Conv, ConvKind, LcNetBlock, LoadError, Stem, load_stages, relu};
+use super::layers::{Conv, ConvKind, LcNetBlock, LoadError, Stem, load_stages};
 
 /// Nearest-neighbour upsampling by an integer factor (`mx.repeat` on the
 /// H and W axes).
@@ -73,7 +73,7 @@ impl IntraCl {
                 .add(&vert.forward(&z)?)?
                 .add(&horiz.forward(&z)?)?;
         }
-        x.add(&relu(&self.final_.forward(&z)?)?)
+        self.final_.forward_act(&z, Activation::Relu, Some(x))
     }
 }
 
@@ -201,8 +201,8 @@ impl DbHead {
     }
 
     fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
-        let x = relu(&self.down.forward(x)?)?;
-        let x = relu(&self.up.forward(&x)?)?;
+        let x = self.down.forward_act(x, Activation::Relu, None)?;
+        let x = self.up.forward_act(&x, Activation::Relu, None)?;
         self.final_.forward(&x)?.sigmoid()
     }
 }

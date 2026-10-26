@@ -8,7 +8,7 @@
 //! (`scale = gamma * rsqrt(var + 1e-5)`, `W * scale`, `beta + scale * (b -
 //! mean)`), so the fused parameters are bit-identical to the reference.
 
-use aimd_mlx::{MlxArray, MlxDtype, MlxError, UnaryOp};
+use aimd_mlx::{Activation, MlxArray, MlxDtype, MlxError, UnaryOp};
 use aimd_weights::{WeightStore, WeightsError};
 
 use super::config::BlockSpec;
@@ -228,15 +228,26 @@ impl Conv {
     }
 
     pub(crate) fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+        self.forward_act(x, Activation::Identity, None)
+    }
+
+    /// `residual + act(conv(x) + b)`, the bias, activation and residual in
+    /// one fused kernel.
+    pub(crate) fn forward_act(
+        &self,
+        x: &MlxArray,
+        act: Activation,
+        residual: Option<&MlxArray>,
+    ) -> Result<MlxArray, MlxError> {
         let y = if self.transpose {
             x.conv_transpose2d(&self.w, self.stride, self.padding, self.groups)?
         } else {
             x.conv2d_ex(&self.w, self.stride, self.padding, [1, 1], self.groups)?
         };
-        match &self.b {
-            Some(b) => y.add(b),
-            None => Ok(y),
+        if self.b.is_none() && act == Activation::Identity && residual.is_none() {
+            return Ok(y);
         }
+        y.bias_act(self.b.as_ref(), act, residual)
     }
 }
 
@@ -277,23 +288,6 @@ impl Linear {
     }
 }
 
-fn scalar(v: f32) -> Result<MlxArray, MlxError> {
-    MlxArray::scalar_f32(v)
-}
-
-/// `HardSigmoid`: `clip(maximum(x + 3, 0), 0, 6) / 6`.
-pub(crate) fn hard_sigmoid(x: &MlxArray) -> Result<MlxArray, MlxError> {
-    x.add(&scalar(3.0)?)?
-        .maximum(&scalar(0.0)?)?
-        .clip(0.0, 6.0)?
-        .divide(&scalar(6.0)?)
-}
-
-/// `nn.ReLU` (`maximum(x, 0)`).
-pub(crate) fn relu(x: &MlxArray) -> Result<MlxArray, MlxError> {
-    x.maximum(&scalar(0.0)?)
-}
-
 /// LCNetV4 squeeze-excitation (`TokenSqueezeExcitation` / `SELayer`).
 struct Se {
     conv1: Conv,
@@ -325,7 +319,10 @@ impl Se {
 
     fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
         let pooled = x.mean_axes(&[1, 2], true)?;
-        let gate = hard_sigmoid(&self.conv2.forward(&relu(&self.conv1.forward(&pooled)?)?)?)?;
+        let hidden = self.conv1.forward_act(&pooled, Activation::Relu, None)?;
+        let gate = self
+            .conv2
+            .forward_act(&hidden, Activation::HardSigmoid, None)?;
         x.multiply(&gate)
     }
 }
@@ -409,14 +406,10 @@ impl LcNetBlock {
         if let Some(se) = &self.se {
             x = se.forward(&x)?;
         }
-        let mixed = self
-            .channel_conv2
-            .forward(&self.channel_conv1.forward(&x)?.gelu()?)?;
-        if self.residual {
-            x.add(&mixed)
-        } else {
-            Ok(mixed)
-        }
+        let hidden = self.channel_conv1.forward_act(&x, Activation::Gelu, None)?;
+        let residual = self.residual.then_some(&x);
+        self.channel_conv2
+            .forward_act(&hidden, Activation::Identity, residual)
     }
 }
 
@@ -448,9 +441,13 @@ impl Stem {
     }
 
     pub(crate) fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
-        let x = relu(&self.stem1.forward(x)?)?;
-        let a = relu(&self.stem2a.forward(&pad_same_2x2(&x)?)?)?;
-        let branch = relu(&self.stem2b.forward(&pad_same_2x2(&a)?)?)?;
+        let x = self.stem1.forward_act(x, Activation::Relu, None)?;
+        let a = self
+            .stem2a
+            .forward_act(&pad_same_2x2(&x)?, Activation::Relu, None)?;
+        let branch = self
+            .stem2b
+            .forward_act(&pad_same_2x2(&a)?, Activation::Relu, None)?;
         // MaxPool2d(2, stride 1) over the SAME-padded input.
         let p = pad_same_2x2(&x)?;
         let s = p.shape()?;
@@ -461,7 +458,8 @@ impl Stem {
             .maximum(&win(0, 1)?)?
             .maximum(&win(1, 0)?.maximum(&win(1, 1)?)?)?;
         let merged = MlxArray::concatenate(&[&pooled, &branch], 3)?;
-        relu(&self.stem4.forward(&relu(&self.stem3.forward(&merged)?)?)?)
+        let x = self.stem3.forward_act(&merged, Activation::Relu, None)?;
+        self.stem4.forward_act(&x, Activation::Relu, None)
     }
 }
 

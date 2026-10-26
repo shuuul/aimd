@@ -230,3 +230,66 @@ fn rope_half_split_is_bit_identical_to_unfused_graph() {
         assert!(got.to_bf16_bytes().unwrap() == want, "{xs:?} differs");
     }
 }
+
+#[test]
+fn bias_act_is_bit_identical_to_unfused_graph() {
+    use aimd_mlx::Activation;
+    let s = |v: f32| MlxArray::scalar_f32(v).unwrap();
+    let shape = [2, 5, 7, 24];
+    let n: usize = shape.iter().product();
+    // lcg is in [-4, 4); spread it so hard sigmoid hits both clamps.
+    let y = f32_arr(
+        &shape,
+        &lcg(n, 4).iter().map(|v| v * 8.0).collect::<Vec<_>>(),
+    );
+    let b = f32_arr(&[24], &lcg(24, 5));
+    let r = f32_arr(&shape, &lcg(n, 6));
+    let unfused = |x: &MlxArray, act: Activation| -> MlxArray {
+        match act {
+            Activation::Identity => unreachable!(),
+            Activation::Relu => x.maximum(&s(0.0)).unwrap(),
+            Activation::HardSigmoid => x
+                .add(&s(3.0))
+                .unwrap()
+                .maximum(&s(0.0))
+                .unwrap()
+                .clip(0.0, 6.0)
+                .unwrap()
+                .divide(&s(6.0))
+                .unwrap(),
+            Activation::Gelu => x.gelu().unwrap(),
+        }
+    };
+    for act in [
+        Activation::Identity,
+        Activation::Relu,
+        Activation::HardSigmoid,
+        Activation::Gelu,
+    ] {
+        for (bias, res) in [
+            (None, None),
+            (Some(&b), None),
+            (None, Some(&r)),
+            (Some(&b), Some(&r)),
+        ] {
+            let pre = bias.map_or_else(|| y.add(&s(0.0)).unwrap(), |b| y.add(b).unwrap());
+            let mut want = if act == Activation::Identity {
+                pre
+            } else {
+                unfused(&pre, act)
+            };
+            if let Some(r) = res {
+                want = r.add(&want).unwrap();
+            }
+            let got = y.bias_act(bias, act, res).unwrap();
+            let (g, w) = (got.to_f32_vec().unwrap(), want.to_f32_vec().unwrap());
+            let same = g.iter().zip(&w).all(|(a, b)| a.to_bits() == b.to_bits());
+            assert!(
+                same,
+                "{act:?} bias={} res={}",
+                bias.is_some(),
+                res.is_some()
+            );
+        }
+    }
+}
