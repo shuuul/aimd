@@ -171,16 +171,15 @@ pub fn det_preprocess(image: &BgrImage) -> DetInput {
         (-0.456 / 0.224) as f32,
         (-0.406 / 0.225) as f32,
     ];
-    let normalized = resized
-        .data
-        .iter()
-        .enumerate()
-        .map(|(i, &v)| {
+    let mut normalized = vec![0f32; resized.data.len()];
+    crate::parallel::for_row_bands(&mut normalized, rw * 3, 32, |first, band| {
+        let src = &resized.data[first * rw * 3..first * rw * 3 + band.len()];
+        for (i, (o, &v)) in band.iter_mut().zip(src).enumerate() {
             let c = i % 3;
             let m = v as f32 * scale[c];
-            m + bias[c]
-        })
-        .collect();
+            *o = m + bias[c];
+        }
+    });
     DetInput {
         resized,
         normalized,
@@ -324,12 +323,13 @@ impl PpOcrV6Pipeline {
         Ok((probs.to_f32_vec()?, probs.shape()?))
     }
 
-    /// Recognizes crops (results in crop order).
+    /// Recognizes crops (results in crop order). Every batch is submitted
+    /// before any is read back, so the GPU runs batch `k` while the host
+    /// prepares batch `k + 1`.
     pub fn recognize(&self, crops: &[BgrImage]) -> Result<Vec<Decoded>, PipelineError> {
         let mut out: Vec<Option<Decoded>> = vec![None; crops.len()];
+        let mut pending = Vec::new();
         for (indices, max_wh) in rec_batches(crops) {
-            let mut batch = Vec::new();
-            let mut img_w = 0;
             let mut valid = Vec::new();
             for &i in &indices {
                 if crops[i].width == 0 || crops[i].height == 0 {
@@ -337,17 +337,26 @@ impl PpOcrV6Pipeline {
                         text: String::new(),
                         score: 0.0,
                     });
-                    continue;
+                } else {
+                    valid.push(i);
                 }
-                let (slab, w) = rec_preprocess(&crops[i], max_wh);
-                img_w = w;
-                batch.extend_from_slice(&slab);
-                valid.push(i);
             }
             if valid.is_empty() {
                 continue;
             }
-            let (idx, max, steps) = self.rec_step_maxima(&batch, valid.len(), img_w)?;
+            let slabs = crate::parallel::map(&valid, |&i| rec_preprocess(&crops[i], max_wh));
+            let img_w = slabs[0].1;
+            let batch: Vec<f32> = slabs.into_iter().flat_map(|(slab, _)| slab).collect();
+            let x = MlxArray::from_f32(&[valid.len(), REC_IMAGE_H, img_w, 3], &batch)?;
+            let probs = self.rec.forward(&x)?;
+            let idx = probs.argmax(-1, false)?;
+            let max = probs.max_axes(&[-1], false)?;
+            MlxArray::async_eval(&[&idx, &max])?;
+            pending.push((valid, idx, max));
+        }
+        for (valid, idx, max) in pending {
+            let steps = idx.shape()?[1];
+            let (idx, max) = (idx.to_u32_vec()?, max.to_f32_vec()?);
             for (k, &i) in valid.iter().enumerate() {
                 let r = k * steps..(k + 1) * steps;
                 out[i] = Some(ctc_decode(
@@ -363,7 +372,7 @@ impl PpOcrV6Pipeline {
     /// Runs det + rec on a decoded BGR image.
     pub fn recognize_image(&self, image: &BgrImage) -> Result<PpOcrOutput, PipelineError> {
         let dets = self.detect(image)?;
-        let crops: Vec<BgrImage> = dets.iter().map(|d| rotate_crop(image, &d.quad)).collect();
+        let crops = crate::parallel::map(&dets, |d| rotate_crop(image, &d.quad));
         let decoded = self.recognize(&crops)?;
         let lines: Vec<TextLine> = dets
             .iter()

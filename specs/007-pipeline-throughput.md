@@ -95,7 +95,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | --- | --- | --- | --- | --- | --- |
 | WS-01 | Decode loops submit step k+1 before reading token k (Qwen3-ASR, PaddleOCR-VL, Unlimited-OCR with its n-gram guard) | coordinator | Done | None | bench tok/s; goldens; corpus gate identical |
 | WS-02 | PDF pages rendered in the background and fed to OCR as they finish; PNM instead of PNG | coordinator | Done | None | multi-page PDF wall time; corpus gate identical; cancellation tests |
-| WS-03 | PP-OCRv6: async rec batches, threaded crop/warp/resize/normalize | coordinator | Pending | None | `ppocrv6` example; checkpoint test; corpus gate identical |
+| WS-03 | PP-OCRv6: async rec batches, threaded crop/warp/resize/normalize | coordinator | Done | None | `ppocrv6` example; checkpoint test; corpus gate identical |
 | WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Pending | None | preprocess goldens; OCR page latency |
 | WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Pending | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
 | WS-06 | Aligner `lm_head` at slots only (if argmax identical); PaddleOCR-VL batched quantize at load | coordinator | Pending | None | aligner parity; load time |
@@ -202,6 +202,29 @@ Append entries rather than rewriting another worker's record.
     cleanup, and PNG for remote OCR.
 - Remaining: WS-03..09.
 - Next action: WS-03 PP-OCRv6 rec pipelining.
+
+### 2026-10-26 — coordinator — WS-03
+
+- Changed:
+  - New `aimd_engine::parallel` helper (`for_row_bands` and an ordered
+    `map`, scoped threads).
+  - PP-OCRv6 now threads `resize_linear` by output-row bands, det
+    normalization, `rotate_crop` per detection and `rec_preprocess` per
+    crop.
+  - Recognition submits every batch (`async_eval`) before reading any back.
+- Evidence:
+  - Stage profile of `report-p1`: det GPU about 320 ms, rec GPU about
+    290 ms (5 batches of 6). Host stages: decode 2, det preprocess 11, DB
+    postprocess 3, crops 9 and rec preprocess 4 ms. Host work was about 5% of
+    a page, which caps this workstream.
+  - Warm latency, 4 corpus pages x 4 interleaved rounds vs bf6c24b:
+    0.93-0.97 -> 0.82-0.92 s, 0.58-0.64 -> 0.55-0.60 s, 0.60-0.67 ->
+    0.58-0.64 s, and 0.54-0.60 -> 0.58-0.61 s (one page also had 0.83 and
+    0.95 s outliers, which are GPU noise).
+  - Text is byte-identical. PP-OCRv6 checkpoint tests (10) pass on Metal,
+    and `corpus_gate --ocr-model pp-ocrv6` matches 5/5.
+- Remaining: WS-04..09.
+- Next action: WS-04 Pillow resize threading and single image decode.
 
 ## Completion summary
 
