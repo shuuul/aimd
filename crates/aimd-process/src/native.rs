@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use aimd_core::{AimdError, Result, log_info};
+use aimd_core::{AimdError, Result, Segment, anchors, log_info};
 use aimd_engine::models::paddleocr_vl::pipeline::{
-    PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest,
+    PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest, VlTask,
 };
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpPipelineError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_asr::pipeline::{
@@ -19,7 +19,9 @@ use aimd_engine::models::unlimited_ocr::pipeline::{
 };
 
 use crate::models::{OcrFamily, PADDLEOCR_VL_REPO, ocr_family};
-use crate::{AsrFailure, AsrModel, CommandOutput, LocalModality, OcrFailure, OcrModel, Runtime};
+use crate::{
+    AsrFailure, AsrModel, CommandOutput, LocalModality, LocatedOcr, OcrFailure, OcrModel, Runtime,
+};
 
 /// Native runtime (real system, cached pipelines).
 #[derive(Debug, Default, Clone, Copy)]
@@ -169,19 +171,101 @@ enum NativeOcr {
 
 impl OcrModel for NativeOcr {
     fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure> {
+        self.recognize_located(image_path, false)
+            .map(|ocr| ocr.markdown)
+    }
+
+    fn recognize_located(
+        &self,
+        image_path: &Path,
+        spotting: bool,
+    ) -> std::result::Result<LocatedOcr, OcrFailure> {
+        let segment = |text: &str, kind: &str| Segment {
+            text: text.to_string(),
+            kind: Some(kind.into()),
+            ..Segment::default()
+        };
         match self {
             Self::Unlimited(p) => match p.recognize_path(image_path, OcrRequest::default()) {
-                Ok(result) => Ok(result.markdown),
+                Ok(result) => Ok(LocatedOcr {
+                    blocks: Some(
+                        result
+                            .blocks
+                            .iter()
+                            .map(|b| Segment {
+                                bbox: Some(b.bbox),
+                                ..segment(&b.text, &b.kind)
+                            })
+                            .collect(),
+                    ),
+                    markdown: result.markdown,
+                    lines: None,
+                }),
                 Err(OcrPipelineError::EmptyContent) => Err(OcrFailure::Empty),
                 Err(e) => Err(OcrFailure::Other(e.to_string())),
             },
-            Self::PaddleVl(p) => match p.recognize_path(image_path, VlRequest::default()) {
-                Ok(result) => Ok(result.markdown),
-                Err(VlPipelineError::EmptyContent) => Err(OcrFailure::Empty),
-                Err(e) => Err(OcrFailure::Other(e.to_string())),
-            },
+            Self::PaddleVl(p) => {
+                let run = |task| match p.recognize_path(
+                    image_path,
+                    VlRequest {
+                        task,
+                        ..VlRequest::default()
+                    },
+                ) {
+                    Ok(result) => Ok(result),
+                    Err(VlPipelineError::EmptyContent) => Err(OcrFailure::Empty),
+                    Err(e) => Err(OcrFailure::Other(e.to_string())),
+                };
+                let markdown = run(VlTask::Ocr)?.markdown;
+                // Spotting loses tables/structure, so it only adds line
+                // positions; an empty spotting pass is not an error.
+                let lines = match spotting {
+                    true => match run(VlTask::Spotting) {
+                        Ok(out) => Some(
+                            out.spots
+                                .iter()
+                                .map(|s| Segment {
+                                    quad: Some(s.quad),
+                                    bbox: Some(anchors::quad_bbox(&s.quad)),
+                                    ..segment(&s.text, "line")
+                                })
+                                .collect(),
+                        ),
+                        Err(OcrFailure::Empty) => None,
+                        Err(e) => return Err(e),
+                    },
+                    false => None,
+                };
+                Ok(LocatedOcr {
+                    markdown,
+                    blocks: None,
+                    lines,
+                })
+            }
             Self::PpOcr(p) => match p.recognize_path(image_path) {
-                Ok(result) => Ok(result.markdown),
+                Ok(result) => {
+                    let (w, h) = (result.width.max(1) as f32, result.height.max(1) as f32);
+                    let lines = result
+                        .lines
+                        .iter()
+                        .map(|l| {
+                            let quad = l
+                                .quad
+                                .map(|[x, y]| [(x / w).clamp(0.0, 1.0), (y / h).clamp(0.0, 1.0)]);
+                            Segment {
+                                quad: Some(quad),
+                                bbox: Some(anchors::quad_bbox(&quad)),
+                                score: Some(l.score),
+                                ..segment(&l.text, "line")
+                            }
+                        })
+                        .collect();
+                    Ok(LocatedOcr {
+                        markdown: result.markdown,
+                        blocks: None,
+                        lines: Some(lines),
+                    })
+                }
                 Err(PpPipelineError::EmptyContent) => Err(OcrFailure::Empty),
                 Err(e) => Err(OcrFailure::Other(e.to_string())),
             },
