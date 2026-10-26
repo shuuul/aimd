@@ -80,6 +80,7 @@ mlx_vlm) on the same machine, measured before the Python package was removed.
 | 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/page_text.png` (4x5 crops, 2327-token prompt) | — | 2.50-2.55 s | ~0.77 s | 170-177 tok/s | 4.51-4.65 s | Reference. |
 | 2026-10-25 | native MLX | same | — | 2.61-2.63 s | 0.79-0.82 s | 165-175 tok/s | 4.67-4.75 s | Markdown identical, finish=stop, 197/197 tokens. Vision + prefill are bit-exact vs mlx_vlm goldens; single-token decode drifts ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
 | 2026-10-26 | native MLX, `main` vs WS-13 | same, interleaved on a loaded machine | — | 2.59-2.80 s both | 0.77-0.92 s both | 166-177 tok/s both | 4.64-4.87 s both | Compiled SwiGLU (dense MLP, shared experts, `SwitchGLU`) is neutral within noise; OCR already had the step-256/ring KV and `async_eval` pipelining. |
+| 2026-10-26 | native MLX, WS-08 kernels | `page_text.png` / `small_text.png` | — | 2.20 s / 0.31 s | 0.69 s (3390 tok/s) / 0.10 s | 254 / 305 tok/s | 3.78 s / 0.63 s | Fused MoE expert + router, decode sdpa, compiled GELU; markdown identical. |
 
 Retired: the hand-written CPU prototype reached 0.1-0.3x realtime on ASR
 and ~734 s per OCR page (vs 4.8 s on MLX); it was deleted under the
@@ -207,6 +208,31 @@ text identical (the first run on a machine pays a one-time Metal compile).
 The rel-pos bias broadcast add already writes ~104 GB/s in isolation; a
 custom kernel was no faster (the 25 ms seen under per-op evals is
 first-touch allocation).
+
+## Golden-corpus accuracy (2026-10-26)
+
+Labeled corpus from `scripts/corpus/`, built by `uv run scripts/build_corpus.py`:
+72 ASR clips (12 en + 12 zh sentences, 3 macOS `say` voices each, 16 kHz)
+and 4 OCR documents / 5 A4 pages (Pandoc + headless Chrome, rasterized with
+`mutool draw -r 144` like production). Scored by
+`cargo run --release -p aimd-engine --example corpus_gate` against the
+mlx-audio 0.5.3 / mlx-vlm 0.7.0 outputs from `uv run scripts/corpus_baseline.py`.
+WER is English words, CER Chinese characters, both after dropping
+punctuation; OCR similarity is 1 - edit distance / longer length over
+alphanumeric and CJK characters with markup removed.
+
+| Checkpoint | en WER | zh CER | OCR similarity | finish=stop | Identical to reference |
+|------------|--------|--------|----------------|-------------|------------------------|
+| Qwen3-ASR-1.7B-4bit | 0.87% | 3.83% | — | — | 72/72 |
+| Qwen3-ASR-1.7B-8bit | 0.44% | 3.55% | — | — | 72/72 |
+| Qwen3-ASR-0.6B-6bit | 1.31% | 3.40% | — | — | 72/72 |
+| Unlimited-OCR-4bit | — | — | 1.0000 | 5/5 | 5/5 pages |
+| Unlimited-OCR-8bit | — | — | 1.0000 | 5/5 | 5/5 pages |
+
+The speech is synthetic and the pages are clean renders, so absolute
+error rates are optimistic. Zh errors are real homophone/near-sound
+mistakes on the weaker voices (构建 -> 断线, 她 -> 他); en errors include
+"twenty" -> "20". Identity with the Python reference is the strong signal.
 
 ## Smoke-test record (Python era)
 

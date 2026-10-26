@@ -20,7 +20,7 @@ Interfaces (one binary each):
 Distribution:
 
 - **Homebrew**: `brew install shuuul/tap/aimd` (formula in `shuuul/homebrew-tap`).
-  Bottles for macOS arm64. Linux bottles wait on WS-09 (tap mlx formula with the CUDA
+  Bottles for macOS arm64. Linux bottles wait on spec 003 (tap mlx formula with the CUDA
   backend).
 - **Runtime deps** (formula `depends_on`): `mlx`, `ffmpeg`, `mupdf` (`mutool`),
   `pandoc`, `yt-dlp`. Model weights download from Hugging Face on first use into the HF
@@ -125,6 +125,7 @@ flowchart TD
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
 | Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,unlimited_ocr}/` | MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. |
 | MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. |
+| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm reference. |
 | Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
 
 ## CONVENTIONS
@@ -200,10 +201,12 @@ flowchart TD
   URLs gain `/v1`. Explicit values override the environment. Remote precision is
   server-owned, so a local `precision` is ignored with one warning.
 - **MLX only**: MLX is the only compute backend (Metal on macOS; CUDA via the mlx CUDA
-  backend is WS-09). Do not add CPU compute paths or hand-written CUDA.
+  backend is spec 003). Do not add CPU compute paths or hand-written CUDA.
 - **Document tools**: Pandoc (brew) reads every supported document format; `.txt`/`.md`
   pass through; legacy `.doc`/`.ppt`/`.xls` and MOBI/AZW3 are unsupported. Text-layer
   PDFs use the `pdf-inspector` crate; scanned pages render with `mutool draw`.
+  Pandoc 3.12 rejects xlsx workbooks whose rels use absolute targets (openpyxl
+  output); Excel-style relative targets convert.
 - **Readable HTML**: `aimd_url::convert_readable_html` (dom_smoothie, with
   `AIMD_READABLE_BACKEND=defuddle` as an escape hatch) exists but is not routed from any
   interface. Do not advertise it until a `TaskType` routes to it.
@@ -313,6 +316,12 @@ Tests are lean by rule; weights are the expensive resource.
      fixture image/clip. Anything that shells out to real tools (`say`, `ffmpeg`,
      `pandoc`, `yt-dlp`, `mutool`, `uv run` references) or writes outside a temp dir is
      tier 3.
+  4. Golden-corpus gate (accuracy): `scripts/build_corpus.py` builds labeled
+     `say` clips and rendered pages from `scripts/corpus/`,
+     `scripts/corpus_baseline.py` records mlx-audio / mlx-vlm outputs, and the
+     `corpus_gate` example scores both (ASR WER/CER <= baseline + 1%, OCR
+     similarity >= baseline - 2%, stop rate no lower). Run it after any change
+     that can move model outputs or when adding a model/precision.
 - **Extend, don't duplicate**: a new stage check extends the existing golden
   test for that model; do not add a second test that covers the same stage
   or reloads the same weights. Delete tests made redundant by a backend or
@@ -398,6 +407,11 @@ curl http://127.0.0.1:8000/healthz
 
 # Regenerate a golden set (not shipped; needs uv)
 uv run scripts/export_mel_reference.py
+
+# Golden-corpus accuracy gate (macOS: say + Chrome; corpus in target/corpus)
+uv run scripts/build_corpus.py
+uv run scripts/corpus_baseline.py
+cargo run --release -p aimd-engine --example corpus_gate
 ```
 
 ## BEFORE EVERY COMMIT
@@ -456,4 +470,4 @@ auto-updated. Release notes come from the GitHub Release.
   it. When bumping brew mlx, update `MLX_BREW_VERSION` there.
 - `.github/workflows/release.yml`: release build, smoke test, GitHub Release, and tap PR
   (see above).
-- No Linux job until WS-09 (mlx CUDA backend).
+- No Linux job until spec 003 (mlx CUDA backend).

@@ -1,15 +1,15 @@
 # aimd 原生化重构设计（v0.5，历史文档）
 
 > **当前状态（2026-10-26，aimd 1.0.0）：本文是 v0.5 设计快照，多处已被后续决策取代，仅作历史记录保留。**
-> 以 `specs/002-native-engine.md` 的 Decisions 表与 `AGENTS.md` 为准。已落地的终态：
+> 以 `specs/archive/002-native-engine.md` 的 Decisions 表与 `AGENTS.md` 为准。已落地的终态：
 >
 > - **全 Rust 接口层**（WS-15..WS-20）：CLI（`aimd`）、HTTP API（`aimd-api`，axum）、MCP（`aimd-mcp`，rmcp）、文档管线（`aimd-doc`）、URL 管线（`aimd-url`）全部移植到 Rust；Python 包（`src/aimd`、MarkItDown 插件体系、`aimd._native` PyO3 设想）已删除。
 > - **纯 Homebrew 分发**（WS-21）：`brew install shuuul/tap/aimd`，运行时依赖 `mlx`、`ffmpeg`、`mupdf`、`pandoc`、`yt-dlp` 由 brew 提供；不再发布 PyPI wheel，WS-10（PyO3/双 wheel）取消。
-> - **MLX 唯一计算后端**：手写 CPU 引擎、`aimd-tensor`、自写 CUDA/CUTLASS 路线均已删除或取消；Linux 走 mlx 的 CUDA 后端（WS-09，未完成）；手写 MSL（WS-08）改为 MLX 图内的自定义 Metal 内核。
+> - **MLX 唯一计算后端**：手写 CPU 引擎、`aimd-tensor`、自写 CUDA/CUTLASS 路线均已删除或取消；Linux 走 mlx 的 CUDA 后端（spec 003，未完成）；手写 MSL（WS-08）改为 MLX 图内的自定义 Metal 内核。
 > - **模型矩阵**：Qwen3-ASR 1.7B/0.6B + Unlimited-OCR，精度 4bit/6bit/8bit；bf16 暂不支持；GLM-OCR 已移除。
 > - 下文 §0、§1（"接口层原生化"非目标）、§4.1、§4.2（hf-hub 已改为自写 HTTPS 下载 + HF 缓存）、§5.4、§5.6、§6、§7、§9 中涉及 Python 接口层、PyPI/wheel、CPU 引擎与 CUDA 自写内核的内容均为**已取代**的计划。文中"MLX 基线""mlx-audio""mlx-vlm"指 Python 时代的参照实现。
 
-> 原状态（v0.5）：设计定稿，已立项执行。执行跟踪见 `specs/002-native-engine.md`。
+> 原状态（v0.5）：设计定稿，已立项执行。执行跟踪见 `specs/archive/002-native-engine.md`（Linux 见 `specs/003-linux-mlx-cuda.md`）。
 > 事实来源：模型结构取自本机缓存的 `mlx-community/Qwen3-ASR-1.7B-4bit` 与
 > `mlx-community/Unlimited-OCR-4bit` 的 `config.json`；性能基线取自
 > `docs/performance.md`；体积数据为本机实测（2026-10-25）。
@@ -154,7 +154,7 @@ gundam 预处理（插值逐像素对齐）、SAM ViT-B、MoE 解码器（sigmoi
 路由、首层 dense、sliding_window=128）、n-gram guard（35/128）、markdown
 归一化。
 
-### 5.4 CUDA 内核（自写 .cu + CUTLASS，metacube 验证，mlx[cuda] 兜底）（已取消：改走 mlx CUDA 后端，WS-09）
+### 5.4 CUDA 内核（自写 .cu + CUTLASS，metacube 验证，mlx[cuda] 兜底）（已取消：改走 mlx CUDA 后端，spec 003）
 
 分工：量化热路径与注意力自写；大型稠密 GEMM 与 grouped GEMM 借 CUTLASS
 起步。内核清单与 v0.3 相同（qgemm/attention/conv1d/fused-norm-rope；

@@ -1,4 +1,4 @@
-# ANE 可行性调研（WS-12, specs/002-native-engine.md）
+# ANE 可行性调研（WS-12, specs/archive/002-native-engine.md）
 
 > 状态：调研完成，供 go/no-go 决策。作者：agent-ane（2026-10-25）。
 > 证据分级：【实测】= 本机命令验证；【文献】= 带引用的公开资料；【推断】=

@@ -1,4 +1,4 @@
-# ANE 编码器 spike 实测结果（WS-12b, specs/002-native-engine.md）
+# ANE 编码器 spike 实测结果（WS-12b, specs/archive/002-native-engine.md）
 
 > 状态：spike 完成，供 go/no-go 决策。作者：agent-ane-spike（2026-10-25）。
 > 设计依据：`docs/ane-feasibility.md` §8"最小 spike 设计"（步骤 1–4 逐条执行）。

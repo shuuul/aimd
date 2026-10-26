@@ -1,11 +1,11 @@
 name: CI
 
-# The Rust engine is MLX-only (specs/002-native-engine.md, "MLX-ONLY engine"):
+# The Rust engine is MLX-only (specs/archive/002-native-engine.md, "MLX-ONLY engine"):
 # `aimd-engine` links `aimd-mlx`, whose build.rs needs brew `mlx`, so it
 # builds on macOS only. There is deliberately no Linux job yet: the
 # mlx-free crate (aimd-weights) is already exercised by the macOS
 # `cargo test --workspace`, so a Linux runner would add cost, not signal.
-# WS-09 (mlx-cuda on Linux) adds the Linux job; see the TODO below.
+# Spec 003 (mlx-cuda on Linux) adds the Linux job; see the TODO below.
 #
 # Cost notes (macOS minutes bill at 10x): PR branches run only via
 # `pull_request` (no duplicate `push` run), drafts skip the macOS job,
@@ -138,7 +138,7 @@ jobs:
           AIMD_MLX_DEVICE: cpu
         run: cargo test --workspace
 
-  # TODO(WS-09): add a Linux job once aimd-mlx supports the mlx CUDA backend
+  # TODO(spec 003): add a Linux job once aimd-mlx supports the mlx CUDA backend
   # (needs a CUDA-capable self-hosted runner such as metacube, or a
   # CPU-only mlx build for compile + hermetic tests): install mlx/CUDA
   # toolchain, set MLX_PREFIX, then run the same fmt/clippy/test sequence.
