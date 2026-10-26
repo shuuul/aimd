@@ -45,6 +45,31 @@ steady state. "Reference" rows are mlx-audio / mlx_vlm on the same machine
 | 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/page_text.png` (4x5 crops, 2327-token prompt) | — | 2.50-2.55 s | ~0.77 s | 170-177 tok/s | 4.51-4.65 s | Reference. |
 | 2026-10-26 | native MLX | `page_text.png` / `small_text.png` | 0.58 s | 2.20 s / 0.31 s | 0.69 s (3390 tok/s) / 0.10 s | 254 / 305 tok/s | 3.78 s / 0.63 s | Fused MoE expert + router, decode sdpa, compiled GELU. Markdown identical to the reference, finish=stop. Vision + prefill are bit-exact vs the mlx_vlm goldens; single-token decode can drift ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
 
+### PaddleOCR-VL-1.6
+
+Apple M2 Pro, release build, `mutool draw -r 144` page (1224x1584, 1253-token
+prompt, 995 generated tokens). Markdown byte-identical to mlx-vlm 0.7.10 in
+both precisions.
+
+| Date | Backend | Precision | Load | Prefill | Decode | Total |
+|------|---------|-----------|------|---------|--------|-------|
+| 2026-10-26 | mlx-vlm 0.7.10 | bf16 | — | 630 tok/s | 167 tok/s | 8.0 s |
+| 2026-10-26 | mlx-vlm 0.7.10 | 4bit (mlx-community repo) | — | 540 tok/s | 321-332 tok/s | 5.3-5.5 s |
+| 2026-10-26 | native MLX | bf16 | 1.6-3.3 s | 620 tok/s | 161 tok/s | 8.3 s |
+| 2026-10-26 | native MLX | 4bit (quantized at load) | 0.5-2.3 s | 565 tok/s | 326 tok/s | 5.3 s |
+
+### PP-OCRv6 medium
+
+Apple M2 Pro, release build, mlx4ocr 0.1.2 example images; load 0.21 s.
+Det + rec outputs are bit-exact with mlx4ocr from decoded pixels on.
+
+| Image | Native first / warm | mlx4ocr |
+|-------|---------------------|---------|
+| sample_doc | 0.24 / 0.21 s | 0.26 s |
+| img_10 (1280x720) | 0.31 / 0.28 s | 0.34 s |
+| general_ocr_002 | 0.56 / 0.50 s | 0.60 s |
+| word_1 (no text) | 1.58 / 0.64 s | 0.67 s |
+
 ASR decode loop: in the pipelined ASR loop the host builds a step's graph in
 ~0.4 ms, and the remaining ~8 ms per token is GPU work plus Metal encode for
 ~25 kernels per layer x 28 layers. Elementwise fusion (`mlx::core::compile`)
@@ -184,6 +209,14 @@ alphanumeric and CJK characters with markup removed.
 | Qwen3-ASR-0.6B-6bit | 1.31% | 3.40% | — | — | 72/72 |
 | Unlimited-OCR-4bit | — | — | 1.0000 | 5/5 | 5/5 pages |
 | Unlimited-OCR-8bit | — | — | 1.0000 | 5/5 | 5/5 pages |
+| PaddleOCR-VL-1.6 bf16 | — | — | 1.0000 | 5/5 | 5/5 pages |
+| PaddleOCR-VL-1.6 4bit | — | — | 1.0000 | 5/5 | 5/5 pages |
+| PP-OCRv6 medium | — | — | 1.0000 | 5/5 | 5/5 pages |
+
+PaddleOCR-VL and PP-OCRv6 baselines come from
+`uv run scripts/corpus_baseline_paddle.py` (mlx-vlm 0.7.10, mlx4ocr 0.1.2);
+score with `corpus_gate -- --only ocr --ocr-model paddleocr-vl [--ocr-bits 4]`
+or `--ocr-model pp-ocrv6`.
 
 The speech is synthetic and the pages are clean renders, so absolute
 error rates are optimistic. Zh errors are real homophone/near-sound

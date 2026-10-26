@@ -120,7 +120,7 @@ flowchart TD
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
 | Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
 | MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. |
-| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm reference. |
+| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. |
 | Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
 
 ## CONVENTIONS
@@ -334,7 +334,8 @@ Tests are lean by rule; weights are the expensive resource.
      tier 3.
   4. Golden-corpus gate (accuracy): `scripts/build_corpus.py` builds labeled
      `say` clips and rendered pages from `scripts/corpus/`,
-     `scripts/corpus_baseline.py` records mlx-audio / mlx-vlm outputs, and the
+     `scripts/corpus_baseline.py` records mlx-audio / mlx-vlm outputs
+     (`corpus_baseline_paddle.py` for PaddleOCR-VL / PP-OCRv6), and the
      `corpus_gate` example scores both (ASR WER/CER <= baseline + 1%, OCR
      similarity >= baseline - 2%, stop rate no lower). Run it after any change
      that can move model outputs or when adding a model/precision.
@@ -431,7 +432,9 @@ uv run scripts/export_mel_reference.py
 # Golden-corpus accuracy gate (macOS: say + Chrome; corpus in target/corpus)
 uv run scripts/build_corpus.py
 uv run scripts/corpus_baseline.py
+uv run scripts/corpus_baseline_paddle.py
 cargo run --release -p aimd-engine --example corpus_gate
+cargo run --release -p aimd-engine --example corpus_gate -- --only ocr --ocr-model pp-ocrv6
 ```
 
 ## BEFORE EVERY COMMIT

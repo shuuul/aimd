@@ -12,7 +12,6 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
-| [004-ppocrv6-paddleocr-vl.md](004-ppocrv6-paddleocr-vl.md) | Active | PP-OCRv6 medium and PaddleOCR-VL-1.6 native OCR; ASR language auto-detection |
 
 ## Archived specs
 
@@ -21,6 +20,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 | [001-remote-asr-ocr.md](archive/001-remote-asr-ocr.md) | 2026-08-24 | Opt-in OpenAI-compatible ASR/OCR HTTP backends for dspark vLLM |
 | [002-native-engine.md](archive/002-native-engine.md) | 2026-10-26 | Native Rust engine on MLX (Qwen3-ASR + Unlimited-OCR) with Rust CLI/API/MCP, shipped via Homebrew on macOS |
 | [003-linux-mlx-cuda.md](archive/003-linux-mlx-cuda.md) | 2026-10-26 | Linux on the mlx CUDA backend: tap mlx-cuda (wheel repackage), source install, corpus gate on metacube and dspark |
+| [004-ppocrv6-paddleocr-vl.md](archive/004-ppocrv6-paddleocr-vl.md) | 2026-10-26 | PP-OCRv6 medium and PaddleOCR-VL-1.6 native OCR; ASR language auto-detection |
 
 ## Lifecycle
 

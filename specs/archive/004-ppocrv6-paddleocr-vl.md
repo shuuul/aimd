@@ -1,7 +1,7 @@
 ---
 id: "004"
 title: "PP-OCRv6 and PaddleOCR-VL-1.6 OCR engines; ASR language auto-detection"
-status: Active
+status: Completed
 created: 2026-10-26
 updated: 2026-10-26
 coordinator: "shuuul"
@@ -44,23 +44,24 @@ load replaces the pickle download.
 
 ## Goal and success criteria
 
-- [ ] `aimd scan.png --model pp-ocrv6` runs PP-OCRv6 medium det + rec natively
+- [x] `aimd scan.png --model pp-ocrv6` runs PP-OCRv6 medium det + rec natively
       on MLX; det probability map and rec logits match mlx4ocr goldens
       (hermetic slices + checkpoint tier), and DB boxes / final text match
-      the mlx4ocr e2e golden on its `examples/images`.
-- [ ] `aimd scan.png --model paddleocr-vl` runs PaddleOCR-VL-1.6 natively
+      the mlx4ocr e2e golden on its `examples/images` (lossless inputs; see
+      the JPEG decision).
+- [x] `aimd scan.png --model paddleocr-vl` runs PaddleOCR-VL-1.6 natively
       (bf16 default; `4bit`/`6bit`/`8bit` quantize at load with the mlx-vlm
       convert rule: every module with `in_dim % 64 == 0`);
       vision features, decoder logits, and greedy text match mlx-vlm goldens.
-- [ ] Omitting `--language` auto-detects for local ASR (no forced language
+- [x] Omitting `--language` auto-detects for local ASR (no forced language
       in the prompt), for every segment and for the URL audio fallback;
       explicit `--language` still forces it. Accepted codes widen to the
       engine's 30-language Qwen3-ASR table.
-- [ ] CLI help, MCP schema descriptions, README, and AGENTS.md list the new
+- [x] CLI help, MCP schema descriptions, README, and AGENTS.md list the new
       aliases and the auto-detect default; no GLM-OCR/Transformers mentions.
-- [ ] Corpus gate: both new models score within the AGENTS.md bounds of
+- [x] Corpus gate: both new models score within the AGENTS.md bounds of
       their Python reference (mlx4ocr / mlx-vlm) on `scripts/corpus` pages.
-- [ ] `prek`, fmt, clippy `-D warnings`, and the hermetic tier pass; hermetic
+- [x] `prek`, fmt, clippy `-D warnings`, and the hermetic tier pass; hermetic
       runtime stays about 2 minutes.
 
 ## Scope and non-goals
@@ -97,6 +98,8 @@ Not in scope:
 | 2026-10-26 | Local OCR ignores `--language` silently (help text says it is a transcription hint) | All OCR families are multilingual | WS-05 |
 | 2026-10-26 | PaddleOCR-VL quantization follows the mlx-vlm convert rule (212 modules incl. vision qkv/out_proj/fc1, projector, position embedding; vision `fc2` stays dense), not decoder-only | Keeps 4-bit bit-exact with `mlx-community/PaddleOCR-VL-1.6-4bit` | WS-03 |
 | 2026-10-26 | Quantized PaddleOCR-VL model keys are `PaddlePaddle/PaddleOCR-VL-1.6:<precision>` | A colon cannot appear in a Hub repo id, so the key never collides with a real repo; `aimd_process::models::ocr_family` decodes it | WS-05 |
+| 2026-10-26 | Accept JPEG decode drift for PP-OCRv6 (zune-jpeg vs PIL libjpeg-turbo, up to 4 levels/pixel); parity is bit-exact from decoded pixels and on lossless inputs (PNG, mutool-rendered PDF pages) | A libjpeg-turbo-exact decoder would be a new crate or a hand-written codec; on mlx4ocr's JPEG examples text differs on one line of 39 | WS-02 |
+| 2026-10-26 | New OCR baselines live in `scripts/corpus_baseline_paddle.py` (mlx 0.32.4, mlx-vlm 0.7.10, mlx4ocr 0.1.2); `corpus_gate --ocr-model` selects the family and its baseline key | The Unlimited-OCR baseline stays pinned to mlx-vlm 0.7.0 | WS-06 |
 | 2026-10-26 | Engine API contracts (below) are frozen before WS-02/WS-03 start so WS-05 can wire against them | Parallel workers in separate worktrees | WS-02, WS-03, WS-05 |
 
 Engine API contracts:
@@ -131,11 +134,11 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
 | WS-01 | `aimd-mlx` shim ops for conv nets and the VL graph | coordinator | Done | None | `cargo test -p aimd-mlx --test mlx_ops_conv` (CPU and Metal) |
-| WS-02 | `aimd-engine::models::pp_ocrv6`: det (PPLCNetV4 + RepLKPAN + IntraCL + DB head), rec (PPLCNetV4 + LightSVTR + CTC), cv2-exact preprocessing, DB postprocess, crop, CTC decode, reading-order markdown; goldens via `scripts/export_ppocrv6_reference.py` (mlx4ocr) | agent ws02 | Claimed | WS-01 | hermetic golden tests; checkpoint parity tier; e2e text vs mlx4ocr on its examples |
+| WS-02 | `aimd-engine::models::pp_ocrv6`: det (PPLCNetV4 + RepLKPAN + IntraCL + DB head), rec (PPLCNetV4 + LightSVTR + CTC), cv2-exact preprocessing, DB postprocess, crop, CTC decode, reading-order markdown; goldens via `scripts/export_ppocrv6_reference.py` (mlx4ocr) | agent ws02 | Done | WS-01 | hermetic golden tests; checkpoint parity tier; e2e text vs mlx4ocr on its examples |
 | WS-03 | `aimd-engine::models::paddleocr_vl`: image processor, vision tower, projector, ERNIE decoder with mRoPE + KV cache, greedy generation, load-time quantization; goldens via `scripts/export_paddleocr_vl_reference.py` (mlx-vlm 0.7.10) | agent ws03 | Done | WS-01 | hermetic golden tests; checkpoint parity tier (bf16 + 4-bit vs mlx-community 4bit); e2e text vs mlx-vlm |
 | WS-04 | ASR language auto-detection (process, Runtime trait, URL fallback, tests, help) | coordinator | Done | None | hermetic tests in `aimd-process` |
-| WS-05 | Model resolution, `NativeRuntime` dispatch, CLI/MCP help, README/AGENTS docs | coordinator | In progress | WS-02/WS-03 API | hermetic tests; CLI smoke |
-| WS-06 | Corpus gate + performance notes for both models | coordinator | Pending | WS-02, WS-03, WS-05 | `corpus_gate` within bounds; `docs/performance.md` |
+| WS-05 | Model resolution, `NativeRuntime` dispatch, CLI/MCP help, README/AGENTS docs | coordinator | Done | WS-02/WS-03 API | hermetic tests; CLI smoke |
+| WS-06 | Corpus gate + performance notes for both models | coordinator | Done | WS-02, WS-03, WS-05 | `corpus_gate` within bounds; `docs/performance.md` |
 
 ## Verification
 
@@ -194,6 +197,39 @@ Append entries rather than rewriting another worker's record.
 - Blockers: WS-02.
 - Next action: merge WS-02.
 
+### 2026-10-26 — agent ws02 — WS-02
+
+- Changed: `crates/aimd-engine/src/models/pp_ocrv6/`, `examples/ppocrv6.rs`,
+  `tests/golden/ppocrv6/`, `scripts/export_ppocrv6_reference.py` (commit `c64f7c0`).
+- Evidence: prob maps, rec argmax/max, lines, scores, and quads identical to mlx4ocr
+  on Metal for sample_doc, general_ocr_002, img_10; warm 0.21-0.50 s per image vs
+  mlx4ocr 0.26-0.60 s.
+- Remaining: CUDA checkpoint tier.
+- Blockers: none.
+- Next action: coordinator wires it (WS-05).
+
+### 2026-10-26 — coordinator — WS-05, WS-06
+
+- Changed: PP-OCRv6 dispatch + README/AGENTS docs (`65aecd1`); `corpus_gate --ocr-model`,
+  `scripts/corpus_baseline_paddle.py`, `docs/performance.md`.
+- Evidence: `aimd general_ocr_002.png --model pp-ocrv6` 1.3 s end to end; corpus gate
+  PASS with 5/5 pages identical to the reference for PaddleOCR-VL bf16, PaddleOCR-VL
+  4bit, and PP-OCRv6; Unlimited-OCR unchanged (5/5); hermetic tier 351 passed.
+- Remaining: Linux CUDA checkpoint tier and corpus gate for both models (metacube).
+- Blockers: none.
+- Next action: none in this spec.
+
 ## Completion summary
 
-Pending.
+Shipped two native OCR families and ASR language auto-detection.
+
+- `pp-ocrv6`: PP-OCRv6 medium det + rec on MLX with hand-written cv2-exact host ops;
+  bit-exact with mlx4ocr from decoded pixels; precision ignored with a warning.
+- `paddleocr-vl`: PaddleOCR-VL-1.6 from the official bf16 checkpoint; `4bit`/`6bit`/
+  `8bit` quantize at load (4-bit bit-identical to the mlx-community repo); greedy text
+  identical to mlx-vlm 0.7.10; speed at parity.
+- Omitted `--language` auto-detects for every local ASR path; 30 explicit codes.
+- README documents the new models and how to use YouTube/podcast descriptions as ASR
+  context; AGENTS.md, help text, and the MCP description list the new aliases.
+- Follow-up outside this spec: run the checkpoint tier and corpus gate for both new
+  models on Linux CUDA (metacube).
