@@ -213,6 +213,11 @@ flowchart TD
   Linux). Do not add CPU compute paths or hand-written CUDA. The WS-08 custom Metal
   kernels are gated on `aimd_mlx::metal_kernels_available()`; other GPU backends use
   the stock mlx ops.
+- **Fused elementwise ops**: shapeless compiled shim ops (`swiglu`, `gelu`,
+  `gelu_tanh`, `rope_half_split`, `bias_act`) run on every backend and must match
+  the unfused graph value for value (tested in `aimd-mlx/tests`). Do not
+  compile whole models shape-keyed: every new page/clip shape would retrace
+  (spec 006).
 - **Linux build**: `aimd-mlx` links `libmlx.so` from `MLX_PREFIX` (brew `mlx-cuda`, or
   an unpacked `mlx-cuda-13` wheel for dev). Cargo applies the shim's rpath only to
   `aimd-mlx`'s own targets, so dev runs of dependents need

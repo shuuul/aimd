@@ -70,6 +70,9 @@ Det + rec outputs are bit-exact with mlx4ocr from decoded pixels on.
 | general_ocr_002 | 0.56 / 0.50 s | 0.60 s |
 | word_1 (no text) | 1.58 / 0.64 s | 0.67 s |
 
+Spec 006's fused conv epilogues later cut warm to 0.445 / 0.283 / 0.203 s
+(general_ocr_002 / img_10 / sample_doc); see "New-model fast paths".
+
 ASR decode loop: in the pipelined ASR loop the host builds a step's graph in
 ~0.4 ms, and the remaining ~8 ms per token is GPU work plus Metal encode for
 ~25 kernels per layer x 28 layers. Elementwise fusion (`mlx::core::compile`)
@@ -101,6 +104,38 @@ alignment take ~6 s, and segmenting adds a second ASR prefill. Unlimited-OCR
 blocks and PP-OCRv6 quads come from the existing forward pass, so OCR anchors
 are free; only PaddleOCR-VL line segments need the extra pass, and only when
 segments are requested.
+
+### New-model fast paths (spec 006)
+
+Apple M2 Pro, release, warm, A/B runs interleaved. Every kept change is
+bit-identical: model goldens pass on Metal, `corpus_gate` pages/clips are
+identical for all OCR models and ASR, and `aligner_parity` keeps its gated
+MAE (0.17 ms).
+
+| Model | Change | Before | After | Kept |
+|-------|--------|--------|-------|------|
+| PaddleOCR-VL decoder | one mRoPE table per generation (sliced per step), rotary as one compiled kernel (`rope_half_split`: halves-reversed strided view times `[-s, s]`, no slice/negate/concat), `sdpa_decode` for single-token steps | 4-bit 305 tok/s, bf16 162-171 tok/s (360-token page) | 4-bit 342-345 tok/s, bf16 unchanged | yes |
+| PaddleOCR-VL vision | same fused rotary in the tower | prefill 1.95 s | 1.86 s | yes |
+| PaddleOCR-VL vision | pad head dim 72 -> 80 to use fused sdpa | 1.86 s | 1.94 s | no |
+| PP-OCRv6 | conv epilogues `act(conv + b) + residual` as one compiled kernel (`bias_act`: relu, hard sigmoid, gelu) | warm 0.470 / 0.297 / 0.212 s | 0.445 / 0.283 / 0.203 s | yes |
+| ForcedAligner (and ASR) | host log-mel frames split over all cores, zero filterbank weights skipped | mel 700 ms per 300 s; aligner en/zh_300s 5.10 / 5.92 s | mel 95 ms; 4.52 / 5.33 s (mlx-audio 4.70 / 5.57 s) | yes |
+
+PP-OCRv6 images are general_ocr_002 / img_10 / sample_doc. The fused build
+is faster warm than mlx4ocr with `compile_models=True` (0.49 / 0.30 / 0.22
+s) and keeps the non-compiled first call (0.49 / 0.31 / 0.22 s). Whole-model
+shape-keyed `compile` was rejected: it retraces for every new image size
+(first call 1.13 -> 6.73 s on general_ocr_002), and aimd sees a new shape
+per page. Detection is ~95% of a page except on dense pages (39 lines: rec
+0.21 s).
+
+The PaddleOCR-VL decode step is host-bound, not bandwidth-bound: ~0.4 ms
+graph build, ~1.8 ms Metal encode in `async_eval`, ~0.8 ms GPU wait, against
+a ~1.2 ms read roofline at 4-bit, so fewer dispatches pay off. The vision
+tower is 1.65 s of the 1.86 s prefill and compute-bound (~63% of peak);
+biases already go through `addmm`.
+
+After the mel fix the aligner's 300 s cost is tower ~1.5 s and the
+cache-free decoder pass 2.8-3.6 s, both on the shared Qwen3-ASR fast paths.
 
 ### Decode-step kernel profile (Metal)
 

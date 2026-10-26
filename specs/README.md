@@ -12,7 +12,6 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
-| [006-new-model-fast-paths.md](006-new-model-fast-paths.md) | Active | Fast paths for PaddleOCR-VL, PP-OCRv6, and Qwen3-ForcedAligner |
 
 ## Archived specs
 
@@ -23,6 +22,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 | [003-linux-mlx-cuda.md](archive/003-linux-mlx-cuda.md) | 2026-10-26 | Linux on the mlx CUDA backend: tap mlx-cuda (wheel repackage), source install, corpus gate on metacube and dspark |
 | [004-ppocrv6-paddleocr-vl.md](archive/004-ppocrv6-paddleocr-vl.md) | 2026-10-26 | PP-OCRv6 medium and PaddleOCR-VL-1.6 native OCR; ASR language auto-detection |
 | [005-source-anchors.md](archive/005-source-anchors.md) | 2026-10-26 | Source anchors: OCR positions, ForcedAligner ASR timestamps, JSON/SRT/VTT output |
+| [006-new-model-fast-paths.md](archive/006-new-model-fast-paths.md) | 2026-10-26 | Bit-identical fast paths: PaddleOCR-VL fused rotary (+12% 4-bit decode), PP-OCRv6 fused conv epilogues, threaded mel (aligner ahead of mlx-audio) |
 
 ## Lifecycle
 

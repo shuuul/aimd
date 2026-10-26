@@ -1,7 +1,7 @@
 ---
 id: "006"
 title: "Fast paths for PaddleOCR-VL, PP-OCRv6, and Qwen3-ForcedAligner"
-status: Active
+status: Completed
 created: 2026-10-26
 updated: 2026-10-26
 coordinator: "shuuul"
@@ -38,18 +38,18 @@ plus a host-built mRoPE table, so dispatch, not bandwidth, bounds it.
 
 ## Goal and success criteria
 
-- [ ] PaddleOCR-VL 4-bit decode improves >= 10% and bf16 decode does not
+- [x] PaddleOCR-VL 4-bit decode improves >= 10% and bf16 decode does not
       regress; the prefill/vision gain is recorded either way.
-- [ ] PP-OCRv6 warm latency reaches mlx4ocr's compiled warm numbers without
+- [x] PP-OCRv6 warm latency reaches mlx4ocr's compiled warm numbers without
       its per-shape first-call cost (first call stays within 10% of today).
-- [ ] ForcedAligner closes the gap to mlx-audio on the 300 s probes, or the
+- [x] ForcedAligner closes the gap to mlx-audio on the 300 s probes, or the
       remaining gap is explained.
-- [ ] Outputs stay identical: model goldens pass on Metal, `corpus_gate`
+- [x] Outputs stay identical: model goldens pass on Metal, `corpus_gate`
       reports identical pages/clips for all OCR models and ASR, and
       `aligner_parity` passes with unchanged gated MAE.
-- [ ] Every tried change is recorded in `docs/performance.md` with its
+- [x] Every tried change is recorded in `docs/performance.md` with its
       measured effect (kept or not).
-- [ ] fmt, clippy `-D warnings`, prek, hermetic tier pass.
+- [x] fmt, clippy `-D warnings`, prek, hermetic tier pass.
 
 ## Scope and non-goals
 
@@ -82,11 +82,11 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | PaddleOCR-VL decoder: cached decode rotary tables, fused rotary apply, `sdpa_decode` | coordinator | Claimed | None | `bench_paddleocr_vl` bf16 + 4-bit; checkpoint goldens on Metal; corpus gate `paddleocr-vl` identical |
-| WS-02 | PaddleOCR-VL vision prefill: profile, fuse rotary and other elementwise chains | coordinator | Pending | WS-01 (shared rotary op) | vision stage goldens on Metal; bench prefill |
-| WS-03 | PP-OCRv6: profile det/rec, fuse activation chains (shapeless) | coordinator | Pending | None | `ppocrv6` example first/warm; checkpoint test; corpus gate `pp-ocrv6` identical |
-| WS-04 | ForcedAligner: profile against mlx-audio, close the gap | coordinator | Pending | None | `aligner_parity` latency and MAE |
-| WS-05 | `docs/performance.md`, AGENTS.md, final gates, closeout | coordinator | Pending | WS-01..04 | `cargo xtask check-specs`; commit gates |
+| WS-01 | PaddleOCR-VL decoder: cached decode rotary tables, fused rotary apply, `sdpa_decode` | coordinator | Done | None | `bench_paddleocr_vl` bf16 + 4-bit; checkpoint goldens on Metal; corpus gate `paddleocr-vl` identical |
+| WS-02 | PaddleOCR-VL vision prefill: profile, fuse rotary and other elementwise chains | coordinator | Done | WS-01 (shared rotary op) | vision stage goldens on Metal; bench prefill |
+| WS-03 | PP-OCRv6: profile det/rec, fuse activation chains (shapeless) | coordinator | Done | None | `ppocrv6` example first/warm; checkpoint test; corpus gate `pp-ocrv6` identical |
+| WS-04 | ForcedAligner: profile against mlx-audio, close the gap | coordinator | Done | None | `aligner_parity` latency and MAE |
+| WS-05 | `docs/performance.md`, AGENTS.md, final gates, closeout | coordinator | Done | WS-01..04 | `cargo xtask check-specs`; commit gates |
 
 ## Verification
 
@@ -120,6 +120,34 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: WS-01.
 
+### 2026-10-26 — coordinator — WS-01..05
+
+- Changed: `rope_half_split` shim op, per-generation mRoPE table and
+  `sdpa_decode` for PaddleOCR-VL (a8bdc0f); `bias_act` shim op for every
+  PP-OCRv6 conv epilogue (79278e6); threaded host mel (ad9b83b);
+  `docs/performance.md` "New-model fast paths" and the AGENTS.md fused-op
+  convention.
+- Evidence: PaddleOCR-VL 4-bit decode 305 -> 342-345 tok/s (+12%), bf16
+  unchanged, prefill 1.95 -> 1.86 s; PP-OCRv6 warm 0.470 / 0.297 / 0.212 ->
+  0.445 / 0.283 / 0.203 s, first call unchanged; aligner en/zh_300s 5.10 /
+  5.92 -> 4.52 / 5.33 s (mlx-audio 4.70 / 5.57); corpus gate identical for
+  unlimited-ocr, paddleocr-vl (bf16 and 4-bit), pp-ocrv6 and ASR 72/72;
+  aligner gated MAE 0.17 ms; new bit-identity tests for both shim ops and the
+  threaded mel.
+- Not kept: vision head-dim padding 72 -> 80 for fused sdpa (1.86 -> 1.94 s).
+- Remaining: none.
+- Blockers: none.
+- Next action: none (archived).
+
 ## Completion summary
 
-Pending.
+All three new models gained bit-identical fast paths. PaddleOCR-VL decode is
+dispatch-bound, so the per-generation rotary table, fused rotary kernel and
+`sdpa_decode` took 4-bit decode +12% (bf16 unchanged, prefill -5%); the
+compute-bound vision tower had no further cheap win. PP-OCRv6 fuses each conv
+epilogue into one compiled kernel and is now faster warm than mlx4ocr's
+whole-model compile without its per-shape first-call cost. The ForcedAligner
+gap was the serial host mel (700 ms per 300 s); threading it puts the aligner
+ahead of mlx-audio and also saves ~0.6 s per 295 s ASR segment. Durable notes
+live in `docs/performance.md` ("New-model fast paths (spec 006)") and the
+AGENTS.md "Fused elementwise ops" convention.
