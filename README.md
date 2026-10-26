@@ -1,9 +1,6 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/shuuul/aimd/main/assets/aimd-banner-sm.png" alt="aimd">
 
-  <a href="https://github.com/shuuul/aimd/actions/workflows/ci.yml">
-    <img src="https://github.com/shuuul/aimd/actions/workflows/ci.yml/badge.svg" alt="CI">
-  </a>
   <a href="https://github.com/shuuul/aimd/releases">
     <img src="https://img.shields.io/github/v/release/shuuul/aimd" alt="Latest release">
   </a>

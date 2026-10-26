@@ -13,7 +13,7 @@ coordinator: "shuuul"
 
 Spec 002 shipped the native engine on macOS only: `aimd-mlx` links brew
 `mlx` (Metal), the Homebrew tap bottles `aimd` for macOS arm64, and CI has
-no Linux job (`.github/workflows/ci.yml` TODO). Its WS-09 (Linux via the mlx
+no Linux job. Its WS-09 (Linux via the mlx
 CUDA backend) never started and moved here when spec 002 closed
 (`specs/archive/002-native-engine.md`, 2026-10-26 decision). Repository
 evidence:
@@ -44,8 +44,8 @@ behavior and accuracy unchanged vs macOS.
 - [x] ASR >= 10x realtime and healthy OCR pages <= 15 s on metacube;
       numbers recorded in `docs/performance.md`. Evidence: 112x realtime
       on a 60 s clip, 0.72 s per dense page.
-- [ ] Linux `aimd` bottle in the tap; a Linux CI job (self-hosted runner)
-      runs the Rust gates.
+- [ ] Linux `aimd` bottle in the tap. (The Linux CI test job was removed
+      by the 2026-10-26 decision: CI only packages, tests run locally.)
 
 ## Scope and non-goals
 
@@ -53,7 +53,7 @@ In scope:
 
 - Tap mlx-cuda formula, OS-conditional `aimd-mlx` build, Linux device
   preflight (`BackendUnavailable` without a CUDA GPU).
-- Linux bottles for `aimd` and the self-hosted CI runner.
+- Linux bottles for `aimd`.
 
 Not in scope:
 
@@ -67,6 +67,7 @@ Not in scope:
 | Date | Decision | Rationale | Affected workstreams |
 | --- | --- | --- | --- |
 | 2026-10-26 | Spec opened as Draft from spec 002 WS-09; the mlx-cuda formula strategy and the CI runner host are open decisions | Spec 002 closed on macOS; Linux work needs its own contract | WS-01 |
+| 2026-10-26 | CI only packages (`release.yml`); `ci.yml` and its test jobs are removed, and no self-hosted runner is added. Tests (hermetic, checkpoint, corpus gate) run locally on the Mac and metacube | A self-hosted GPU runner is too much upkeep for this project; the GPU tiers need local weights anyway | WS-01 |
 | 2026-10-26 | The WS-08 custom kernels gate on `aimd_mlx::metal_kernels_available()` (GPU device and `metal::is_available()`), not `!device_is_cpu()`; CUDA runs plain mlx ops | `device_is_cpu` is false on CUDA, so the old gate dispatched Metal kernels there | WS-01 |
 
 ## Workstreams
@@ -75,7 +76,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR corpus gate against the Python reference, Linux bottle build + self-hosted CI runner (from spec 002 WS-09) | shuuul | In progress | None | Corpus gate PASS on metacube; `brew install` of the tap formulas + Linux bottle works; perf rows in docs/performance.md |
+| WS-01 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR corpus gate against the Python reference, Linux bottle build (from spec 002 WS-09) | shuuul | In progress | None | Corpus gate PASS on metacube; `brew install` of the tap formulas + Linux bottle works; perf rows in docs/performance.md |
 
 ## Verification
 
@@ -137,7 +138,7 @@ Append entries rather than rewriting another worker's record.
     formula should place `libmlx.so` in the brew lib dir.
   - mlx's CUDA JIT needs `CUDA_HOME` at runtime (formula env / wrapper).
 - Remaining: vision-bound decision, tap mlx-cuda formula, Linux bottle,
-  self-hosted CI runner, dspark (aarch64).
+  dspark (aarch64).
 - Blockers: none.
 - Next action: decide the vision parity bounds, then the formula.
 

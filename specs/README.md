@@ -62,7 +62,7 @@ cargo test -p xtask
 
 The validator enforces filenames, flat frontmatter, real dates, per-directory
 statuses, required sections, and the index tables in this README. It is
-deliberately dependency-free and runs in CI before tests.
+deliberately dependency-free; run it after every spec change.
 
 ## Documentation sync
 

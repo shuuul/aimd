@@ -243,7 +243,7 @@ For API/MCP model-reuse measurements, start the server once and send repeated re
 
 ## Dependency-upgrade smoke tests
 
-Before bumping brew `mlx` (and `MLX_BREW_VERSION` in `.github/workflows/ci.yml`), run the
+Before bumping brew `mlx`, run the
 checkpoint and E2E tiers on a Metal machine with the HF cache present. Also re-record the
 bench rows above if the numbers move:
 
