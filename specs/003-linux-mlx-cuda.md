@@ -141,6 +141,29 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: decide the vision parity bounds, then the formula.
 
+### 2026-10-26 — shuuul/vision parity investigation — WS-01
+
+- Changed: nothing in the tree (experiments reverted).
+- Evidence:
+  - Op probe at vision shapes (bf16 vs a float64 reference, same seeded
+    inputs on both backends): matmul, conv2d, layer_norm, GELU and
+    precise softmax sit at the bf16 rounding floor on CUDA and Metal
+    alike; CUDA cuDNN SDPA is slightly above it (2.1-2.3e-3 vs Metal
+    1.66e-3).
+  - Replacing SDPA with explicit f32 attention does not fix the CUDA
+    failures, and the same patch on Metal fails both tests by the same
+    margin (final features 4.0-4.2% vs the 3% bound): the vision tower
+    amplifies any rounding change, so these two tests detect "not the
+    Metal mlx rounding", not inaccuracy.
+  - mlx v0.32.4 CUDA source: bf16 GEMM (`CUBLAS_COMPUTE_32F`), conv,
+    SDPA, norms and erf accumulate in fp32; TF32 applies only to fp32.
+    No mlx issue reports a CUDA bf16 precision bug of this kind; mlx's own
+    suite loosened CUDA tolerances (ml-explore/mlx#2815).
+- Remaining: choose how the two vision stage tests treat non-Metal
+  backends (backend-specific bounds, or rely on the corpus gate there).
+- Blockers: none.
+- Next action: record that decision, then the formula.
+
 ## Completion summary
 
 (to complete before archiving)
