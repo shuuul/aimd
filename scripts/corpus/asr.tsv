@@ -1,0 +1,25 @@
+id	language	text
+en01	en	The quick brown fox jumps over the lazy dog.
+en02	en	Context engineering decides what information a language model sees before it answers.
+en03	en	Please send the quarterly report to the finance team before Friday afternoon.
+en04	en	The train to the airport leaves every twenty minutes from the central station.
+en05	en	Scanned documents must preserve tables, headings, and the original reading order.
+en06	en	She opened the window and the cold morning air filled the quiet room.
+en07	en	Local inference keeps private recordings on the device and removes the network from the critical path.
+en08	en	Our meeting has been moved to Tuesday at three in the afternoon.
+en09	en	The library will be closed for renovation during the first two weeks of March.
+en10	en	Researchers measured the temperature of the lake every hour for an entire year.
+en11	en	If the build fails, check the logs, fix the error, and run the tests again.
+en12	en	A good transcript keeps the speaker's words and drops the background noise.
+zh01	zh	今天天气很好，我们一起去公园散步吧。
+zh02	zh	上下文工程决定了语言模型在回答之前能看到哪些信息。
+zh03	zh	请在周五下午之前把季度报告发给财务部门。
+zh04	zh	去机场的列车每二十分钟从中央车站发出一班。
+zh05	zh	扫描文档必须保留表格、标题和原来的阅读顺序。
+zh06	zh	她打开窗户，清晨的冷空气充满了安静的房间。
+zh07	zh	本地推理把私人录音留在设备上，不再依赖网络。
+zh08	zh	我们的会议改到星期二下午三点。
+zh09	zh	图书馆在三月的前两个星期因为装修而关闭。
+zh10	zh	研究人员在一整年里每小时测量一次湖水的温度。
+zh11	zh	如果构建失败，先查看日志，修复错误，然后重新运行测试。
+zh12	zh	好的转写应该保留说话人的原话，去掉背景噪音。

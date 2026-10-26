@@ -1,7 +1,7 @@
 ---
 id: "002"
 title: "Native Rust inference engine reimplementation"
-status: Active
+status: Completed
 created: 2026-10-25
 updated: 2026-10-26
 coordinator: "shuuul"
@@ -38,24 +38,35 @@ Replace the local ML inference stack with a hand-written Rust engine exposed
 to the retained Python interface layer as a `aimd._native` extension module,
 supporting exactly two models on CPU, Metal (M2 Pro), and CUDA (metacube).
 
-- [ ] MLX 4-bit affine (g=64) safetensors loader reproduces MLX-exported
-      reference tensors bit-exactly in CI.
-- [ ] ASR: on a labeled golden corpus, CER/WER degrades <= 1% absolute vs the
+- [x] MLX 4-bit affine (g=64) safetensors loader reproduces MLX-exported
+      reference tensors bit-exactly in CI. Evidence: `aimd-weights`
+      `tests/golden/quant` parity in the hermetic CI tier.
+- [x] ASR: on a labeled golden corpus, CER/WER degrades <= 1% absolute vs the
       current MLX backend; 4-bit repetition-loop 8-bit retry still works.
-- [ ] OCR: text similarity >= MLX baseline - 2% on the golden corpus; healthy
-      pages end with `finish=stop` at a rate no lower than today.
-- [ ] Perf gates (v0.5): ASR >= MLX baseline on M2 Pro via the MLX variant
+      Evidence: `corpus_gate` on 72 clips, transcripts identical to
+      mlx-audio 0.5.3 for 1.7B-4bit, 1.7B-8bit and 0.6B-6bit (deltas 0.00%);
+      retry covered by `repetition_loop_on_4bit_retries_with_8bit`.
+- [x] OCR: text similarity >= MLX baseline - 2% on the golden corpus; healthy
+      pages end with `finish=stop` at a rate no lower than today. Evidence:
+      `corpus_gate` on 4 documents / 5 pages, markdown identical to mlx-vlm
+      0.7.0 for 4bit and 8bit, similarity 1.0, stop 5/5.
+- [x] Perf gates (v0.5): ASR >= MLX baseline on M2 Pro via the MLX variant
       and >= 10x realtime on metacube (CUDA); OCR healthy pages <= 15s
       (CUDA), MLX-comparable (MLX variant). The CPU path has no perf gate —
       it is the correctness baseline and small-wheel fallback. Results
-      recorded in `docs/performance.md`.
-- [ ] `aimd` ships as a Homebrew formula in our own tap with bottles for
+      recorded in `docs/performance.md`. Evidence (macOS): 60 s ASR clip
+      2.59 s vs mlx-audio 2.88-2.95 s; OCR `page_text.png` 3.78 s vs mlx_vlm
+      4.51-4.65 s. The CUDA half moved to spec 003 (2026-10-26 decision).
+- [x] `aimd` ships as a Homebrew formula in our own tap with bottles for
       macOS arm64 (Metal) and Linux (mlx CUDA backend); `brew install`
       gives working CLI/API/MCP binaries with behavior unchanged vs the
       Python interfaces. The PyPI package gets one final release pointing
-      users to brew.
-- [ ] `mlx-audio`, `mlx-vlm`, `transformers`, `torch` removed from default
-      installs after a one-minor-version deprecation window.
+      users to brew. Evidence: v1.0.0 tap bottle (WS-21), PyPI 0.23.4. The
+      Linux bottle moved to spec 003.
+- [x] `mlx-audio`, `mlx-vlm`, `transformers`, `torch` removed from default
+      installs after a one-minor-version deprecation window. Evidence: the
+      Python package is deleted (WS-15); the pure Homebrew decision replaced
+      the deprecation window with the final PyPI release.
 
 ## Scope and non-goals
 
@@ -125,6 +136,7 @@ Not in scope:
 | 2026-10-26 | WS-13 `mlx::core::compile` scope narrowed to fused elementwise ops (compiled SwiGLU in the shim, used by the ASR MLP and the OCR dense/shared/`SwitchGLU` MLPs); no whole-layer/step compile. The OCR `KvCache` (step-256 + ring) moves to `aimd_engine::models::kv_cache` and replaces the ASR concatenate cache; ASR decode adopts the OCR/mlx-lm `async_eval` pipelining. Bench baseline is `main` 8021879 (b96c031 predates the crates move), A/B interleaved | The KV cache grows every step, so a shape-keyed compile retraces per token and a shapeless one cannot express slice bounds (mlx-lm does not compile the step either); profiling shows ~0.4 ms host graph build vs ~8 ms GPU+encode per ASR token, so remaining headroom is WS-14/WS-08 | WS-13, WS-14, WS-08 |
 | 2026-10-26 | WS-14 closed without shipping prompt-lookup speculation: measured on 6 real OCR pages (arXiv/conference PDFs at 144 dpi + `page_text.png`), n-gram drafts (n 2-4, k 1-15) accept only 1.01-1.15 tokens per verify, and an m-token Unlimited-OCR verify costs 1.5x (m=2), 2.5x (m=4), 4.3x (m=8) a single step because each routed token reads its own 6 experts; simulated end-to-end 0.63-1.01x, ceiling ~1.15x even with free verification. ASR is not attempted (no draft source: speech output is not in the prompt and rarely self-repeats). Reopen only with a real draft source (draft model or MTP head) | The 1.3x gate is unreachable with model-free drafts on this MoE; shipping a slower path behind a flag adds risk for no gain | WS-14, WS-08 |
 | 2026-10-26 | WS-21 and WS-15 closed: tag v1.0.0 released; tap PR published by `brew pr-pull` (aimd 1.0.0 + `arm64_golden_gate` bottle); `brew install shuuul/tap/aimd` pours the bottle on a clean Mac and the three binaries run; PyPI 0.23.4 is the final Python release | Every WS-15/WS-21 deliverable has evidence; spec 002 stays Active for WS-08 and WS-09 | WS-15, WS-21 |
+| 2026-10-26 | Spec 002 closes on macOS (user direction "先做 2/3/4"): WS-09 (Linux via the mlx CUDA backend) moves to spec 003 as its WS-01, taking the metacube CUDA perf gate and the Linux bottle with it; the ASR/OCR accuracy gates are met by the labeled golden corpus (`scripts/build_corpus.py`, `scripts/corpus_baseline.py`, `corpus_gate`) | Every macOS criterion has evidence; Linux is an independent deliverable with its own hardware and formula work | WS-09 |
 | 2026-10-25 | MLX-only cleanup: `aimd-tensor` crate deleted; ANE spike artifacts (`golden/ane_spike`, `scripts/ane_spike`) deleted (report `docs/ane-spike-results.md` kept as history); `aimd_weights::dequantize_affine` kept as the test-only bit-exact oracle for `golden/quant`; `golden/asr_decoder/logits.f32` dropped (unread). MLX device = GPU unless `AIMD_MLX_DEVICE=cpu` or no GPU; hermetic CI runs on the CPU device and the checkpoint tier skips there; MLX's CPU `quantized_matmul` with bf16 inputs loses precision as K grows (vs float64: 1-2% of max|out| at K=128, 6.5-17% at K=4096; f16/dense/f32 <= 0.2%; Metal bf16 < 0.8%; reproduced in Python mlx 0.32.2), so CPU-device parity tests promote bf16 cases to f32 inputs and keep the Metal tolerance; the CPU device must never run real bf16-scale checkpoints | Hosted macOS runners may lack Metal; keep CI hermetic and inside the TEST RULES budget (CPU 4 s, Metal 12 s) | WS-02, WS-03, WS-12 |
 
 ## Workstreams
@@ -140,8 +152,8 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-05 | `crates/aimd-engine/src/audio`: wav load (f32 mono 16k), 128-bin mel matching the Qwen3-ASR feature extractor, `scripts/export_mel_reference.py` + committed golden fixtures | agent-audio | Done | WS-01 | `cargo test -p aimd-engine --lib audio` golden parity (tolerance vs exported reference) |
 | WS-06 | ASR model graph + generation loop on CPU (windowed encoder n_window=50/infer=800, Qwen3 decoder, greedy, retry-on-loop) | agent-encoder + agent-decoder + shuuul | Done | WS-02, WS-03, WS-04, WS-05 | Commits 2cc53a9/8de3841: token-identical outputs vs MLX, golden argmax stream exact, E2E green. Open tail: labeled golden-corpus CER harness (two-clip identity is evidence, not the gate) |
 | WS-07 | OCR model graph + generation loop on the MLX backend (gundam preprocessing, SAM ViT-B + CLIP + projector, MoE decoder with ring sliding-window KV, n-gram guard, markdown normalization); CPU prototype retired per the MLX-only decision | agent-ocr-vision + agent-ocr-decoder + agent-ocr-integration + agent-ocr-mlx | Done | WS-11 | Vision + prefill bit-exact vs mlx_vlm goldens; E2E markdown identical (similarity 1.0, finish=stop, equal token counts) on both `crates/aimd-engine/tests/golden/ocr_e2e` fixtures; latency at parity with mlx_vlm (0.83 s / 4.7 s vs 0.88 s / 4.6 s). Open tail: labeled multi-page OCR corpus gate |
-| WS-08 | Hand-written Metal MSL kernels for macOS hot spots, plugged into the MLX graph (`mlx::core::fast::metal_kernel` custom kernels through the shim, e.g. fused MoE dispatch, fused attention/ring-KV update, quantized GEMV variants tuned for M2 Pro); chosen by profiling after WS-13/WS-14, kept only where they beat MLX's built-ins | shuuul | In progress | WS-13 | Per-kernel A/B vs the MLX built-in with outputs unchanged; end-to-end decode gain recorded in docs/performance.md |
-| WS-09 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR E2E against the Python reference, Linux bottle build + self-hosted CI runner; hand-written .cu/CUTLASS cancelled | Unassigned | Pending | WS-07 | ASR/OCR E2E parity on metacube; `brew install` of the tap mlx formula + Linux bottle works; perf rows in docs/performance.md |
+| WS-08 | Hand-written Metal MSL kernels for macOS hot spots, plugged into the MLX graph (`mlx::core::fast::metal_kernel` custom kernels through the shim, e.g. fused MoE dispatch, fused attention/ring-KV update, quantized GEMV variants tuned for M2 Pro); chosen by profiling after WS-13/WS-14, kept only where they beat MLX's built-ins | shuuul | Done | WS-13 | PR #26: fused MoE expert + router, decode sdpa, compiled GELU, all bit-identical; OCR decode ~232 -> ~276 tok/s, vision 1.505 -> 1.432 s/page, 5-min ASR 22.85 -> ~21.9 s (docs/performance.md). Not kept: fused q\|k\|v, rel-pos bias, add + rms_norm |
+| WS-09 | Linux on metacube/dspark via the `mlx` CUDA backend — MOVED to `specs/003-linux-mlx-cuda.md` WS-01 at closeout (no work done here) | shuuul | Done | WS-07 | Move recorded in Decisions (2026-10-26 spec 002 closes on macOS) |
 | WS-10 | PyO3 binding / wheels / PyPI — CANCELLED by the pure Homebrew distribution decision (no work done) | shuuul | Done | None | Cancellation recorded in Decisions (2026-10-25 pure Homebrew) |
 | WS-11 | `aimd-mlx` C-ABI shim over `mlx::core` (array lifetime, `quantized_matmul`, GEMM/attention composition); model graphs on the MLX backend; `--features mlx` variant build. Promoted to the active wave (ASR first); brew mlx 0.32.4 link target | agent-mlx + agent-mlxgraph + shuuul | Done | WS-06 | ASR done (commit b96c031: 0.92-0.93x mlx-audio latency, 24x faster load, token-identical outputs); OCR graph rides WS-07 completion |
 | WS-13 | MLX perf pack: preallocated/ring KV cache (replace concatenate growth) + `mlx::core::compile` through the shim applied to decoder layer/step functions + A/B benchmarks recorded in docs/performance.md | shuuul | Done | WS-07 | Decode-latency improvement vs b96c031 baseline with outputs still text-identical; bench rows recorded |
@@ -192,7 +204,8 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 ### Experiment refs
 
-- (to record before archiving)
+- None: every experiment landed as a commit on `main` (PR #26); variants
+  that were not kept are recorded in `docs/performance.md`.
 
 ## Progress and handoff
 
@@ -1053,6 +1066,49 @@ Append entries rather than rewriting another worker's record.
 - Next action: none on decode dispatch count; decode is ~80% of the
   practical bandwidth roofline.
 
+### 2026-10-26 — shuuul/WS-08 closeout — WS-08
+
+- WS-08 Done: merged in PR #26 (d4bf55e). Decode runs at ~80% of the
+  practical bandwidth roofline; the remaining small ops are below the
+  measurable floor. Prefill and the vision tower are mlx GEMM-bound, and a
+  faster GEMM would change accumulation order (not bit-identical).
+- Next action: WS-09 (Linux via the mlx CUDA backend) and the open
+  golden-corpus gates (WS-06 ASR CER, WS-07 multi-page OCR).
+
+### 2026-10-26 — shuuul/golden corpus and closeout — WS-06, WS-07, WS-16, WS-17
+
+- Changed: labeled golden corpus (`scripts/corpus/`: 12 en + 12 zh
+  sentences x 3 `say` voices = 72 clips; 4 Markdown documents rendered
+  through Pandoc + headless Chrome + `mutool draw -r 144` = 5 pages),
+  `scripts/build_corpus.py`, `scripts/corpus_baseline.py` (mlx-audio 0.5.3 /
+  mlx-vlm 0.7.0) and `crates/aimd-engine/examples/corpus_gate.rs` (WER/CER,
+  OCR character similarity, stop rate, gates, exit 1 on failure).
+- Evidence: ASR 1.7B-4bit en WER 0.87% / zh CER 3.83%, 1.7B-8bit 0.44% /
+  3.55%, 0.6B-6bit 1.31% / 3.40%, each identical to mlx-audio on 72/72
+  clips; OCR 4bit and 8bit similarity 1.0, stop 5/5, 5/5 pages identical to
+  mlx-vlm. Open tails exercised: `aimd --model qwen3-asr-0.6b --precision
+  6bit` downloaded the checkpoint (836 MB) and transcribed exactly; the
+  Unlimited-OCR-8bit download (3.7 GB) and non-fused MoE path ran through
+  the CLI; a real archive.org URL with no subtitles went through audio
+  download + ASR (161 s LibriVox clip, accurate); xlsx and pptx convert on
+  Pandoc 3.12.1 (xlsxwriter/Excel-style workbooks; openpyxl workbooks with
+  absolute rels targets fail inside Pandoc).
+- Remaining: Linux (spec 003). The synthetic corpus is clean speech and
+  clean pages, so absolute error rates are optimistic; identity with the
+  Python reference is the strong signal.
+- Next action: none in this spec.
+
 ## Completion summary
 
-(to complete before archiving)
+The native Rust engine replaced the Python ML stack on macOS: Qwen3-ASR
+(1.7B, 0.6B) and Unlimited-OCR run on MLX through the `aimd-mlx` shim with
+custom bit-identical Metal kernels, behind Rust CLI/API/MCP binaries shipped
+as a Homebrew bottle (v1.0.0). Scope deviations, all recorded in Decisions:
+MLX-only (CPU engine and hand-written CUDA cancelled), full-Rust interfaces
+instead of a PyO3 extension, pure Homebrew instead of wheels, speculative
+decoding and the ANE route measured and dropped, and Linux moved to spec 003.
+Verification: hermetic `cargo test --workspace` in CI, checkpoint parity
+tests, tier-3 E2E, and the golden-corpus gate (outputs identical to
+mlx-audio / mlx-vlm). Durable docs: `AGENTS.md` (architecture, conventions,
+test tiers, corpus gate commands), `docs/performance.md` (bench and corpus
+results), `docs/native-reimplementation-design.md`, `docs/sidecar.md`.

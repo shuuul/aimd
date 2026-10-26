@@ -1,6 +1,6 @@
 name: Release
 
-# Tag-driven release (release-please removed, specs/002-native-engine.md):
+# Tag-driven release (release-please removed, specs/archive/002-native-engine.md):
 #   1. bump `[workspace.package] version` in Cargo.toml, `cargo update
 #      --workspace`, commit `chore(release): vX.Y.Z`;
 #   2. push tag `vX.Y.Z`.

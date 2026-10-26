@@ -365,6 +365,7 @@ mod ffi {
         pub fn mlx_async_eval(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_eval_many(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_device_is_cpu() -> i32;
+        pub fn mlx_metal_kernels_available() -> i32;
         pub fn mlx_clear_cache() -> i32;
         pub fn mlx_array_clone(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
     }
@@ -1288,6 +1289,17 @@ pub fn device_is_cpu() -> Result<bool, MlxError> {
         1 => Ok(true),
         0 => Ok(false),
         _ => Err(op_failed("mlx_device_is_cpu")),
+    }
+}
+
+/// Whether the custom Metal kernels (fused MoE, decode SDPA) can run: the
+/// GPU device is selected and it is Metal. False on the CPU device and on
+/// the mlx CUDA backend, where the engine keeps plain mlx ops.
+pub fn metal_kernels_available() -> Result<bool, MlxError> {
+    match unsafe { ffi::mlx_metal_kernels_available() } {
+        1 => Ok(true),
+        0 => Ok(false),
+        _ => Err(op_failed("mlx_metal_kernels_available")),
     }
 }
 

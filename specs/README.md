@@ -12,13 +12,14 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
-| [002-native-engine.md](002-native-engine.md) | Active | Hand-written Rust inference engine (CPU/Metal/CUDA) for Qwen3-ASR-1.7B + Unlimited-OCR behind the retained Python interfaces |
+| [003-linux-mlx-cuda.md](003-linux-mlx-cuda.md) | Draft | Linux x86_64 on the mlx CUDA backend: tap mlx-cuda formula, Linux bottle, corpus gate on metacube |
 
 ## Archived specs
 
 | Spec | Completed | Outcome |
 | --- | --- | --- |
 | [001-remote-asr-ocr.md](archive/001-remote-asr-ocr.md) | 2026-08-24 | Opt-in OpenAI-compatible ASR/OCR HTTP backends for dspark vLLM |
+| [002-native-engine.md](archive/002-native-engine.md) | 2026-10-26 | Native Rust engine on MLX (Qwen3-ASR + Unlimited-OCR) with Rust CLI/API/MCP, shipped via Homebrew on macOS |
 
 ## Lifecycle
 
@@ -61,13 +62,13 @@ cargo test -p xtask
 
 The validator enforces filenames, flat frontmatter, real dates, per-directory
 statuses, required sections, and the index tables in this README. It is
-deliberately dependency-free and runs in CI before tests.
+deliberately dependency-free; run it after every spec change.
 
 ## Documentation sync
 
 A spec closes only when its lasting behavior has moved into durable
-documentation: the nearest `AGENTS.md`, `docs/`, code comments, and
-`CHANGELOG.md` as relevant. Record the sync targets in the spec's
+documentation: the nearest `AGENTS.md`, `docs/`, and code comments as
+relevant. Record the sync targets in the spec's
 `Documentation sync` section. If experiment commits back the spec, record
 their final Git refs (annotated tags like `experiments/<topic>-v<N>` or
 custom refs like `refs/experiments/<topic>-v<N>`) under `Documentation sync`

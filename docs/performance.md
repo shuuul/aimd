@@ -2,11 +2,6 @@
 
 This document records practical performance expectations for `aimd` processing paths. It is not a leaderboard: real throughput depends on input length, page resolution, model size, first-run model download time, GPU memory, and whether the path can reuse model weights already loaded in the current process.
 
-Sections marked **Python era** record measurements of the Python package (`aimd-tool`
-<= 0.23.x: mlx-audio, mlx-vlm, Transformers). They are kept as historical baselines; the
-Python package and those backends are gone. Current numbers are in
-[Native Rust engine (MLX backend)](#native-rust-engine-mlx-backend).
-
 ## High-level expectations
 
 | Path | Typical bottleneck | Warm-cache behavior | Notes |
@@ -26,66 +21,31 @@ Python package and those backends are gone. Current numbers are in
 | OCR | native MLX | Unlimited-OCR (`4bit`, `6bit`, `8bit`) | Default 4-bit. Single-image gundam mode per page, no-repeat n-gram guard (`ngram=35`, `window=128`), `max_tokens=8192`. Without the guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
 | ASR / OCR | remote OpenAI-compatible | server-defined | Latency is network plus server-side; no local load. |
 
-### Python-era backends (historical)
-
-| Task | Backend | Model family | Expected performance profile |
-|------|--------|--------------|------------------------------|
-| Transcription | `mlx` | Qwen3-ASR 1.7B/0.6B (`4bit`, `6bit`, `8bit`, `bf16`) | Best for Apple Silicon local transcription; lower-bit and 0.6B models trade quality/capability for lower memory and faster startup. |
-| Transcription | `transformers` | Qwen3-ASR | Default on CUDA-capable non-Darwin platforms and explicit opt-in on macOS/MPS when a `Qwen/Qwen3-ASR-*-hf` (or legacy `Qwen/Qwen3-ASR-*`) model ID is provided. Uses native Transformers Qwen3-ASR (`transformers>=5.14.1`); no vendored model code, `qwen-asr`, vLLM, or SGLang runtime. The 0.6B-hf model is the lower-memory option; 1.7B-hf is the default quality-oriented CUDA option. |
-| OCR | `mlx-vlm` | Unlimited-OCR (`4bit`, `6bit`, `8bit`, `bf16`) | Default macOS OCR path via `mlx-community/Unlimited-OCR-4bit` and `mlx-vlm>=0.6.4`. Each page uses single-image gundam mode with Baidu's sliding-window no-repeat n-gram guard (`ngram=35`, `window=128`) and `max_tokens=8192`. PDFs are OCR'd page-by-page. Without the n-gram guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
-| OCR | `mlx-vlm` | GLM-OCR (`4bit`, `6bit`, `8bit`, `bf16`) | Optional macOS VLM OCR path using the four `mlx-community/GLM-OCR-*` checkpoints. |
-| OCR | `transformers` | Unlimited-OCR | Default Linux/CUDA OCR path using Baidu's custom `infer`/`infer_multi` API and trusted remote code. Results are read from the model's saved output files. |
-| OCR | `transformers` | GLM-OCR | Linux/CUDA OCR path using the dedicated `zai-org/GLM-OCR` adapter. |
-
-## Apple Silicon ASR comparison (Python era)
-
-MPS can run Qwen3-ASR through native Transformers (`transformers>=5.14.1`), but macOS still defaults to MLX. In our smoke/latency checks, the MPS path was viable and useful as an explicit `Qwen/Qwen3-ASR-*-hf` opt-in, but the quantized MLX models remained the better default for Apple Silicon because they are simpler to maintain, smaller, and at least as fast in warm-cache runs.
-
-Input shapes differed slightly between runs, so treat these as practical observations rather than a strict leaderboard.
-
-| Date | Hardware/runtime | Backend/model | Input | Warm latency | Memory observation | Result / decision |
-|------|------------------|---------------|-------|--------------|--------------------|-------------------|
-| 2026-06-23 | Apple Silicon, macOS, MLX | `mlx-community/Qwen3-ASR-0.6B-4bit` | 7.24s generated Chinese WAV | ~0.18s | MLX peak ~1.46 GB | Fastest/lower-memory observed Qwen3-ASR path; suitable Apple Silicon opt-in for lower-memory MLX use. |
-| 2026-06-23 | Apple Silicon, macOS, MLX | `mlx-community/Qwen3-ASR-1.7B-4bit` | 7.24s generated Chinese WAV | ~0.39s | MLX peak ~2.5 GB | Balanced default-quality Apple Silicon path; macOS default remains MLX. |
-| 2026-06-23 | Apple Silicon, macOS, MLX | `mlx-community/Qwen3-ASR-1.7B-8bit` | 7.24s generated Chinese WAV | ~0.56s | MLX peak ~3.32 GB | Higher memory and slower than 4-bit in this smoke. |
-| 2026-06-23 | Apple Silicon, macOS, Transformers 5.12.1 / MPS | `Qwen/Qwen3-ASR-0.6B` (legacy ID; now maps to `...-0.6B-hf`) | generated Chinese WAV | ~0.25s after local SDPA + KV-cache adaptation on a short smoke; earlier 7.24s run was ~0.45s | MPS allocated ~1.5 GB in earlier run | Historical smoke on vendored backend. Current path uses native Transformers `Qwen/Qwen3-ASR-*-hf` and still does not replace MLX as the macOS default. |
-
-Policy at the time: MLX stayed the macOS default and `Qwen/Qwen3-ASR-*-hf` ids opted into Transformers. The Rust release removed the Transformers path; only the MLX checkpoints remain.
-
 ## Native Rust engine (MLX backend)
 
-The native engine (spec 002) runs only on MLX through the `aimd-mlx` C-ABI
-shim (brew `mlx` 0.32.4). Numbers are from Apple M2 Pro (19-core GPU,
-32 GB), release builds of
-`crates/aimd-engine/examples/{bench_asr_mlx,bench_ocr}.rs`, rounds
-2-3 steady state. The "Reference" rows are the Python-era baselines (mlx-audio,
-mlx_vlm) on the same machine, measured before the Python package was removed.
+The engine runs only on MLX through the `aimd-mlx` C-ABI shim (brew `mlx`
+0.32.4). Numbers are from Apple M2 Pro (19-core GPU, 32 GB), release builds
+of `crates/aimd-engine/examples/{bench_asr_mlx,bench_ocr}.rs`, rounds 2-3
+steady state. "Reference" rows are mlx-audio / mlx_vlm on the same machine
+(`scripts/ocr_bench_mlx_vlm.py`, the corpus baseline tooling).
 
 ### Qwen3-ASR-1.7B-4bit
 
 | Date | Backend | Input | Load | Warm latency | Realtime | Notes |
 |------|---------|-------|------|--------------|----------|-------|
 | 2026-10-25 | mlx-audio (Metal) | zh 8.56 s / en 3.75 s TTS clips | 10.01 s | zh 0.43 s; en 0.25 s | 19.9x / 15x | Reference. |
-| 2026-10-25 | native MLX | same | 0.42-0.45 s warm / 3.81 s cold | zh 0.40-0.44 s; en 0.23-0.27 s | ~20x / ~15x | Token-identical text (incl. the same 上下文忠诚 mishearing); 4-bit triples go straight into `quantized_matmul` (no eager dequant), hence ~24x faster load. Unchanged after the CPU-path deletion (transcripts byte-identical). |
 | 2026-10-26 | mlx-audio 0.5.3 (Metal) | 59.96 s en TTS clip (797-token prompt, 191 tokens) | — | 2.88-2.95 s | ~20.5x | Reference for the long clip. |
-| 2026-10-26 | native MLX, `main` (concatenate KV, sync per step) | zh 4.83 s / en 4.09 s / 59.96 s en | — | zh 0.32 s; en 0.31 s; long 3.47-6.05 s (median 4.18 s) | ~15x / ~13x / ~14x | WS-13 A/B baseline, interleaved with the next row on a loaded machine. |
-| 2026-10-26 | native MLX, WS-13 | same | — | zh 0.30-0.31 s; en 0.29-0.30 s; long 3.07-3.20 s (median 3.13 s) | ~16x / ~14x / ~19x | Step-256 preallocated KV (`slice_update`), `async_eval`-pipelined decode, compiled SwiGLU. Long clip -25% and far steadier; transcripts byte-identical. On a quiet machine: long 2.73-2.75 s; encoder 0.44 s, prefill 0.67 s (~1.2k tok/s), decode 1.65 s (~117 tok/s). |
+| 2026-10-26 | native MLX | zh 4.83 s / en 4.09 s / 59.96 s en | 0.42-0.45 s warm / 3.81 s cold | zh 0.30-0.31 s; en 0.29-0.30 s; long 2.73-2.75 s | ~16x / ~14x / ~22x | Transcripts token-identical to the reference. Long clip: encoder 0.44 s, prefill 0.67 s (~1.2k tok/s), decode 1.65 s (~117 tok/s). A 5-minute clip takes ~22 s. 4-bit triples go straight into `quantized_matmul`, hence the fast load. |
 
 ### Unlimited-OCR-4bit
 
 | Date | Backend | Input | Load | Vision | Prefill | Decode | Total | Notes |
 |------|---------|-------|------|--------|---------|--------|-------|-------|
 | 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/small_text.png` (no crops) | 3.26 s | 0.35-0.37 s | in prompt | 199-206 tok/s | 0.87-0.88 s | Reference. |
-| 2026-10-25 | native MLX | same | 0.58 s | 0.36-0.37 s | 0.12 s (2300 tok/s) | 200-205 tok/s | 0.82-0.84 s | Markdown identical (similarity 1.0), finish=stop, 69/69 tokens. |
 | 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/page_text.png` (4x5 crops, 2327-token prompt) | — | 2.50-2.55 s | ~0.77 s | 170-177 tok/s | 4.51-4.65 s | Reference. |
-| 2026-10-25 | native MLX | same | — | 2.61-2.63 s | 0.79-0.82 s | 165-175 tok/s | 4.67-4.75 s | Markdown identical, finish=stop, 197/197 tokens. Vision + prefill are bit-exact vs mlx_vlm goldens; single-token decode drifts ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
-| 2026-10-26 | native MLX, `main` vs WS-13 | same, interleaved on a loaded machine | — | 2.59-2.80 s both | 0.77-0.92 s both | 166-177 tok/s both | 4.64-4.87 s both | Compiled SwiGLU (dense MLP, shared experts, `SwitchGLU`) is neutral within noise; OCR already had the step-256/ring KV and `async_eval` pipelining. |
+| 2026-10-26 | native MLX | `page_text.png` / `small_text.png` | 0.58 s | 2.20 s / 0.31 s | 0.69 s (3390 tok/s) / 0.10 s | 254 / 305 tok/s | 3.78 s / 0.63 s | Fused MoE expert + router, decode sdpa, compiled GELU. Markdown identical to the reference, finish=stop. Vision + prefill are bit-exact vs the mlx_vlm goldens; single-token decode can drift ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
 
-Retired: the hand-written CPU prototype reached 0.1-0.3x realtime on ASR
-and ~734 s per OCR page (vs 4.8 s on MLX); it was deleted under the
-MLX-only decision.
-
-WS-13 findings: in the pipelined ASR loop the host builds a step's graph in
+ASR decode loop: in the pipelined ASR loop the host builds a step's graph in
 ~0.4 ms, and the remaining ~8 ms per token is GPU work plus Metal encode for
 ~25 kernels per layer x 28 layers. Elementwise fusion (`mlx::core::compile`)
 buys little there. A whole-step `compile` does not fit because the KV cache
@@ -93,15 +53,14 @@ grows every step, so a shape-keyed compile would retrace each token and a
 shapeless one cannot express the slice bounds (mlx-lm doesn't compile the
 step either).
 
-WS-14 findings (prompt-lookup speculative decoding, not shipped): an
+Prompt-lookup speculative decoding (not shipped): an
 m-token Unlimited-OCR verify forward costs 4.3 / 6.5 / 11.0 / 19.4 / 24.6 ms
 for m = 1 / 2 / 4 / 8 / 16, nearly linear because every routed token reads
 its own 6 of 64 experts. On six real OCR pages, n-gram drafts were accepted
 for only 1.01-1.15 tokens per verify, so simulated decode came out
-0.63-1.01x. Remaining decode headroom is WS-08 (custom Metal kernels inside
-the MLX graph).
+0.63-1.01x.
 
-### WS-08 decode-step kernel profile
+### Decode-step kernel profile (Metal)
 
 `cargo run --release -p aimd-mlx --example bench_ops` times every
 decode-step op at the real shapes as a dependent chain (GPU time plus Metal
@@ -137,7 +96,7 @@ lm_head 0.56 ms, router ~0.25 ms, the rest small ops. ASR is dominated by
 qmv (~6 ms of ~8.5 ms) already at 60-84% of roofline, plus lm_head at
 roofline.
 
-Candidates ranked by expected saving per token:
+Changes tried, by expected saving per token (shipped ones are the current code):
 
 1. ~~Fused q|k|v projection~~ (tried 2026-10-26, not kept): outputs were
    byte-identical (3 ASR clips, 7 OCR images) but decode moved <1% (OCR
@@ -192,9 +151,7 @@ Candidates ranked by expected saving per token:
 Caveat: the chain serializes every op, so it overstates ops that run
 concurrently in the decoder (q/k/v, gate/up, shared vs routed experts).
 Treat the per-op times as upper bounds and the serially dependent paths
-(router -> experts, attention) as the reliable targets. Ceiling if all land:
-OCR decode ~1.2x, ASR ~1.1x. Prefill and the OCR
-vision tower (2.6 s of a 4.8 s page) are separate targets.
+(router -> experts, attention) as the reliable targets.
 
 OCR vision tower (2026-10-26, sym-6, 12 crops + global view, ~1.5 s):
 SAM over the crops is ~1.0 s (window blocks ~75 ms, global blocks ~95 ms
@@ -208,17 +165,54 @@ The rel-pos bias broadcast add already writes ~104 GB/s in isolation; a
 custom kernel was no faster (the 25 ms seen under per-op evals is
 first-touch allocation).
 
-## Smoke-test record (Python era)
+## Golden-corpus accuracy (2026-10-26)
 
-Functional smoke tests of the Python package, not benchmarks. They verified that the
-heavyweight model paths could load and run in development environments.
+Labeled corpus from `scripts/corpus/`, built by `uv run scripts/build_corpus.py`:
+72 ASR clips (12 en + 12 zh sentences, 3 macOS `say` voices each, 16 kHz)
+and 4 OCR documents / 5 A4 pages (Pandoc + headless Chrome, rasterized with
+`mutool draw -r 144` like production). Scored by
+`cargo run --release -p aimd-engine --example corpus_gate` against the
+mlx-audio 0.5.3 / mlx-vlm 0.7.0 outputs from `uv run scripts/corpus_baseline.py`.
+WER is English words, CER Chinese characters, both after dropping
+punctuation; OCR similarity is 1 - edit distance / longer length over
+alphanumeric and CJK characters with markup removed.
 
-| Date | Hardware | Command/path | Input | Observed result |
-|------|----------|--------------|-------|-----------------|
-| 2026-06-22 | NVIDIA GeForce RTX 5090, Linux/WSL2 | `process_ocr(..., model="unlimited_ocr")` | Generated 512×160 PNG containing `Hello OCR 123` | Returned `HelloOCR 123` after first loading `baidu/Unlimited-OCR`. |
-| 2026-07-31 | Apple Silicon, macOS, mlx-vlm 0.6.8 | `aimd biorxiv.pdf --task ocr --start 0 --end 0` (default `unlimited_ocr`) | bioRxiv 10.64898/2026.06.01.729423v1 full PDF, page 0 only | Cold run ~22s including model fetch; output contained title `Direct Detection and Atomic Modeling of Ligands in Cryo-EM Maps Using Deep Learning` plus author/affiliation text with grounding `<\|det\|>` markers. |
-| 2026-07-31 | Apple Silicon, macOS, mlx-vlm 0.6.8 | Unlimited-OCR page timing after n-gram fix | bioRxiv pages 0/4/10 at aimd 2× render | Healthy pages ~6–11s (`finish=stop`, ~350–826 gen tokens). Pre-fix page 10 looped to `max_tokens` (~80s at 8192). Post-fix page 10 ~9s with stop. |
-| 2026-06-23 | Apple Silicon, macOS, Transformers 5.12.1 / MPS | `transcribe_file(..., model="Qwen/Qwen3-ASR-0.6B", language="zh")` | Generated short Chinese WAV | Historical smoke: non-empty Chinese text via vendored Transformers backend. Prefer `Qwen/Qwen3-ASR-0.6B-hf` with `transformers>=5.14.1` now. |
+| Checkpoint | en WER | zh CER | OCR similarity | finish=stop | Identical to reference |
+|------------|--------|--------|----------------|-------------|------------------------|
+| Qwen3-ASR-1.7B-4bit | 0.87% | 3.83% | — | — | 72/72 |
+| Qwen3-ASR-1.7B-8bit | 0.44% | 3.55% | — | — | 72/72 |
+| Qwen3-ASR-0.6B-6bit | 1.31% | 3.40% | — | — | 72/72 |
+| Unlimited-OCR-4bit | — | — | 1.0000 | 5/5 | 5/5 pages |
+| Unlimited-OCR-8bit | — | — | 1.0000 | 5/5 | 5/5 pages |
+
+The speech is synthetic and the pages are clean renders, so absolute
+error rates are optimistic. Zh errors are real homophone/near-sound
+mistakes on the weaker voices (构建 -> 断线, 她 -> 他); en errors include
+"twenty" -> "20". Identity with the mlx-audio / mlx-vlm reference is the strong signal.
+
+On Linux with the mlx CUDA backend (metacube, see below) the same corpus
+and the macOS-built baseline give identical results for all five
+checkpoints: 72/72 clips and 5/5 pages identical to the reference.
+
+## Linux, mlx CUDA backend (spec 003)
+
+metacube: RTX 5090 32 GB, Arch Linux, CUDA 13.4, cuDNN 9.27, NCCL 2.32,
+the `mlx-cuda-13` 0.32.4 wheel's `libmlx.so` (`MLX_PREFIX`). Release builds
+of the same examples, rounds 2-3 steady state. The custom Metal kernels are
+off on CUDA (`aimd_mlx::metal_kernels_available`), so these are plain mlx
+ops.
+
+| Date | Model | Input | Load | Warm | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 2026-10-26 | Qwen3-ASR-1.7B-4bit | zh 4.83 s / en 4.09 s / 59.96 s en | 0.68 s | 0.05-0.06 s / 0.05 s / 0.54 s | ~85x / ~77x / 112x realtime; transcripts identical to macOS. Round 1 adds ~0.7 s of CUDA JIT. |
+| 2026-10-26 | Unlimited-OCR-4bit | `page_text.png` (4x5 crops, 2327-token prompt) | 0.74 s | 0.72 s | Vision 0.12 s, prefill 0.24 s (~9.5k tok/s), decode 750-770 tok/s, finish=stop. Round 1 2.19 s (JIT). |
+| 2026-10-26 | Unlimited-OCR-4bit | `small_text.png` | — | 0.14 s | Decode ~850 tok/s. |
+
+Runtime needs: `CUDA_HOME` (mlx JIT-compiles kernels against the CUDA
+headers) and `libmlx.so` on the loader path. Vision-tower stage parity
+against the Metal goldens drifts past the bf16 bounds on CUDA (final
+features 4.6-5.3% rel rms vs 3%) while end-to-end markdown stays
+identical; see spec 003.
 
 ## Measurement guidance
 
@@ -249,7 +243,7 @@ For API/MCP model-reuse measurements, start the server once and send repeated re
 
 ## Dependency-upgrade smoke tests
 
-Before bumping brew `mlx` (and `MLX_BREW_VERSION` in `.github/workflows/ci.yml`), run the
+Before bumping brew `mlx`, run the
 checkpoint and E2E tiers on a Metal machine with the HF cache present. Also re-record the
 bench rows above if the numbers move:
 

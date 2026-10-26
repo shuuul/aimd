@@ -43,6 +43,7 @@
 #include "mlx/ops.h"
 #include "mlx/fast.h"
 #include "mlx/backend/gpu/device_info.h"
+#include "mlx/backend/metal/metal.h"
 #include "mlx/memory.h"
 #include "mlx/transforms.h"
 
@@ -1511,6 +1512,15 @@ AimdMlxArray* mlx_array_clone(AimdMlxArray* a) {
 int32_t mlx_device_is_cpu(void) {
   return guarded([&]() -> int32_t {
     return selected_device().type == mlx::core::Device::DeviceType::cpu ? 1 : 0;
+  });
+}
+
+int32_t mlx_metal_kernels_available(void) {
+  return guarded([&]() -> int32_t {
+    return selected_device().type == mlx::core::Device::DeviceType::gpu &&
+                   mlx::core::metal::is_available()
+               ? 1
+               : 0;
   });
 }
 

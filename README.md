@@ -1,9 +1,6 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/shuuul/aimd/main/assets/aimd-banner-sm.png" alt="aimd">
 
-  <a href="https://github.com/shuuul/aimd/actions/workflows/ci.yml">
-    <img src="https://github.com/shuuul/aimd/actions/workflows/ci.yml/badge.svg" alt="CI">
-  </a>
   <a href="https://github.com/shuuul/aimd/releases">
     <img src="https://img.shields.io/github/v/release/shuuul/aimd" alt="Latest release">
   </a>
@@ -214,8 +211,7 @@ aimd scan.pdf --model unlimited-ocr --precision 8bit
 Explicit `mlx-community/Qwen3-ASR-*` and `mlx-community/Unlimited-OCR-*`
 checkpoint IDs are also accepted. If a checkpoint ID already contains a
 precision, a different `--precision` is an error. Other models are rejected.
-bf16 (dense) checkpoints are not supported by the native engine yet. GLM-OCR
-and the Transformers/CUDA backends of the Python releases were removed.
+bf16 (dense) checkpoints are not supported by the native engine yet.
 
 Local inference needs the MLX GPU (Metal) device. With `AIMD_MLX_DEVICE=cpu`,
 or on a machine without a Metal GPU, local ASR/OCR fails early. Use a remote
@@ -377,8 +373,7 @@ cargo build --release -p aimd-cli -p aimd-api -p aimd-mcp
 the crate layout, test tiers, and release process, and
 [docs/architecture.md](docs/architecture.md) for the processing flow.
 
-`CHANGELOG.md` covers the Python releases (up to v0.23.x) and is no longer
-updated. Release notes for 1.0.0 and later are on the GitHub Releases page.
+Release notes are on the GitHub Releases page.
 
 ## License
 

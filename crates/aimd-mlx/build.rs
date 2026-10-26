@@ -6,6 +6,10 @@
 //! embedded so test/link products also resolve `libmlx.dylib` and its
 //! `@rpath/libjaccl.dylib` dependency without `DYLD_*` env fiddling; the
 //! bundled `mlx.metallib` is located by MLX relative to the loaded dylib.
+//!
+//! On Linux (spec 003) the prefix is an mlx build with the CUDA backend
+//! (`MLX_PREFIX`, e.g. the `mlx/` dir of the `mlx-cuda-13` wheel): it links
+//! `libmlx.so` against libstdc++ with the same rpath.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -19,8 +23,9 @@ fn main() {
     let include_dir = prefix.join("include");
     let lib_dir = prefix.join("lib");
 
+    let linux = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux");
     let header = include_dir.join("mlx").join("ops.h");
-    let lib = lib_dir.join("libmlx.dylib");
+    let lib = lib_dir.join(if linux { "libmlx.so" } else { "libmlx.dylib" });
     for required in [&header, &lib] {
         if !required.is_file() {
             panic!(
@@ -39,7 +44,7 @@ fn main() {
         // mlx 0.32.4 headers use C++20 (e.g. defaulted comparison operators
         // in mlx/backend/common/metal_kernel.h).
         .std("c++20")
-        .cpp_link_stdlib("c++")
+        .cpp_link_stdlib(if linux { "stdc++" } else { "c++" })
         .file("shim/shim.cpp")
         .include(&include_dir)
         .compile("aimd_mlx_shim");

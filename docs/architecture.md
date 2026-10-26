@@ -24,7 +24,7 @@ crates:
   resolution, and HF cache lookup/download.
 - `aimd-engine`: tokenizer, mel front-end, and the MLX model graphs and generation loops
   for Qwen3-ASR and Unlimited-OCR.
-- `aimd-mlx`: C-ABI shim over MLX C++ (Metal; device selection via `AIMD_MLX_DEVICE`).
+- `aimd-mlx`: C-ABI shim over MLX C++ (Metal on macOS; the mlx CUDA backend on Linux is spec 003; device selection via `AIMD_MLX_DEVICE`).
 - `aimd-weights`: safetensors mmap and the bit-exact MLX affine unpack used as a test
   oracle.
 - `aimd-cli`, `aimd-api`, `aimd-mcp`: the CLI (hand-written argument parser), the axum
