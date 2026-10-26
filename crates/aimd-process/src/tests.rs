@@ -38,6 +38,38 @@ impl ScriptedAsr {
     }
 }
 
+/// Fixed transcript with word alignment units.
+struct AlignedAsr;
+
+impl AsrModel for AlignedAsr {
+    fn transcribe(
+        &self,
+        _: &Path,
+        _: Option<&str>,
+        _: Option<&str>,
+    ) -> std::result::Result<String, AsrFailure> {
+        Ok("Hello there. Bye now.".into())
+    }
+
+    fn transcribe_aligned(
+        &self,
+        wav_path: &Path,
+        language: Option<&str>,
+        context: Option<&str>,
+    ) -> std::result::Result<crate::AlignedTranscript, AsrFailure> {
+        let words = [("Hello", 1.0), ("there", 1.5), ("Bye", 5.0), ("now", 5.5)];
+        Ok(crate::AlignedTranscript {
+            text: self.transcribe(wav_path, language, context)?,
+            units: Some(
+                words
+                    .iter()
+                    .map(|&(w, t)| (w.to_string(), t, t + 0.4))
+                    .collect(),
+            ),
+        })
+    }
+}
+
 impl AsrModel for ScriptedAsr {
     fn transcribe(
         &self,
@@ -83,7 +115,7 @@ struct Mock {
     tools: HashMap<String, PathBuf>,
     responder: Box<Responder>,
     runs: Mutex<Vec<(String, Vec<String>)>>,
-    asr: HashMap<String, Arc<ScriptedAsr>>,
+    asr: HashMap<String, Arc<dyn AsrModel>>,
     ocr: HashMap<String, Arc<ScriptedOcr>>,
     loads: Mutex<Vec<String>>,
     preflight: Option<AimdError>,
@@ -135,7 +167,7 @@ impl Mock {
         self
     }
 
-    fn with_asr(mut self, id: &str, model: Arc<ScriptedAsr>) -> Self {
+    fn with_asr(mut self, id: &str, model: Arc<dyn AsrModel>) -> Self {
         self.asr.insert(id.into(), model);
         self
     }
@@ -356,8 +388,13 @@ fn write_pdf(path: &Path, pages: &[Option<&str>]) {
     std::fs::write(path, out).unwrap();
 }
 
+/// A request with anchors off (the pre-spec-005 output); anchored tests
+/// opt in.
 fn request(path: &Path) -> ProcessInput {
-    ProcessInput::new(path.to_string_lossy())
+    ProcessInput {
+        anchors: false,
+        ..ProcessInput::new(path.to_string_lossy())
+    }
 }
 
 fn warnings(logs: &[(Level, String)]) -> Vec<String> {
@@ -726,6 +763,17 @@ fn local_transcript_uses_resolved_model_language_and_context() {
     let result = result.unwrap();
     assert_eq!(result.task_type, TaskType::Transcript);
     assert_eq!(result.markdown, "hello world");
+    assert_eq!(result.segments, None);
+    // Anchored local ASR uses the model's alignment units.
+    let rt = Mock::default().with_asr(ASR_4BIT, Arc::new(AlignedAsr));
+    let anchored = ProcessInput::new(wav.to_string_lossy());
+    let aligned = process_input_with(&anchored, &NoHooks, &rt).unwrap();
+    assert_eq!(
+        aligned.markdown,
+        "[00:00:01] Hello there.\n\n[00:00:05] Bye now."
+    );
+    let segments = aligned.segments.unwrap();
+    assert_eq!((segments[0].start, segments[0].end), (Some(1.0), Some(1.9)));
     assert_eq!(result.text_context.title, "clip");
     assert_eq!(result.asset_base_uri, None);
     let calls = model.calls.lock().unwrap();
@@ -917,6 +965,26 @@ fn long_audio_is_segmented_with_progress_and_cancellation() {
     assert_eq!(
         err.unwrap_err().message,
         "ASR produced empty transcription for all segments"
+    );
+
+    // Anchors: 300 s segments; unaligned text is spread over its segment.
+    let anchored = ProcessInput {
+        anchors: true,
+        ..req.clone()
+    };
+    let rt = make_rt(vec![
+        Ok("one".into()),
+        Err(AsrFailure::Empty),
+        Ok("three".into()),
+    ]);
+    let (result, _) = capture(|| process_input_with(&anchored, &NoHooks, &rt));
+    let result = result.unwrap();
+    assert_eq!(result.markdown, "[00:00:00] one\n\n[00:10:00] three");
+    assert_eq!(rt.runs()[1].1[6], "300.0");
+    let segments = result.segments.unwrap();
+    assert_eq!(
+        (segments[1].start, segments[1].end),
+        (Some(600.0), Some(900.0))
     );
 
     let rt = make_rt(vec![Ok("one".into()), Ok("two".into()), Ok("three".into())]);

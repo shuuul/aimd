@@ -164,7 +164,7 @@ fn transcript_writes_output_and_reports_success() {
         &Fake::default(),
     );
     assert_eq!(o.code, 0, "{:?}", o.logs);
-    assert_eq!(std::fs::read_to_string(&out).unwrap(), "hello");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "[00:00:00] hello");
     assert_eq!(
         o.stdout,
         format!(
@@ -181,6 +181,41 @@ fn transcript_writes_output_and_reports_success() {
     assert_eq!(infos[0], format!("Input: {}", wav.display()));
     assert!(infos.contains(&"Task: transcript"));
     assert!(infos.contains(&format!("Transcript saved to: {}", out.display()).as_str()));
+
+    // --no-anchors keeps the plain transcript; srt renders the timed cues.
+    let plain = dir.join("plain.md");
+    let o = invoke(
+        &[
+            &wav.to_string_lossy(),
+            "--no-anchors",
+            "-o",
+            &plain.to_string_lossy(),
+        ],
+        &Fake::default(),
+    );
+    assert_eq!(o.code, 0, "{:?}", o.logs);
+    assert_eq!(std::fs::read_to_string(&plain).unwrap(), "hello");
+    let srt = dir.join("clip.srt");
+    let o = invoke(
+        &[
+            &wav.to_string_lossy(),
+            "-f",
+            "srt",
+            "-o",
+            &srt.to_string_lossy(),
+        ],
+        &Fake::default(),
+    );
+    assert_eq!(o.code, 0, "{:?}", o.logs);
+    assert_eq!(
+        std::fs::read_to_string(&srt).unwrap(),
+        "1\n00:00:00,000 --> 00:00:00,500\nhello\n"
+    );
+    let o = invoke(
+        &[&wav.to_string_lossy(), "-f", "vtt", "--no-anchors"],
+        &Fake::default(),
+    );
+    assert_eq!(o.code, 1);
 }
 
 #[test]

@@ -73,6 +73,27 @@ pub trait AsrModel: Send + Sync {
         language: Option<&str>,
         context: Option<&str>,
     ) -> std::result::Result<String, AsrFailure>;
+
+    /// [`Self::transcribe`] plus forced-alignment units for the transcript
+    /// (spec 005). Models that cannot align (or fail to) return
+    /// `units: None`; the default never aligns.
+    fn transcribe_aligned(
+        &self,
+        wav_path: &Path,
+        language: Option<&str>,
+        context: Option<&str>,
+    ) -> std::result::Result<AlignedTranscript, AsrFailure> {
+        self.transcribe(wav_path, language, context)
+            .map(|text| AlignedTranscript { text, units: None })
+    }
+}
+
+/// A transcript with forced-alignment units: `(text, start, end)` in
+/// seconds from the start of the audio, in transcript order.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AlignedTranscript {
+    pub text: String,
+    pub units: Option<Vec<(String, f64, f64)>>,
 }
 
 /// Model-level OCR failure.
@@ -94,7 +115,9 @@ pub use aimd_doc::DocOutput;
 
 /// URL transcript output and the audio-fallback seam (re-exports of the URL
 /// crate).
-pub use aimd_url::{AudioTranscriber, TranscribeRequest, UrlOutput, markitdown_normalize};
+pub use aimd_url::{
+    AudioTranscriber, TimedText, TranscribeRequest, UrlOutput, markitdown_normalize,
+};
 
 /// [`AudioTranscriber`] for the URL audio fallback over [`asr::transcribe_with_options`]
 /// with a runtime's model loading and tools.
@@ -115,8 +138,34 @@ impl AudioTranscriber for UrlAudioTranscriber<'_> {
             asr_base_url: request.asr_base_url.clone(),
             asr_model: request.asr_model.clone(),
             asr_api_key: request.asr_api_key.clone(),
+            anchors: false,
         };
         asr::transcribe_with_options(
+            self.0,
+            audio_path,
+            &options,
+            request.context.as_deref(),
+            hooks,
+        )
+    }
+
+    fn transcribe_timed(
+        &self,
+        audio_path: &Path,
+        request: &TranscribeRequest,
+        hooks: &dyn ProcessHooks,
+    ) -> Result<TimedText> {
+        let options = asr::AsrOptions {
+            language: request.language.clone(),
+            model: request.model.clone(),
+            precision: request.precision.clone(),
+            temp_dir: request.temp_dir.clone(),
+            asr_base_url: request.asr_base_url.clone(),
+            asr_model: request.asr_model.clone(),
+            asr_api_key: request.asr_api_key.clone(),
+            anchors: request.anchors,
+        };
+        asr::transcribe_timed(
             self.0,
             audio_path,
             &options,
@@ -293,10 +342,17 @@ fn process_local_file(
         .then(|| parent_dir(input_path).join(&stem));
     let temp_dir = request.temp_dir.as_deref();
 
+    let mut segments = None;
     let (raw_markdown, title) = match task_type {
         TaskType::Transcript => {
-            let text =
-                asr::transcribe_file(rt, input_path, request, request.context.as_deref(), hooks)?;
+            let options = asr::AsrOptions::from_request(request);
+            let context = request.context.as_deref();
+            let timed = asr::transcribe_timed(rt, input_path, &options, context, hooks)?;
+            segments = timed.sentences.filter(|s| !s.is_empty());
+            let text = match &segments {
+                Some(sentences) => aimd_core::anchors::timed_paragraphs(sentences),
+                None => timed.text,
+            };
             (text, Some(stem.clone()))
         }
         TaskType::Ocr => {
@@ -324,7 +380,7 @@ fn process_local_file(
         asset_base_uri,
         output_dir,
         platform: None,
-        segments: None,
+        segments,
     })
 }
 
