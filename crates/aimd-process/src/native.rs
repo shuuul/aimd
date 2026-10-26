@@ -7,6 +7,9 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use aimd_core::{AimdError, Result, log_info};
+use aimd_engine::models::paddleocr_vl::pipeline::{
+    PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest,
+};
 use aimd_engine::models::qwen3_asr::pipeline::{
     PipelineError as AsrPipelineError, Qwen3AsrPipeline, TranscriptionRequest,
 };
@@ -14,6 +17,7 @@ use aimd_engine::models::unlimited_ocr::pipeline::{
     OcrRequest, PipelineError as OcrPipelineError, UnlimitedOcrPipeline,
 };
 
+use crate::models::{OcrFamily, PADDLEOCR_VL_REPO, ocr_family};
 use crate::{AsrFailure, AsrModel, CommandOutput, LocalModality, OcrFailure, OcrModel, Runtime};
 
 /// Native runtime (real system, cached pipelines).
@@ -81,17 +85,41 @@ impl Runtime for NativeRuntime {
         if let Some(model) = cache.get(model_id) {
             return Ok(model.clone());
         }
-        let dir = crate::hf::resolve_checkpoint(model_id, &|k| self.env(k))?;
-        log_info!(
-            "Loading Unlimited-OCR checkpoint {model_id} from {}",
-            dir.display()
-        );
-        let pipeline = UnlimitedOcrPipeline::load(&dir).map_err(|e| {
+        let family = ocr_family(model_id);
+        let load_err = |e: String| {
             AimdError::backend_unavailable(format!(
                 "Unable to load MLX VLM OCR model '{model_id}': {e}"
             ))
-        })?;
-        let model = Arc::new(NativeOcr(pipeline));
+        };
+        let model = match family {
+            OcrFamily::UnlimitedOcr => {
+                let dir = crate::hf::resolve_checkpoint(model_id, &|k| self.env(k))?;
+                log_info!(
+                    "Loading {} checkpoint {model_id} from {}",
+                    family.name(),
+                    dir.display()
+                );
+                let pipeline =
+                    UnlimitedOcrPipeline::load(&dir).map_err(|e| load_err(e.to_string()))?;
+                Arc::new(NativeOcr::Unlimited(pipeline))
+            }
+            OcrFamily::PaddleOcrVl { quant_bits } => {
+                let dir = crate::hf::resolve_checkpoint(PADDLEOCR_VL_REPO, &|k| self.env(k))?;
+                log_info!(
+                    "Loading {} checkpoint {model_id} from {}",
+                    family.name(),
+                    dir.display()
+                );
+                let pipeline = PaddleOcrVlPipeline::load(&dir, quant_bits)
+                    .map_err(|e| load_err(e.to_string()))?;
+                Arc::new(NativeOcr::PaddleVl(pipeline))
+            }
+            OcrFamily::PpOcrV6 => {
+                return Err(load_err(
+                    "PP-OCRv6 is not built into this binary".to_string(),
+                ));
+            }
+        };
         cache.insert(model_id.to_string(), model.clone());
         Ok(model)
     }
@@ -118,14 +146,24 @@ impl AsrModel for NativeAsr {
     }
 }
 
-struct NativeOcr(UnlimitedOcrPipeline);
+enum NativeOcr {
+    Unlimited(UnlimitedOcrPipeline),
+    PaddleVl(PaddleOcrVlPipeline),
+}
 
 impl OcrModel for NativeOcr {
     fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure> {
-        match self.0.recognize_path(image_path, OcrRequest::default()) {
-            Ok(result) => Ok(result.markdown),
-            Err(OcrPipelineError::EmptyContent) => Err(OcrFailure::Empty),
-            Err(e) => Err(OcrFailure::Other(e.to_string())),
+        match self {
+            Self::Unlimited(p) => match p.recognize_path(image_path, OcrRequest::default()) {
+                Ok(result) => Ok(result.markdown),
+                Err(OcrPipelineError::EmptyContent) => Err(OcrFailure::Empty),
+                Err(e) => Err(OcrFailure::Other(e.to_string())),
+            },
+            Self::PaddleVl(p) => match p.recognize_path(image_path, VlRequest::default()) {
+                Ok(result) => Ok(result.markdown),
+                Err(VlPipelineError::EmptyContent) => Err(OcrFailure::Empty),
+                Err(e) => Err(OcrFailure::Other(e.to_string())),
+            },
         }
     }
 }
