@@ -83,6 +83,11 @@ pub struct TextLine {
 pub struct PpOcrOutput {
     pub lines: Vec<TextLine>,
     pub markdown: String,
+    /// Original image width in pixels (the frame of [`TextLine::quad`];
+    /// tiny-image padding is not included).
+    pub width: u32,
+    /// Original image height in pixels.
+    pub height: u32,
 }
 
 /// The detector input after preprocessing.
@@ -383,7 +388,12 @@ impl PpOcrV6Pipeline {
         } else {
             text + "\n"
         };
-        Ok(PpOcrOutput { lines, markdown })
+        Ok(PpOcrOutput {
+            lines,
+            markdown,
+            width: image.width as u32,
+            height: image.height as u32,
+        })
     }
 
     /// Decodes and recognizes the image at `path`.

@@ -21,7 +21,10 @@
 //!   numerics), KV cache, boolean causal prefill mask, `lm_head`.
 //! - [`generate`]: mlx-vlm `generate_step` greedy loop (chunked prefill,
 //!   `cache_offset + rope_delta` decode positions, pipelined decode).
-//! - [`pipeline`]: [`pipeline::PaddleOcrVlPipeline`] wiring all of it.
+//! - [`spotting`]: the `Spotting:` task (README x2 LANCZOS upscale, larger
+//!   `max_pixels`) and the `<|LOC_n|>` output parser.
+//! - [`pipeline`]: [`pipeline::PaddleOcrVlPipeline`] wiring all of it;
+//!   [`pipeline::VlTask`] picks `OCR:` (default) or `Spotting:`.
 //!
 //! # Reference implementations
 //!
@@ -38,6 +41,7 @@ pub mod decoder;
 pub mod generate;
 pub mod pipeline;
 pub mod preprocess;
+pub mod spotting;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod vision;

@@ -1,5 +1,5 @@
 //! PaddleOCR-VL end-to-end recognition: image decode -> preprocessing ->
-//! vision features -> `OCR:` prompt ids -> embedding splice -> greedy
+//! vision features -> `OCR:` / `Spotting:` prompt ids -> embedding splice -> greedy
 //! generation -> `decode(skip_special_tokens=True).strip()`.
 
 use std::collections::BTreeSet;
@@ -20,6 +20,11 @@ use super::generate::{
 use super::preprocess::{
     IMAGE_PLACEHOLDER, OCR_TASK, PreparedImage, RopeIndex, build_prompt_text, image_token_count,
     preprocess_rgb8, rope_index,
+};
+pub use super::spotting::Spot;
+use super::spotting::{
+    SPOTTING_MAX_PIXELS, SPOTTING_TASK, parse_spotting_output, spotting_upscale,
+    strip_location_tokens,
 };
 use super::vision::{PaddleVision, VisionError};
 use super::weights::Loader;
@@ -62,20 +67,47 @@ pub enum PipelineError {
     EmptyContent,
 }
 
+/// The task prompt.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VlTask {
+    /// Full-page `OCR:` (Markdown, no positions).
+    #[default]
+    Ocr,
+    /// `Spotting:`: text lines with quadrilaterals (see [`super::spotting`]).
+    Spotting,
+}
+
+impl VlTask {
+    /// The prompt text after the image.
+    pub fn prompt(self) -> &'static str {
+        match self {
+            VlTask::Ocr => OCR_TASK,
+            VlTask::Spotting => SPOTTING_TASK,
+        }
+    }
+}
+
 /// One recognition request.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VlRequest {
     /// Generation budget; `None` = [`DEFAULT_MAX_TOKENS`] (4096).
     pub max_tokens: Option<usize>,
+    /// Task prompt (default `OCR:`).
+    pub task: VlTask,
 }
 
 /// Recognition result.
 #[derive(Clone, Debug)]
 pub struct VlOutput {
-    /// `decode(tokens, skip_special_tokens=True).strip()`.
+    /// `Ocr`: `decode(tokens, skip_special_tokens=True).strip()`.
+    /// `Spotting`: the same decode with the `<|LOC_n|>` tokens removed
+    /// (one text line per spotted item).
     pub markdown: String,
     /// Generated tokens (EOS excluded).
     pub tokens: usize,
+    /// Spotted lines (quads normalized to the original image); empty for
+    /// [`VlTask::Ocr`].
+    pub spots: Vec<Spot>,
 }
 
 /// Prompt size and timings of one recognition.
@@ -221,7 +253,7 @@ impl PaddleOcrVlPipeline {
             .0)
     }
 
-    fn recognize_rgb8_with_stats(
+    pub(crate) fn recognize_rgb8_with_stats(
         &self,
         rgb: &[u8],
         width: usize,
@@ -231,11 +263,14 @@ impl PaddleOcrVlPipeline {
         let t0 = Instant::now();
         let (stream, prompt) = self.generate_rgb8(rgb, width, height, request, None)?;
         let total = t0.elapsed();
-        let markdown = self
-            .tokenizer
-            .decode(&stream.tokens, true)?
-            .trim()
-            .to_string();
+        let decoded = self.tokenizer.decode(&stream.tokens, true)?;
+        let (markdown, spots) = match request.task {
+            VlTask::Ocr => (decoded.trim().to_string(), Vec::new()),
+            VlTask::Spotting => (
+                strip_location_tokens(&decoded),
+                parse_spotting_output(&decoded),
+            ),
+        };
         if markdown.is_empty() {
             return Err(PipelineError::EmptyContent);
         }
@@ -254,24 +289,39 @@ impl PaddleOcrVlPipeline {
             VlOutput {
                 markdown,
                 tokens: stream.tokens.len(),
+                spots,
             },
             stats,
         ))
     }
 
-    /// Preprocessing + prompt ids + mRoPE index for one image.
+    /// Preprocessing + prompt ids + mRoPE index for one image. `Spotting`
+    /// first applies the README upscale and raises `max_pixels`.
     pub(crate) fn prepare(
         &self,
         rgb: &[u8],
         width: usize,
         height: usize,
+        task: VlTask,
     ) -> Result<Prompt, PipelineError> {
-        let image = preprocess_rgb8(rgb, width, height, &self.pre_cfg)?;
+        let image = match task {
+            VlTask::Ocr => preprocess_rgb8(rgb, width, height, &self.pre_cfg)?,
+            VlTask::Spotting => {
+                let cfg = PreprocessorConfig {
+                    max_pixels: SPOTTING_MAX_PIXELS,
+                    ..self.pre_cfg.clone()
+                };
+                match spotting_upscale(rgb, width, height)? {
+                    Some((up, w, h)) => preprocess_rgb8(&up, w, h, &cfg)?,
+                    None => preprocess_rgb8(rgb, width, height, &cfg)?,
+                }
+            }
+        };
         let merge = self.cfg.vision_config.spatial_merge_size;
         let n_image = image_token_count(image.grid_thw, merge);
         let ids = self
             .tokenizer
-            .encode(&build_prompt_text(OCR_TASK, n_image))?;
+            .encode(&build_prompt_text(task.prompt(), n_image))?;
         let img = self.cfg.image_token_id;
         let image_start = ids
             .iter()
@@ -349,7 +399,7 @@ impl PaddleOcrVlPipeline {
         request: VlRequest,
         capture: Option<&mut Vec<MlxArray>>,
     ) -> Result<(GreedyStream, Prompt), PipelineError> {
-        let prompt = self.prepare(rgb, width, height)?;
+        let prompt = self.prepare(rgb, width, height, request.task)?;
         let features = self.image_features(&prompt)?;
         let embeds = self.splice(&prompt, &features)?;
         let stream = greedy_stream(

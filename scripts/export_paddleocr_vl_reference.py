@@ -40,6 +40,12 @@ Loads the official dense bf16 `PaddlePaddle/PaddleOCR-VL-1.6` and the
   max_tokens 4096), mlx-vlm timings, and the 4-bit load-time-quantization
   bit-exactness check (dense bf16 weights quantized with `mx.quantize`
   (affine, group 64) vs the mlx-community tensors).
+- Spotting (spec 005 WS-03), following the checkpoint README: PIL LANCZOS
+  hashes on LCG noise (`preprocess.json` `lanczos`), per fixture the x2
+  LANCZOS upscale hash, grid, pixel hash and prompt ids
+  (`preprocess.json` `spotting`), and per precision the `Spotting:` greedy
+  stream with its parsed spots (`manifest.json` `<prec>.fixtures.*.spotting`,
+  max_pixels 2048*28*28).
 
 Usage: uv run scripts/export_paddleocr_vl_reference.py
 """
@@ -49,7 +55,9 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -73,6 +81,9 @@ IMAGES = OUT / "images"
 DENSE = "PaddlePaddle/PaddleOCR-VL-1.6"
 Q4 = "mlx-community/PaddleOCR-VL-1.6-4bit"
 PROMPT = "OCR:"
+SPOTTING_PROMPT = "Spotting:"
+SPOTTING_UPSCALE = 1500
+SPOTTING_MAX_PIXELS = 2048 * 28 * 28
 MAX_TOKENS = 4096
 LOGPROB_STEPS = 6
 LOGPROB_STRIDE = 97
@@ -222,6 +233,66 @@ def smart_resize_cases() -> list[list[int]]:
     return out
 
 
+def make_noise_image(width: int, height: int, seed: int) -> Image.Image:
+    """LCG-noise RGB image (same generator as export_ocr_vision_reference)."""
+    state = seed & 0x7FFFFFFF
+    data = bytearray(width * height * 3)
+    for i in range(len(data)):
+        state = (state * 1103515245 + 12345) % (1 << 31)
+        data[i] = (state >> 16) & 0xFF
+    return Image.frombytes("RGB", (width, height), bytes(data))
+
+
+def lanczos_cases() -> list[dict]:
+    """PIL LANCZOS resizes of LCG noise (x2 upscale, odd ratios, and the
+    downscale branch with filterscale > 1), as FNV-1a 64 of the RGB8 bytes."""
+    out = []
+    for (w, h), (dw, dh), seed in (
+        ((37, 23), (74, 46), 7),
+        ((50, 50), (83, 31), 11),
+        ((97, 61), (40, 29), 13),
+        ((64, 9), (128, 18), 17),
+    ):
+        dst = make_noise_image(w, h, seed).resize((dw, dh), Image.Resampling.LANCZOS)
+        out.append(
+            {
+                "source": [w, h],
+                "target": [dw, dh],
+                "lcg_seed": seed,
+                "rgb8_fnv1a64": fnv1a64(np.asarray(dst, dtype=np.uint8).tobytes()),
+            }
+        )
+    return out
+
+
+def spotting_image(png: Path, tmp: Path) -> tuple[Path, Image.Image]:
+    """README spotting preprocessing: x2 LANCZOS when both sides < 1500.
+    The result is saved as a lossless PNG for the mlx-vlm processor."""
+    img = Image.open(png).convert("RGB")
+    w, h = img.size
+    if w < SPOTTING_UPSCALE and h < SPOTTING_UPSCALE:
+        img = img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+    out = tmp / f"{png.stem}_spotting.png"
+    img.save(out)
+    return out, img
+
+
+LOC_ITEM = re.compile(r"(.*?)((?:<\|LOC_\d+\|>){8})", re.S)
+LOC_VALUE = re.compile(r"<\|LOC_(\d+)\|>")
+
+
+def parse_spots(text: str) -> list[dict]:
+    """PaddleX `post_process_for_spotting` grammar: text followed by eight
+    LOC tokens (TL, TR, BR, BL corners on a 0..1000 grid), normalized."""
+    spots = []
+    for body, locs in LOC_ITEM.findall(text):
+        vals = [int(v) for v in LOC_VALUE.findall(locs)]
+        quad = [[vals[i] / 1000.0, vals[i + 1] / 1000.0] for i in range(0, 8, 2)]
+        if body.strip():
+            spots.append({"text": body.strip(), "quad": quad})
+    return spots
+
+
 def processor_inputs(processor, prompt: str, png: Path):
     inputs = prepare_inputs(processor, images=[png.as_posix()], prompts=[prompt])
     return inputs
@@ -361,6 +432,49 @@ def quant_check(dense_model, q4_dir: Path) -> dict:
     }
 
 
+def spotting(
+    model, processor, prec: str, prec_entry: dict, manifest: dict, preprocess: dict
+):
+    """`Spotting:` per the checkpoint README (x2 LANCZOS below 1500 px,
+    max_pixels 2048*28*28): preprocessing facts into `preprocess.json`
+    (bf16 pass) and the greedy generation + parsed spots per fixture."""
+    prompt = apply_chat_template(processor, model.config, SPOTTING_PROMPT, num_images=1)
+    manifest["spotting_formatted_prompt"] = prompt
+    ip = processor.image_processor
+    default_max = ip.max_pixels
+    ip.max_pixels = SPOTTING_MAX_PIXELS
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in manifest["fixtures"]:
+            spng, simg = spotting_image(IMAGES / f"{name}.png", Path(tmp))
+            inputs = processor_inputs(processor, prompt, spng)
+            ids = [int(x) for x in np.array(inputs["input_ids"]).reshape(-1)]
+            grid = [int(x) for x in np.array(inputs["image_grid_thw"]).reshape(-1)]
+            if prec == "bf16":
+                pv = mx.array(inputs["pixel_values"], dtype=mx.bfloat16)
+                pv_bits = np.array(pv.view(mx.uint16)).astype("<u2")
+                preprocess.setdefault("spotting", {})[name] = {
+                    "upscaled_wh": list(simg.size),
+                    "upscaled_rgb8_fnv1a64": fnv1a64(
+                        np.asarray(simg, dtype=np.uint8).tobytes()
+                    ),
+                    "grid_thw": grid,
+                    "pixel_bf16_fnv1a64": fnv1a64(pv_bits.tobytes()),
+                    "prompt_ids": ids,
+                }
+            else:
+                assert preprocess["spotting"][name]["prompt_ids"] == ids
+            g = greedy(model, processor, prompt, spng)
+            g["plain"] = LOC_VALUE.sub("", g["markdown"]).strip()
+            g["spots"] = parse_spots(g["markdown"])
+            prec_entry["fixtures"][name]["spotting"] = g
+            print(
+                f"[{prec}] {name} spotting: {len(g['tokens'])} tokens finish={g['finish_reason']} "
+                f"prompt {g['prompt_tokens']}, {g['elapsed_s']:.2f} s, {len(g['spots'])} spots",
+                file=sys.stderr,
+            )
+    ip.max_pixels = default_max
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     render_fixtures()
@@ -380,6 +494,7 @@ def main() -> None:
     preprocess: dict = {
         "smart_resize": smart_resize_cases(),
         "pixel_lut_bf16": pixel_lut(),
+        "lanczos": lanczos_cases(),
         "fixtures": {},
     }
 
@@ -471,6 +586,7 @@ def main() -> None:
                 file=sys.stderr,
             )
             prec_entry["fixtures"][name] = fx
+        spotting(model, processor, prec, prec_entry, manifest, preprocess)
         if prec == "bf16":
             dense_model = model
         else:

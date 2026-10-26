@@ -277,6 +277,11 @@ fn checkpoint_pipeline_matches_mlx4ocr() {
 
         // Final lines.
         let out = pipe.recognize_image(&image).unwrap();
+        assert_eq!(
+            (out.width as usize, out.height as usize),
+            (image.width, image.height),
+            "{name}: output frame"
+        );
         let want_lines = entry["lines"].as_array().unwrap();
         assert_eq!(out.lines.len(), want_lines.len(), "{name}: line count");
         let mut worst_score = 0f32;
