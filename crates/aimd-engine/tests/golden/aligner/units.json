@@ -1,0 +1,280 @@
+[
+ {
+  "language": "English",
+  "text": "The quick brown fox jumps over the lazy dog.",
+  "units": [
+   "The",
+   "quick",
+   "brown",
+   "fox",
+   "jumps",
+   "over",
+   "the",
+   "lazy",
+   "dog"
+  ]
+ },
+ {
+  "language": "English",
+  "text": "Don't stop: it's 3.14, not 22/7 -- right?!",
+  "units": [
+   "Don't",
+   "stop",
+   "it's",
+   "314",
+   "not",
+   "227",
+   "right"
+  ]
+ },
+ {
+  "language": "English",
+  "text": "  Context   engineering\tdecides\nwhat a model sees.  ",
+  "units": [
+   "Context",
+   "engineering",
+   "decides",
+   "what",
+   "a",
+   "model",
+   "sees"
+  ]
+ },
+ {
+  "language": "English",
+  "text": "GPU-accelerated inference 用MLX运行。",
+  "units": [
+   "GPUaccelerated",
+   "inference",
+   "用",
+   "MLX",
+   "运",
+   "行"
+  ]
+ },
+ {
+  "language": "English",
+  "text": "...!!! ---",
+  "units": []
+ },
+ {
+  "language": "English",
+  "text": "",
+  "units": []
+ },
+ {
+  "language": "Chinese",
+  "text": "今天天气很好，我们一起去公园散步吧。",
+  "units": [
+   "今",
+   "天",
+   "天",
+   "气",
+   "很",
+   "好",
+   "我",
+   "们",
+   "一",
+   "起",
+   "去",
+   "公",
+   "园",
+   "散",
+   "步",
+   "吧"
+  ]
+ },
+ {
+  "language": "Chinese",
+  "text": "我用GPT-4写代码，效率提高了50%！",
+  "units": [
+   "我",
+   "用",
+   "GPT4",
+   "写",
+   "代",
+   "码",
+   "效",
+   "率",
+   "提",
+   "高",
+   "了",
+   "50"
+  ]
+ },
+ {
+  "language": "Chinese",
+  "text": "hello,world 你好 AI 时代",
+  "units": [
+   "helloworld",
+   "你",
+   "好",
+   "AI",
+   "时",
+   "代"
+  ]
+ },
+ {
+  "language": "Chinese",
+  "text": "上下文工程（context engineering）很重要。",
+  "units": [
+   "上",
+   "下",
+   "文",
+   "工",
+   "程",
+   "context",
+   "engineering",
+   "很",
+   "重",
+   "要"
+  ]
+ },
+ {
+  "language": "Chinese",
+  "text": "𠀀𪜀㐀豈",
+  "units": [
+   "𠀀",
+   "𪜀",
+   "㐀",
+   "豈"
+  ]
+ },
+ {
+  "language": "Cantonese",
+  "text": "我哋今日去飲茶，好唔好？",
+  "units": [
+   "我",
+   "哋",
+   "今",
+   "日",
+   "去",
+   "飲",
+   "茶",
+   "好",
+   "唔",
+   "好"
+  ]
+ },
+ {
+  "language": "German",
+  "text": "Größenwahn ist übermäßig — sagt Jürgen.",
+  "units": [
+   "Größenwahn",
+   "ist",
+   "übermäßig",
+   "sagt",
+   "Jürgen"
+  ]
+ },
+ {
+  "language": "French",
+  "text": "L'homme qu'il a vu, c'était « là-bas ».",
+  "units": [
+   "L'homme",
+   "qu'il",
+   "a",
+   "vu",
+   "c'était",
+   "làbas"
+  ]
+ },
+ {
+  "language": "Spanish",
+  "text": "¿Dónde está la biblioteca? ¡Aquí!",
+  "units": [
+   "Dónde",
+   "está",
+   "la",
+   "biblioteca",
+   "Aquí"
+  ]
+ },
+ {
+  "language": "Italian",
+  "text": "Perché l'università è chiusa?",
+  "units": [
+   "Perché",
+   "l'università",
+   "è",
+   "chiusa"
+  ]
+ },
+ {
+  "language": "Portuguese",
+  "text": "A ação começou às três horas.",
+  "units": [
+   "A",
+   "ação",
+   "começou",
+   "às",
+   "três",
+   "horas"
+  ]
+ },
+ {
+  "language": "Russian",
+  "text": "Съешь же ещё этих мягких французских булок, да выпей чаю.",
+  "units": [
+   "Съешь",
+   "же",
+   "ещё",
+   "этих",
+   "мягких",
+   "французских",
+   "булок",
+   "да",
+   "выпей",
+   "чаю"
+  ]
+ },
+ {
+  "language": "Korean",
+  "text": "안녕하세요. 오늘 날씨가 정말 좋네요!",
+  "units": [
+   "안녕",
+   "하세요",
+   "오늘",
+   "날씨",
+   "가",
+   "정말",
+   "좋네요"
+  ]
+ },
+ {
+  "language": "Korean",
+  "text": "회의는 화요일 오후 세 시로 변경되었습니다.",
+  "units": [
+   "회의",
+   "는",
+   "화요일",
+   "오후",
+   "세",
+   "시로",
+   "변경",
+   "되었습니다"
+  ]
+ },
+ {
+  "language": "Korean",
+  "text": "대한민국의 수도는 서울입니다",
+  "units": [
+   "대한민국",
+   "의",
+   "수도",
+   "는",
+   "서울",
+   "입니다"
+  ]
+ },
+ {
+  "language": "Korean",
+  "text": "나 너 AI가 좋아",
+  "units": [
+   "나",
+   "너",
+   "AI가",
+   "좋아"
+  ]
+ }
+]
