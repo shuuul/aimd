@@ -140,7 +140,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-05 | `crates/aimd-engine/src/audio`: wav load (f32 mono 16k), 128-bin mel matching the Qwen3-ASR feature extractor, `scripts/export_mel_reference.py` + committed golden fixtures | agent-audio | Done | WS-01 | `cargo test -p aimd-engine --lib audio` golden parity (tolerance vs exported reference) |
 | WS-06 | ASR model graph + generation loop on CPU (windowed encoder n_window=50/infer=800, Qwen3 decoder, greedy, retry-on-loop) | agent-encoder + agent-decoder + shuuul | Done | WS-02, WS-03, WS-04, WS-05 | Commits 2cc53a9/8de3841: token-identical outputs vs MLX, golden argmax stream exact, E2E green. Open tail: labeled golden-corpus CER harness (two-clip identity is evidence, not the gate) |
 | WS-07 | OCR model graph + generation loop on the MLX backend (gundam preprocessing, SAM ViT-B + CLIP + projector, MoE decoder with ring sliding-window KV, n-gram guard, markdown normalization); CPU prototype retired per the MLX-only decision | agent-ocr-vision + agent-ocr-decoder + agent-ocr-integration + agent-ocr-mlx | Done | WS-11 | Vision + prefill bit-exact vs mlx_vlm goldens; E2E markdown identical (similarity 1.0, finish=stop, equal token counts) on both `crates/aimd-engine/tests/golden/ocr_e2e` fixtures; latency at parity with mlx_vlm (0.83 s / 4.7 s vs 0.88 s / 4.6 s). Open tail: labeled multi-page OCR corpus gate |
-| WS-08 | Hand-written Metal MSL kernels for macOS hot spots, plugged into the MLX graph (`mlx::core::fast::metal_kernel` custom kernels through the shim, e.g. fused MoE dispatch, fused attention/ring-KV update, quantized GEMV variants tuned for M2 Pro); chosen by profiling after WS-13/WS-14, kept only where they beat MLX's built-ins | shuuul | In progress | WS-13 | Per-kernel A/B vs the MLX built-in with outputs unchanged; end-to-end decode gain recorded in docs/performance.md |
+| WS-08 | Hand-written Metal MSL kernels for macOS hot spots, plugged into the MLX graph (`mlx::core::fast::metal_kernel` custom kernels through the shim, e.g. fused MoE dispatch, fused attention/ring-KV update, quantized GEMV variants tuned for M2 Pro); chosen by profiling after WS-13/WS-14, kept only where they beat MLX's built-ins | shuuul | Done | WS-13 | PR #26: fused MoE expert + router, decode sdpa, compiled GELU, all bit-identical; OCR decode ~232 -> ~276 tok/s, vision 1.505 -> 1.432 s/page, 5-min ASR 22.85 -> ~21.9 s (docs/performance.md). Not kept: fused q\|k\|v, rel-pos bias, add + rms_norm |
 | WS-09 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR E2E against the Python reference, Linux bottle build + self-hosted CI runner; hand-written .cu/CUTLASS cancelled | Unassigned | Pending | WS-07 | ASR/OCR E2E parity on metacube; `brew install` of the tap mlx formula + Linux bottle works; perf rows in docs/performance.md |
 | WS-10 | PyO3 binding / wheels / PyPI — CANCELLED by the pure Homebrew distribution decision (no work done) | shuuul | Done | None | Cancellation recorded in Decisions (2026-10-25 pure Homebrew) |
 | WS-11 | `aimd-mlx` C-ABI shim over `mlx::core` (array lifetime, `quantized_matmul`, GEMM/attention composition); model graphs on the MLX backend; `--features mlx` variant build. Promoted to the active wave (ASR first); brew mlx 0.32.4 link target | agent-mlx + agent-mlxgraph + shuuul | Done | WS-06 | ASR done (commit b96c031: 0.92-0.93x mlx-audio latency, 24x faster load, token-identical outputs); OCR graph rides WS-07 completion |
@@ -1052,6 +1052,15 @@ Append entries rather than rewriting another worker's record.
   cannot write the KV row in place, so decode small-op fusion is closed.
 - Next action: none on decode dispatch count; decode is ~80% of the
   practical bandwidth roofline.
+
+### 2026-10-26 — shuuul/WS-08 closeout — WS-08
+
+- WS-08 Done: merged in PR #26 (d4bf55e). Decode runs at ~80% of the
+  practical bandwidth roofline; the remaining small ops are below the
+  measurable floor. Prefill and the vision tower are mlx GEMM-bound, and a
+  faster GEMM would change accumulation order (not bit-identical).
+- Next action: WS-09 (Linux via the mlx CUDA backend) and the open
+  golden-corpus gates (WS-06 ASR CER, WS-07 multi-page OCR).
 
 ## Completion summary
 
