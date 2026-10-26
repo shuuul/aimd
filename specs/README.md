@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [006-new-model-fast-paths.md](006-new-model-fast-paths.md) | Active | Fast paths for PaddleOCR-VL, PP-OCRv6, and Qwen3-ForcedAligner |
 
 ## Archived specs
 
