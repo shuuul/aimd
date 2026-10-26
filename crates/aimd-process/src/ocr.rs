@@ -10,7 +10,7 @@ use aimd_core::{
     AimdError, ProcessHooks, ProcessInput, RemoteBackendConfig, RemoteModality, Result, log_warn,
 };
 
-use crate::models::{ensure_native_ocr, resolve_mlx_ocr_model};
+use crate::models::{OcrFamily, ensure_native_ocr, ocr_family, resolve_mlx_ocr_model};
 use crate::tempdir::TempDir;
 use crate::{LocalModality, OcrFailure, Runtime, remote};
 
@@ -115,6 +115,9 @@ pub fn recognize_file(
             let model_id =
                 resolve_mlx_ocr_model(request.model.as_deref(), request.precision.as_deref())?;
             ensure_native_ocr(&model_id)?;
+            if ocr_family(&model_id) == OcrFamily::PpOcrV6 && request.precision.is_some() {
+                log_warn!("Ignoring OCR precision for PP-OCRv6; its checkpoints are dense f32.");
+            }
             rt.preflight_local(LocalModality::Ocr)?;
             Engine::Local(model_id)
         }
@@ -182,14 +185,15 @@ fn recognize_one(
         Engine::Remote(config) => remote::recognize_image(config, image, multi_page),
         Engine::Local(model_id) => {
             let model = rt.load_ocr(model_id)?;
+            let family = ocr_family(model_id).name();
             match model.recognize(image) {
                 Ok(text) if !text.trim().is_empty() => Ok(text),
-                Ok(_) | Err(OcrFailure::Empty) => {
-                    Err(AimdError::failed("Unlimited-OCR produced empty content"))
-                }
-                Err(OcrFailure::Other(e)) => Err(AimdError::failed(format!(
-                    "Unlimited-OCR inference failed: {e}"
+                Ok(_) | Err(OcrFailure::Empty) => Err(AimdError::failed(format!(
+                    "{family} produced empty content"
                 ))),
+                Err(OcrFailure::Other(e)) => {
+                    Err(AimdError::failed(format!("{family} inference failed: {e}")))
+                }
             }
         }
     }
