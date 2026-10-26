@@ -64,12 +64,13 @@ pub enum AsrFailure {
 
 /// A loaded local ASR model.
 pub trait AsrModel: Send + Sync {
-    /// Transcribe a 16 kHz mono wav with a resolved language name and
-    /// optional biasing context; returns the parsed transcript.
+    /// Transcribe a 16 kHz mono wav with a resolved language name (`None`
+    /// = auto-detect) and optional biasing context; returns the parsed
+    /// transcript.
     fn transcribe(
         &self,
         wav_path: &Path,
-        language: &str,
+        language: Option<&str>,
         context: Option<&str>,
     ) -> std::result::Result<String, AsrFailure>;
 }

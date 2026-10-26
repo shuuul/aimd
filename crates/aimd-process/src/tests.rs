@@ -20,10 +20,13 @@ use crate::*;
 
 type Responder = dyn Fn(&str, &[String]) -> std::io::Result<CommandOutput> + Send + Sync;
 
+/// One recorded ASR call: wav path, language, context.
+type AsrCall = (PathBuf, Option<String>, Option<String>);
+
 #[derive(Default)]
 struct ScriptedAsr {
     outputs: Mutex<VecDeque<std::result::Result<String, AsrFailure>>>,
-    calls: Mutex<Vec<(PathBuf, String, Option<String>)>>,
+    calls: Mutex<Vec<AsrCall>>,
 }
 
 impl ScriptedAsr {
@@ -39,12 +42,12 @@ impl AsrModel for ScriptedAsr {
     fn transcribe(
         &self,
         wav_path: &Path,
-        language: &str,
+        language: Option<&str>,
         context: Option<&str>,
     ) -> std::result::Result<String, AsrFailure> {
         self.calls.lock().unwrap().push((
             wav_path.to_path_buf(),
-            language.to_string(),
+            language.map(str::to_string),
             context.map(str::to_string),
         ));
         self.outputs
@@ -674,7 +677,7 @@ fn url_audio_fallback_transcribes_through_the_runtime() {
         model.calls.lock().unwrap()[0],
         (
             wav.clone(),
-            "English".into(),
+            Some("English".into()),
             Some("Vocabulary: Linus\n\nThe following background".into())
         )
     );
@@ -727,7 +730,11 @@ fn local_transcript_uses_resolved_model_language_and_context() {
     let calls = model.calls.lock().unwrap();
     assert_eq!(
         calls[0],
-        (wav.clone(), "English".into(), Some("Kubernetes".into()))
+        (
+            wav.clone(),
+            Some("English".into()),
+            Some("Kubernetes".into())
+        )
     );
     // No ffprobe/ffmpeg: duration unknown -> warn and run unsegmented.
     assert!(warnings(&logs)[0].starts_with("Could not determine audio/video duration:"));
@@ -800,11 +807,16 @@ fn repetition_loop_on_4bit_retries_with_8bit() {
     let wav = dir.path().join("loop.wav");
     write_wav(&wav);
     let looped = "好".repeat(200);
+    let first = ScriptedAsr::new(vec![Ok(looped)]);
+    let retry = ScriptedAsr::new(vec![Ok("clean text".into())]);
     let rt = Mock::default()
-        .with_asr(ASR_4BIT, ScriptedAsr::new(vec![Ok(looped)]))
-        .with_asr(ASR_8BIT, ScriptedAsr::new(vec![Ok("clean text".into())]));
+        .with_asr(ASR_4BIT, first.clone())
+        .with_asr(ASR_8BIT, retry.clone());
     let (result, logs) = capture(|| process_input_with(&request(&wav), &NoHooks, &rt));
     assert_eq!(result.unwrap().markdown, "clean text");
+    // No --language: both passes leave detection to the model.
+    assert_eq!(first.calls.lock().unwrap()[0].1, None);
+    assert_eq!(retry.calls.lock().unwrap()[0].1, None);
     assert_eq!(
         *rt.loads.lock().unwrap(),
         vec![ASR_4BIT.to_string(), ASR_8BIT.to_string()]

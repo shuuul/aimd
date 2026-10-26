@@ -49,7 +49,11 @@ impl AsrOptions {
 
 enum Engine {
     Remote(RemoteBackendConfig),
-    Local { model_id: String, language: String },
+    /// `language: None` lets Qwen3-ASR detect the language.
+    Local {
+        model_id: String,
+        language: Option<String>,
+    },
 }
 
 /// `transcribe_file` for a [`ProcessInput`].
@@ -219,7 +223,7 @@ fn transcribe_segment_with_fallback(
             }
         }
         Engine::Local { model_id, language } => {
-            match transcribe_local(rt, model_id, language, path, temp_dir, context)? {
+            match transcribe_local(rt, model_id, language.as_deref(), path, temp_dir, context)? {
                 Some(text) => text,
                 None => return Ok(String::new()),
             }
@@ -237,7 +241,7 @@ fn transcribe_segment_with_fallback(
             );
             ensure_native_asr(&fallback)?;
             Ok(
-                transcribe_local(rt, &fallback, language, path, temp_dir, context)?
+                transcribe_local(rt, &fallback, language.as_deref(), path, temp_dir, context)?
                     .unwrap_or_default(),
             )
         }
@@ -252,13 +256,16 @@ fn transcribe_segment_with_fallback(
 fn transcribe_local(
     rt: &dyn Runtime,
     model_id: &str,
-    language: &str,
+    language: Option<&str>,
     path: &Path,
     temp_dir: Option<&Path>,
     context: Option<&str>,
 ) -> Result<Option<String>> {
     let model = rt.load_asr(model_id)?;
-    log_info!("Transcribing with native Qwen3-ASR model: {model_id}, language: {language}");
+    log_info!(
+        "Transcribing with native Qwen3-ASR model: {model_id}, language: {}",
+        language.unwrap_or("auto")
+    );
     let converted;
     let wav_path = if audio::is_native_wav(path) {
         path

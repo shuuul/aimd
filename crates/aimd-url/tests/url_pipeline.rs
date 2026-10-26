@@ -1296,7 +1296,7 @@ fn audio_fallback_metadata_context_variants() {
 }
 
 #[test]
-fn audio_fallback_forwards_inferred_language_model_precision() {
+fn audio_fallback_auto_detects_language_and_forwards_model_precision() {
     let fake = Fake::new("lang");
     fake.info(&json!({
         "title": "中文播客：聊聊创业与产品",
@@ -1313,14 +1313,16 @@ fn audio_fallback_forwards_inferred_language_model_precision() {
     let out = run_audio(&fake, &inp, &asr, &Hooks::default()).unwrap();
     assert!(out.markdown.contains("transcribed chinese audio"));
     let req = asr.single();
-    assert_eq!(req.language.as_deref(), Some("zh"));
+    // Without --language the title/description heuristics only steer
+    // subtitles; ASR gets no forced language and detects it itself.
+    assert_eq!(req.language, None);
     assert_eq!(req.model.as_deref(), Some("qwen3-asr-1.7b"));
     assert_eq!(req.precision.as_deref(), Some("8bit"));
     assert_eq!(req.temp_dir, inp.temp_dir);
     assert_eq!(req.asr_base_url.as_deref(), Some("http://127.0.0.1:9/v1"));
     assert_eq!(req.asr_model.as_deref(), Some("remote-asr"));
 
-    // An explicit language wins over inference.
+    // An explicit language is forwarded.
     let fake = linus_fake("explicitlang");
     let asr = MockAsr::ok("transcribed audio text");
     let mut inp = input_in("https://example.com/video", &fake);

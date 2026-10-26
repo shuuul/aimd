@@ -95,7 +95,7 @@ aimd [OPTIONS] INPUT_SOURCE
 | `-o, --output PATH` | Output file. Generated from the title when omitted. |
 | `-m, --model TEXT` | ASR or OCR model (see [Models and precision](#models-and-precision)). |
 | `--precision TEXT` | `4bit`, `6bit`, or `8bit` (dash variants such as `4-bit` are accepted). |
-| `-l, --language TEXT` | Language hint for transcription or OCR (`zh`, `en`, `ja`, ...). |
+| `-l, --language TEXT` | ASR language (`zh`, `en`, `ja`, `yue`, ...). Omit it to auto-detect. OCR ignores it. |
 | `--context TEXT` | ASR biasing text: proper nouns, names, domain vocabulary. |
 | `--no-context` | Do not build ASR context from URL page metadata. |
 | `--start INTEGER`, `--end INTEGER` | 0-based inclusive page range for OCR of PDFs. |
@@ -122,11 +122,13 @@ aimd interview.mp3 --context "Vocabulary: Qwen, MLX, LoRA."
 ```
 
 ffmpeg decodes audio and extracts it from video. Inputs longer than 10
-minutes are transcribed in segments. Local ASR uses Chinese when `--language`
-is omitted. Supported language hints are `zh`, `en`, `ja`, `ko`, `de`, `es`,
-`fr`, `it`, `pt`, and `ru`, or the full language name. If a 4-bit run gets
-stuck in a repetition loop, aimd retries that segment once with the matching
-8-bit checkpoint.
+minutes are transcribed in segments. Without `--language`, Qwen3-ASR detects
+the language itself (per segment), which also handles mixed-language audio.
+Pass `--language` only to force one: `zh`, `en`, `ja`, `ko`, `de`, `es`,
+`fr`, `it`, `pt`, `ru`, `ar`, `hi`, `th`, `vi`, `id`, `tr`, `nl`, `pl`,
+`sv`, `da`, `fi`, `ms`, `yue`, `cs`, `fil`, `fa`, `el`, `hu`, `mk`, `ro`, or
+the full language name. If a 4-bit run gets stuck in a repetition loop, aimd
+retries that segment once with the matching 8-bit checkpoint.
 
 ### URLs
 
@@ -155,6 +157,66 @@ before falling back to unauthenticated access. An explicit cookie option that
 yt-dlp rejects fails immediately. If neither subtitles nor audio
 transcription produce text, the request fails; aimd does not return
 metadata-only Markdown as a transcript.
+
+### ASR context: names and terms from descriptions
+
+Qwen3-ASR takes free-form context text as a hint for spelling names, brands,
+and jargon. It is not an instruction prompt: give it the words you expect to
+hear, not commands. Context does not change which language is detected or
+what gets transcribed; it only nudges ambiguous words toward the spellings
+you supply.
+
+**YouTube videos and podcast pages.** For URLs, aimd builds the context from
+the page metadata automatically whenever it has to transcribe audio:
+
+```text
+Title: <title>
+Author: <uploader or channel>
+Description: <first 800 characters of the description>
+Tags: <up to 20 tags>
+Chapters: <chapter titles>
+```
+
+The whole block is capped at 2000 characters. The description is usually
+the most useful part: video descriptions and podcast show notes list guest
+names, products, papers, and links that the speaker then says out loud. Your
+own `--context` goes in front of the metadata, so put the terms that matter
+most there:
+
+```bash
+# YouTube talk: metadata context is automatic; add the names it may miss
+aimd "https://www.youtube.com/watch?v=..." \
+  --context "Speakers: Andrej Karpathy. Terms: nanoGPT, RLHF, tokenizer."
+
+# Podcast episode page
+aimd "https://www.xiaoyuzhoufm.com/episode/..." \
+  --context "嘉宾：张三、李四。话题：MLX、Apple Silicon、端侧推理。"
+
+# Turn metadata off when the description is unrelated (sponsor copy, link lists)
+aimd "https://www.youtube.com/watch?v=..." --no-context --context "Qwen, MLX"
+```
+
+When the page already has subtitles, aimd uses them and does not run ASR,
+so context has no effect there.
+
+**Downloaded audio and local recordings** get no metadata, so pass the show
+notes yourself. Keep it short and term-dense: a list of names and terms
+works better than the full notes.
+
+```bash
+aimd episode.mp3 --context "Guests: Jane Doe (Acme). Terms: LoRA, KV cache, Metal."
+aimd episode.mp3 --context "$(head -c 1500 shownotes.txt)"
+```
+
+Tips:
+
+- Lead with proper nouns and domain terms; drop links, timestamps, and
+  sponsor copy.
+- Write names in the script the speaker uses (for example `张三` in a
+  Chinese podcast, not a romanization).
+- Long-audio segments all receive the same context.
+- Never paste a previous transcript as context; ASR errors in it get
+  reinforced.
 
 ### Documents
 

@@ -229,22 +229,11 @@ pub fn convert_url_with(
         cookies_from_browser,
     )?;
     let info = &video.info;
-    let str_field = |key: &str| info.get(key).and_then(serde_json::Value::as_str);
     let title = match info.get("title").filter(|v| !v.is_null()) {
         Some(v) => markdown::py_str(v),
         None => "Unknown Title".to_string(),
     };
     let language = input.language.as_deref().filter(|l| !l.is_empty());
-    let effective_language = match language {
-        Some(l) => Some(l.to_string()),
-        None => resolve_subtitle_language(
-            None,
-            Some(title.as_str()),
-            str_field("description"),
-            str_field("language"),
-        ),
-    };
-
     let work = tempdir::TempDir::new(input.temp_dir.as_deref(), "aimd-url")?;
     let subtitle = subtitles::extract_subtitles(
         &config.ytdlp,
@@ -274,8 +263,10 @@ pub fn convert_url_with(
     }
 
     hooks.progress("downloading", None, None, Some("Downloading source audio"));
+    // Only an explicit language forces ASR; otherwise Qwen3-ASR detects it
+    // (metadata/title heuristics only steer subtitle selection).
     let request = TranscribeRequest {
-        language: effective_language,
+        language: language.map(str::to_string),
         context: merge_asr_context(input.context.as_deref(), input.metadata_context, info),
         model: input.model.clone(),
         precision: input.precision.clone(),

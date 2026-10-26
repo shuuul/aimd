@@ -32,7 +32,7 @@ impl AsrModel for Text {
     fn transcribe(
         &self,
         _: &Path,
-        _: &str,
+        _: Option<&str>,
         _: Option<&str>,
     ) -> std::result::Result<String, AsrFailure> {
         if self.0.is_empty() {

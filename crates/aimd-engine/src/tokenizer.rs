@@ -223,48 +223,51 @@ pub fn build_ocr_prompt_ids(
     Ok(ids)
 }
 
-/// Short language code -> canonical name map (mirrors the Python
-/// `LANGUAGE_CODE_TO_NAME` map; full names pass through case-insensitively).
+/// Qwen3-ASR language codes and canonical names (the Python
+/// `LANGUAGE_CODE_TO_NAME` map), in display order.
+pub const ASR_LANGUAGES: &[(&str, &str)] = &[
+    ("zh", "Chinese"),
+    ("en", "English"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+    ("de", "German"),
+    ("es", "Spanish"),
+    ("fr", "French"),
+    ("it", "Italian"),
+    ("pt", "Portuguese"),
+    ("ru", "Russian"),
+    ("ar", "Arabic"),
+    ("hi", "Hindi"),
+    ("th", "Thai"),
+    ("vi", "Vietnamese"),
+    ("id", "Indonesian"),
+    ("tr", "Turkish"),
+    ("nl", "Dutch"),
+    ("pl", "Polish"),
+    ("sv", "Swedish"),
+    ("da", "Danish"),
+    ("fi", "Finnish"),
+    ("ms", "Malay"),
+    ("yue", "Cantonese"),
+    ("cs", "Czech"),
+    ("fil", "Filipino"),
+    ("fa", "Persian"),
+    ("el", "Greek"),
+    ("hu", "Hungarian"),
+    ("mk", "Macedonian"),
+    ("ro", "Romanian"),
+];
+
+/// Short language code -> canonical name map; full names pass through
+/// case-insensitively.
 pub fn resolve_language(input: &str) -> Option<String> {
-    const CODES: &[(&str, &str)] = &[
-        ("zh", "Chinese"),
-        ("en", "English"),
-        ("ja", "Japanese"),
-        ("ko", "Korean"),
-        ("de", "German"),
-        ("es", "Spanish"),
-        ("fr", "French"),
-        ("it", "Italian"),
-        ("pt", "Portuguese"),
-        ("ru", "Russian"),
-        ("ar", "Arabic"),
-        ("hi", "Hindi"),
-        ("th", "Thai"),
-        ("vi", "Vietnamese"),
-        ("id", "Indonesian"),
-        ("tr", "Turkish"),
-        ("nl", "Dutch"),
-        ("pl", "Polish"),
-        ("sv", "Swedish"),
-        ("da", "Danish"),
-        ("fi", "Finnish"),
-        ("ms", "Malay"),
-        ("yue", "Cantonese"),
-        ("cs", "Czech"),
-        ("fil", "Filipino"),
-        ("fa", "Persian"),
-        ("el", "Greek"),
-        ("hu", "Hungarian"),
-        ("mk", "Macedonian"),
-        ("ro", "Romanian"),
-    ];
     let lower = input.trim().to_ascii_lowercase();
-    for (code, name) in CODES {
+    for (code, name) in ASR_LANGUAGES {
         if lower == *code {
             return Some((*name).to_string());
         }
     }
-    for (_, name) in CODES {
+    for (_, name) in ASR_LANGUAGES {
         if lower == name.to_ascii_lowercase() {
             return Some((*name).to_string());
         }

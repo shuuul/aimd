@@ -103,11 +103,11 @@ impl AsrModel for NativeAsr {
     fn transcribe(
         &self,
         wav_path: &Path,
-        language: &str,
+        language: Option<&str>,
         context: Option<&str>,
     ) -> std::result::Result<String, AsrFailure> {
         let request = TranscriptionRequest {
-            language: Some(language),
+            language,
             context: context.filter(|c| !c.is_empty()),
         };
         match self.0.transcribe(wav_path, request) {

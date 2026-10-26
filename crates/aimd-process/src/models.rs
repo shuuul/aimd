@@ -5,6 +5,7 @@
 use aimd_core::precision::SUPPORTED_PRECISIONS;
 use aimd_core::pyfmt::{repr, strip};
 use aimd_core::{AimdError, Precision, Result, normalize_precision};
+use aimd_engine::tokenizer::{ASR_LANGUAGES, resolve_language};
 
 /// `MLX_AUDIO_MODELS` (display order).
 pub const MLX_AUDIO_MODELS: [&str; 8] = [
@@ -154,31 +155,17 @@ pub fn eight_bit_fallback(model_id: &str) -> Option<String> {
         .then(|| model_id.replace("-4bit", "-8bit"))
 }
 
-/// Qwen3-ASR language hint (`mlx._resolve_language`): `None` -> Chinese.
-pub fn resolve_asr_language(language: Option<&str>) -> Result<String> {
-    const CODES: [(&str, &str); 10] = [
-        ("zh", "Chinese"),
-        ("en", "English"),
-        ("ja", "Japanese"),
-        ("ko", "Korean"),
-        ("de", "German"),
-        ("es", "Spanish"),
-        ("fr", "French"),
-        ("it", "Italian"),
-        ("pt", "Portuguese"),
-        ("ru", "Russian"),
-    ];
-    let Some(language) = language else {
-        return Ok("Chinese".to_string());
+/// Qwen3-ASR language hint: `None` (or blank) -> `None`, which lets the
+/// model detect the language; codes and full names map to the engine's
+/// canonical name.
+pub fn resolve_asr_language(language: Option<&str>) -> Result<Option<String>> {
+    let Some(language) = language.filter(|l| !l.trim().is_empty()) else {
+        return Ok(None);
     };
-    let lang = language.to_lowercase();
-    if let Some((_, name)) = CODES.iter().find(|(c, _)| *c == lang) {
-        return Ok(name.to_string());
+    if let Some(name) = resolve_language(language) {
+        return Ok(Some(name));
     }
-    if let Some((_, name)) = CODES.iter().find(|(_, n)| n.to_lowercase() == lang) {
-        return Ok(name.to_string());
-    }
-    let codes: Vec<&str> = CODES.iter().map(|(c, _)| *c).collect();
+    let codes: Vec<&str> = ASR_LANGUAGES.iter().map(|(c, _)| *c).collect();
     Err(AimdError::unsupported(format!(
         "Unsupported language for mlx backend: '{language}'. Supported: {}",
         aimd_core::pyfmt::repr_list(&codes)
@@ -296,15 +283,29 @@ mod tests {
 
     #[test]
     fn languages() {
-        assert_eq!(resolve_asr_language(None).unwrap(), "Chinese");
-        assert_eq!(resolve_asr_language(Some("EN")).unwrap(), "English");
-        assert_eq!(resolve_asr_language(Some("japanese")).unwrap(), "Japanese");
+        assert_eq!(resolve_asr_language(None).unwrap(), None);
+        assert_eq!(resolve_asr_language(Some("  ")).unwrap(), None);
+        assert_eq!(
+            resolve_asr_language(Some("EN")).unwrap().unwrap(),
+            "English"
+        );
+        assert_eq!(
+            resolve_asr_language(Some("japanese")).unwrap().unwrap(),
+            "Japanese"
+        );
+        assert_eq!(
+            resolve_asr_language(Some("yue")).unwrap().unwrap(),
+            "Cantonese"
+        );
         let err = resolve_asr_language(Some("xx")).unwrap_err();
         assert_eq!(err.kind, ErrorKind::UnsupportedInput);
-        assert_eq!(
-            err.message,
-            "Unsupported language for mlx backend: 'xx'. Supported: ['zh', 'en', 'ja', 'ko', \
-             'de', 'es', 'fr', 'it', 'pt', 'ru']"
+        assert!(
+            err.message.starts_with(
+                "Unsupported language for mlx backend: 'xx'. Supported: ['zh', 'en', 'ja', "
+            ),
+            "{}",
+            err.message
         );
+        assert!(err.message.ends_with("'mk', 'ro']"), "{}", err.message);
     }
 }

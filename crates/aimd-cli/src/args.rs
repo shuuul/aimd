@@ -347,7 +347,7 @@ pub fn help_text() -> String {
         ),
         (
             "-l, --language TEXT",
-            "Language code/hint for transcription or OCR (e.g., zh, en, ja).",
+            "ASR language (e.g., zh, en, ja, yue); omit to auto-detect. OCR ignores it.",
         ),
         (
             "--start INTEGER",

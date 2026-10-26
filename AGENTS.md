@@ -283,8 +283,10 @@ Supported model families are intentionally narrow:
 
 - **ASR**: `qwen3-asr-1.7b` (default) and `qwen3-asr-0.6b`. Omitted precision defaults
   to `4bit` and resolves to `mlx-community/Qwen3-ASR-{1.7B,0.6B}-{4bit,6bit,8bit}`.
-  Local ASR defaults the language hint to Chinese. Supported codes: `zh en ja ko de es
-  fr it pt ru`.
+  Omitted `language` means auto-detect (no forced language in the prompt) for local
+  ASR, every segment, the 8-bit retry, and the URL audio fallback; URL metadata and
+  title heuristics steer subtitle choice only. Explicit codes come from
+  `aimd_engine::tokenizer::ASR_LANGUAGES` (30 languages).
 - **OCR**: `unlimited-ocr`, resolving to `mlx-community/Unlimited-OCR-{4bit,6bit,8bit}`
   (default 4bit). OCR uses single-image gundam mode (`document parsing.`), the
   sliding-window no-repeat n-gram guard (35/128), `max_tokens=8192`, and page-by-page PDF
