@@ -1840,26 +1840,27 @@ AimdMlxArray* mlx_clip(AimdMlxArray* a, float lo, float hi) {
   });
 }
 
-std::vector<array> gelu_tanh_impl(const std::vector<array>& inputs) {
-  // mlx.nn.gelu_approx: 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
-  const array& x = inputs[0];
-  const Dtype t = x.dtype();
-  array inner = mlx::core::multiply(
-      array(std::sqrt(2.0 / M_PI), t),
-      mlx::core::add(
-          x,
-          mlx::core::multiply(array(0.044715, t), mlx::core::power(x, array(3, t)))));
-  return {mlx::core::multiply(
-      mlx::core::multiply(array(0.5, t), x),
-      mlx::core::add(array(1.0, t), mlx::core::tanh(inner)))};
-}
-
 /// Tanh-approximate GELU (`gelu_pytorch_tanh` / `mlx.nn.gelu_approx`),
 /// compiled into one kernel.
 AimdMlxArray* mlx_gelu_tanh(AimdMlxArray* x) {
   return guarded([&]() -> AimdMlxArray* {
     require({x});
-    static const auto compiled = mlx::core::compile(gelu_tanh_impl, true);
+    // mlx.nn.gelu_approx: 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
+    static const auto compiled = mlx::core::compile(
+        [](const std::vector<array>& inputs) -> std::vector<array> {
+          const array& x = inputs[0];
+          const Dtype t = x.dtype();
+          array inner = mlx::core::multiply(
+              array(std::sqrt(2.0 / M_PI), t),
+              mlx::core::add(
+                  x,
+                  mlx::core::multiply(
+                      array(0.044715, t), mlx::core::power(x, array(3, t)))));
+          return {mlx::core::multiply(
+              mlx::core::multiply(array(0.5, t), x),
+              mlx::core::add(array(1.0, t), mlx::core::tanh(inner)))};
+        },
+        true);
     return wrap(compiled({as_array(x)})[0]);
   });
 }
