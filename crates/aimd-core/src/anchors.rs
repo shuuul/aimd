@@ -223,6 +223,23 @@ pub fn timed_sentences(text: &str, units: &[(String, f64, f64)], offset: f64) ->
     out
 }
 
+/// Timed sentences from subtitle cues: cue texts are joined into running
+/// text and each sentence takes the times of the cues it spans.
+pub fn sentences_from_cues(cues: &[Segment]) -> Vec<Segment> {
+    let mut text = String::new();
+    for c in cues {
+        join_text(&mut text, &c.text);
+    }
+    let units: Vec<(String, f64, f64)> = cues
+        .iter()
+        .map(|c| {
+            let start = c.start.unwrap_or(0.0);
+            (c.text.clone(), start, c.end.unwrap_or(start))
+        })
+        .collect();
+    timed_sentences(&text, &units, 0.0)
+}
+
 /// Sentences of `text` spread evenly over `[start, end]` by character count
 /// (chunk-level fallback when no alignment is available).
 pub fn spread_sentences(text: &str, start: f64, end: f64) -> Vec<Segment> {
@@ -558,6 +575,19 @@ mod tests {
         let got = timed_sentences(text, &units, 0.0);
         assert_eq!((got[0].start, got[0].end), (Some(1.0), Some(2.0)));
         assert_eq!((got[1].start, got[1].end), (Some(2.0), Some(2.0)));
+    }
+
+    #[test]
+    fn cue_sentences_span_cues() {
+        let cues = [
+            seg("so this is the first", 1.0, 2.0),
+            seg("sentence. And a second", 2.0, 3.5),
+            seg("one.", 3.5, 4.0),
+        ];
+        let got = sentences_from_cues(&cues);
+        assert_eq!(got[0].text, "so this is the first sentence.");
+        assert_eq!((got[0].start, got[0].end), (Some(1.0), Some(3.5)));
+        assert_eq!((got[1].start, got[1].end), (Some(2.0), Some(4.0)));
     }
 
     #[test]

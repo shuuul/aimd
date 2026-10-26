@@ -245,7 +245,7 @@ pub fn process_input_with(
             asset_base_uri: Some(request.input_source.clone()),
             output_dir: None,
             platform: Some(output.platform),
-            segments: None,
+            segments: output.segments,
         });
     }
     process_local_file(request, task_type, hooks, rt)

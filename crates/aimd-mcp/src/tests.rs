@@ -46,6 +46,7 @@ impl Runtime for MockRuntime {
             markdown: self.url_markdown.clone(),
             title: "mock-title".into(),
             platform: "generic".into(),
+            segments: None,
         })
     }
 }

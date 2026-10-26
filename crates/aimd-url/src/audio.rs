@@ -15,7 +15,7 @@ use crate::cookies::{
 };
 use crate::tempdir::TempDir;
 use crate::ytdlp::{self, YtDlp};
-use crate::{AudioTranscriber, TranscribeRequest, detect_platform};
+use crate::{AudioTranscriber, TimedText, TranscribeRequest, detect_platform};
 
 const MAX_FILENAME_BYTES: usize = 200;
 
@@ -249,7 +249,7 @@ fn download_and_transcribe(
     download_dir: &Path,
     transcriber: &dyn AudioTranscriber,
     hooks: &dyn ProcessHooks,
-) -> Result<Option<String>> {
+) -> Result<Option<TimedText>> {
     let audio = download_audio(
         fb.ytdlp,
         fb.info,
@@ -268,8 +268,15 @@ fn download_and_transcribe(
         None,
         Some("Transcribing source audio"),
     );
-    let text = transcriber.transcribe(&audio, &fb.request, hooks)?;
-    if text.chars().count() > 10 {
+    let text = if fb.request.anchors {
+        transcriber.transcribe_timed(&audio, &fb.request, hooks)?
+    } else {
+        TimedText {
+            text: transcriber.transcribe(&audio, &fb.request, hooks)?,
+            sentences: None,
+        }
+    };
+    if text.text.chars().count() > 10 {
         Ok(Some(text))
     } else {
         Ok(None)
@@ -282,7 +289,7 @@ pub fn extract_content_from_audio(
     fb: &AudioFallback<'_>,
     transcriber: &dyn AudioTranscriber,
     hooks: &dyn ProcessHooks,
-) -> Result<Option<String>> {
+) -> Result<Option<TimedText>> {
     if let Some(save) = fb.save_original {
         let download_dir = if save.is_dir() || (!save.exists() && save.extension().is_none()) {
             save.to_path_buf()

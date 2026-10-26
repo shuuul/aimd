@@ -361,6 +361,28 @@ fn extracts_info_once_and_reports_unknown_platform() {
         std::fs::read_dir(fake.dir().join("tmp")).unwrap().count(),
         0
     );
+    // Anchors (default): timed paragraph and cue-timed sentences.
+    assert!(
+        out.markdown.contains("[00:00:01] subtitle text"),
+        "{}",
+        out.markdown
+    );
+    let segments = out.segments.expect("subtitle sentences");
+    assert_eq!((segments[0].start, segments[0].end), (Some(1.0), Some(2.0)));
+    // `anchors: false` keeps the plain stripped body.
+    let plain = convert_url_with(
+        &ProcessInput {
+            anchors: false,
+            ..input_in("https://example.com/video", &fake)
+        },
+        &fake.config(),
+        &asr,
+        &hooks,
+    )
+    .unwrap();
+    assert!(plain.markdown.contains("subtitle text"));
+    assert!(!plain.markdown.contains("[00:00:01]"));
+    assert_eq!(plain.segments, None);
 }
 
 #[test]

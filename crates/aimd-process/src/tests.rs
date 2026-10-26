@@ -608,6 +608,7 @@ fn url_results_carry_platform_and_source_uri() {
             markdown: "# Video\n\ntext".into(),
             title: "Video".into(),
             platform: "bilibili".into(),
+            segments: None,
         }),
         ..Mock::default()
     };

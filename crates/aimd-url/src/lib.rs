@@ -48,7 +48,7 @@ mod ytdlp;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use aimd_core::{AimdError, ProcessHooks, ProcessInput, Result};
+use aimd_core::{AimdError, ProcessHooks, ProcessInput, Result, Segment, anchors};
 
 pub use audio::{
     AudioFallback, audio_filename, download_audio, extract_content_from_audio, format_strategies,
@@ -92,6 +92,16 @@ pub struct TranscribeRequest {
     pub asr_base_url: Option<String>,
     pub asr_model: Option<String>,
     pub asr_api_key: Option<String>,
+    /// `ProcessInput.anchors`: ask for timed sentences
+    /// ([`AudioTranscriber::transcribe_timed`]).
+    pub anchors: bool,
+}
+
+/// A transcript with optional timed sentences (spec 005).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TimedText {
+    pub text: String,
+    pub sentences: Option<Vec<Segment>>,
 }
 
 /// Transcribes downloaded URL audio. Implemented by `aimd-process` (WS-16).
@@ -102,14 +112,31 @@ pub trait AudioTranscriber: Send + Sync {
         request: &TranscribeRequest,
         hooks: &dyn ProcessHooks,
     ) -> Result<String>;
+
+    /// [`Self::transcribe`] plus timed sentences when the backend has them;
+    /// the default returns the plain transcript.
+    fn transcribe_timed(
+        &self,
+        audio_path: &Path,
+        request: &TranscribeRequest,
+        hooks: &dyn ProcessHooks,
+    ) -> Result<TimedText> {
+        Ok(TimedText {
+            text: self.transcribe(audio_path, request, hooks)?,
+            sentences: None,
+        })
+    }
 }
 
 /// Markdown extracted from a URL.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UrlOutput {
     pub markdown: String,
     pub title: String,
     pub platform: String,
+    /// Timed transcript sentences (subtitle cues or aligned ASR) when
+    /// anchors were requested.
+    pub segments: Option<Vec<Segment>>,
 }
 
 /// External tools used by the URL pipeline.
@@ -250,15 +277,19 @@ pub fn convert_url_with(
         ));
     }
     if let Some(sub) = subtitle.filter(|s| !pytext::strip(s).is_empty()) {
-        let body = if input.raw_transcript {
-            sub
-        } else {
-            strip_subtitle_formatting(&sub)
+        let sentences = (input.anchors && !input.raw_transcript)
+            .then(|| anchors::sentences_from_cues(&anchors::parse_srt(&sub)))
+            .filter(|s| !s.is_empty());
+        let body = match &sentences {
+            _ if input.raw_transcript => sub,
+            Some(sentences) => anchors::timed_paragraphs(sentences),
+            None => strip_subtitle_formatting(&sub),
         };
         return Ok(UrlOutput {
             markdown: markitdown_normalize(&format_content(info, Some(&body), Some(&platform))),
             title,
             platform,
+            segments: sentences,
         });
     }
 
@@ -274,6 +305,7 @@ pub fn convert_url_with(
         asr_base_url: input.asr_base_url.clone(),
         asr_model: input.asr_model.clone(),
         asr_api_key: input.asr_api_key.clone(),
+        anchors: input.anchors,
     };
     let fallback = audio::AudioFallback {
         ytdlp: &config.ytdlp,
@@ -286,11 +318,17 @@ pub fn convert_url_with(
         request,
     };
     let audio_text = audio::extract_content_from_audio(&fallback, transcriber, hooks)?;
-    if let Some(text) = audio_text.filter(|t| !pytext::strip(t).is_empty()) {
+    if let Some(timed) = audio_text.filter(|t| !pytext::strip(&t.text).is_empty()) {
+        let sentences = timed.sentences.filter(|s| input.anchors && !s.is_empty());
+        let body = match &sentences {
+            Some(sentences) => anchors::timed_paragraphs(sentences),
+            None => timed.text,
+        };
         return Ok(UrlOutput {
-            markdown: markitdown_normalize(&format_content(info, Some(&text), Some(&platform))),
+            markdown: markitdown_normalize(&format_content(info, Some(&body), Some(&platform))),
             title,
             platform,
+            segments: sentences,
         });
     }
     Err(AimdError::failed(
@@ -306,6 +344,7 @@ pub fn convert_readable_html(source: &str, config: &UrlConfig) -> Result<UrlOutp
         markdown: markitdown_normalize(&page.markdown),
         title: page.title.unwrap_or_default(),
         platform: detect_platform(source),
+        segments: None,
     })
 }
 
