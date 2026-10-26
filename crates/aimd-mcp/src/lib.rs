@@ -27,7 +27,7 @@ use serde_json::{Map, Value, json};
 
 /// Docstring of the Python `process_input` tool (kept verbatim, including its
 /// indentation, because FastMCP publishes it as the tool description).
-const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    model selects the ASR model (qwen3-asr-1.7b default, qwen3-asr-0.6b)\n    or the OCR model (unlimited-ocr default, pp-ocrv6, paddleocr-vl).\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR select the\n    matching mlx-community checkpoint (default 4bit; bf16 not yet supported).\n    paddleocr-vl defaults to bf16 and quantizes at load; pp-ocrv6 ignores\n    precision. Remote backends own their precision.\n\n    language forces the ASR language (e.g. zh, en, ja, yue); omit it to\n    auto-detect. OCR ignores it.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n\n    anchors (default True) marks OCR blocks with invisible\n    <!-- aimd:loc page=.. bbox=.. --> comments and transcript paragraphs\n    with [hh:mm:ss]; include_segments adds the located/timed segments.\n    ";
+const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    model selects the ASR model (qwen3-asr-1.7b default, qwen3-asr-0.6b)\n    or the OCR model (unlimited-ocr default, pp-ocrv6, paddleocr-vl).\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR select the\n    matching mlx-community checkpoint (default 4bit; bf16 not yet supported).\n    paddleocr-vl defaults to bf16 and quantizes at load; pp-ocrv6 ignores\n    precision. Remote backends own their precision.\n\n    language forces the ASR language (e.g. zh, en, ja, yue); omit it to\n    auto-detect. OCR ignores it.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n\n    anchors (default False) marks OCR blocks with invisible\n    <!-- aimd:loc page=.. bbox=.. --> comments and transcript paragraphs\n    with [hh:mm:ss]; include_segments returns the located/timed segments\n    (with or without anchors).\n    ";
 
 /// A tool call failure; rendered as an `isError` tool result.
 #[derive(Debug)]
@@ -100,7 +100,7 @@ impl ProcessArgs {
         let precision = field.optional_string("precision");
         let context = field.optional_string("context");
         let metadata_context = field.bool_or("metadata_context", true);
-        let anchors = field.bool_or("anchors", true);
+        let anchors = field.bool_or("anchors", false);
         let include_segments = field.bool_or("include_segments", false);
         let asr_base_url = field.optional_string("asr_base_url");
         let asr_model = field.optional_string("asr_model");
@@ -326,7 +326,7 @@ pub fn tools() -> Vec<Tool> {
     );
     props.insert(
         "anchors".into(),
-        json!({"default": true, "title": "Anchors", "type": "boolean"}),
+        json!({"default": false, "title": "Anchors", "type": "boolean"}),
     );
     props.insert(
         "include_segments".into(),

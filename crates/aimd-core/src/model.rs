@@ -90,8 +90,8 @@ pub struct ProcessInput {
     pub ocr_base_url: Option<String>,
     pub ocr_model: Option<String>,
     pub ocr_api_key: Option<String>,
-    /// Source anchors in `markdown` (OCR position comments, `[hh:mm:ss]`
-    /// transcript paragraphs) and forced alignment (default `true`).
+    /// Source anchors in `markdown`: OCR position comments and `[hh:mm:ss]`
+    /// transcript paragraphs (default `false`).
     pub anchors: bool,
     /// The caller returns `segments` (MCP `include_segments`, CLI
     /// `--format json`): enables extra passes such as PaddleOCR-VL
@@ -122,9 +122,17 @@ impl Default for ProcessInput {
             ocr_base_url: None,
             ocr_model: None,
             ocr_api_key: None,
-            anchors: true,
+            anchors: false,
             include_segments: false,
         }
+    }
+}
+
+impl ProcessInput {
+    /// Whether positions/timestamps are computed (forced alignment, OCR
+    /// locations): for anchored Markdown or returned `segments`.
+    pub fn wants_positions(&self) -> bool {
+        self.anchors || self.include_segments
     }
 }
 

@@ -231,13 +231,8 @@ impl PaddleOcrVlPipeline {
         path: &Path,
         request: VlRequest,
     ) -> Result<(VlOutput, VlStats), PipelineError> {
-        let bytes = std::fs::read(path)
-            .map_err(|e| PipelineError::Io(format!("read {}: {e}", path.display())))?;
-        let decoded =
-            image::load_from_memory(&bytes).map_err(|e| PipelineError::Image(e.to_string()))?;
-        let rgb = decoded.to_rgb8();
-        let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-        self.recognize_rgb8_with_stats(rgb.as_raw(), w, h, request)
+        let (rgb, w, h) = load_rgb8(path)?;
+        self.recognize_rgb8_with_stats(&rgb, w, h, request)
     }
 
     /// Recognizes an RGB8 HWC image.
@@ -412,4 +407,15 @@ impl PaddleOcrVlPipeline {
         )?;
         Ok((stream, prompt))
     }
+}
+
+/// Reads and decodes an image file to RGB8 HWC `(pixels, width, height)`.
+pub fn load_rgb8(path: &Path) -> Result<(Vec<u8>, usize, usize), PipelineError> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| PipelineError::Io(format!("read {}: {e}", path.display())))?;
+    let rgb = image::load_from_memory(&bytes)
+        .map_err(|e| PipelineError::Image(e.to_string()))?
+        .to_rgb8();
+    let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+    Ok((rgb.into_raw(), w, h))
 }

@@ -137,6 +137,45 @@ biases already go through `addmm`.
 After the mel fix the aligner's 300 s cost is tower ~1.5 s and the
 cache-free decoder pass 2.8-3.6 s, both on the shared Qwen3-ASR fast paths.
 
+### Pipeline throughput (spec 007)
+
+Apple M2 Pro, release, warm, A/B runs interleaved against the previous
+commit. Everything kept is bit-identical: Metal checkpoint tests pass,
+`corpus_gate` is identical for ASR (72/72) and every OCR model (5/5), and
+`aligner_parity` keeps its gated MAE (0.17 ms).
+
+| Area | Change | Before | After | Kept |
+|------|--------|--------|-------|------|
+| Decode loops (ASR, PaddleOCR-VL, Unlimited-OCR) | submit step k+1 (`async_eval`) before reading token k, like mlx-lm `generate_step`; Unlimited-OCR submits the forward early and samples after its n-gram guard | Unlimited-OCR 227-239, PaddleOCR-VL 4-bit 264-310, bf16 143-154 tok/s; ASR en_60s 2.35-2.49 s | 263-276, 324-334, 157-160 tok/s; 2.29-2.37 s | yes |
+| Metal command buffers | shim sets `MLX_MAX_MB_PER_BUFFER=30` unless the user set it | Unlimited-OCR early submit at mlx's 50 MB: 223 tok/s | 272-276 tok/s; dense models neutral | yes |
+| PDF OCR | render pages one `mutool draw` run at a time on a background thread, at most two ahead; PPM for local engines (PNG for remote) | all pages rendered first, PNG 42 ms + decode 1.9 ms per page | overlapped; PPM 23 ms + 0.4 ms | yes |
+| PP-OCRv6 host | resize, det normalize, crops, rec preprocess threaded (`aimd_engine::parallel`); all rec batches submitted before any readback | warm 0.93-0.97 / 0.58-0.64 / 0.60-0.67 s | 0.82-0.92 / 0.55-0.60 / 0.58-0.64 s | yes |
+| Unlimited-OCR preprocess | Pillow bicubic passes on HWC with fixed-point taps, threaded by row bands | 0.104-0.111 s | 0.013-0.016 s | yes |
+| Unlimited-OCR preprocess | global-view and crop resizes concurrently | - | - | no: each pass already uses every core |
+| PaddleOCR-VL spotting | reuse the OCR pass's decoded page | two decodes | one | yes |
+| ForcedAligner | gather the timestamp slots before the 5000-class `lm_head` | `[seq, 5000]` logits | `[slots, 5000]`; latency within noise | yes |
+| PaddleOCR-VL load | quantize-at-load via `async_eval` instead of one blocking eval per tensor | 4-bit 0.52-0.54 s | 0.42-0.44 s | yes |
+| Qwen3-ASR host | device-side feature merge, single WAV parse, streamed segmentation | merge 0.02-0.04 s, WAV 4 ms, mel 0.2 s per 600 s; ffmpeg segmentation 1.3 s per hour | - | no: under 1% of a segment |
+| Batched decoding | B sequences per step (microbenchmark, Qwen3-1.7B-shaped 4-bit, KV 2000) | 8.1 ms/token at B=1 | B=2 5.4, B=4 4.9, B=8 5.4 ms per sequence | no: at most ~1.5x on decode, under the 1.3x end-to-end bar |
+
+Notes:
+
+- mlx commits a Metal command buffer when its op count or input size passes
+  a cap (50 ops / 50 MB on M2 Pro). A buffer holds its inputs until it
+  completes. When the next step is encoded while the previous one is in
+  flight, the previous KV arrays are still referenced, so `slice_update`
+  cannot donate them and copies each layer's cache. Unlimited-OCR's MoE
+  `gather_qmm` expert weights fill buffers by size, so it hit this; the
+  dense models fill buffers by op count and did not. At 30 MB the buffers
+  are small enough to complete before the next step needs the cache.
+- Long-audio ASR decode is bandwidth-bound, not copy-bound. A 300 s decode
+  is 8.8-9.4 s at buffer caps from 10 to 1000 MB. For a 600 s segment the
+  phases are: tower 4.7 s, prefill of 7.8k tokens 9.0 s, decode of 2427
+  tokens 35 s.
+- The PaddleOCR-VL vision tower is 1.83 s of a page with 4960 patches. That
+  is about 7 TFLOP (27 layers with full attention through fused sdpa),
+  close to M2 Pro peak. The LM prefill of 1253 tokens is 0.26 s.
+
 ### Decode-step kernel profile (Metal)
 
 `cargo run --release -p aimd-mlx --example bench_ops` times every

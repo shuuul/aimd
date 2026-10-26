@@ -19,4 +19,5 @@
 
 pub mod audio;
 pub mod models;
+pub mod parallel;
 pub mod tokenizer;

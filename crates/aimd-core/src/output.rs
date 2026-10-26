@@ -103,7 +103,7 @@ pub fn subtitle_text(result: &ProcessResult, format: OutputFormat) -> Result<Str
         .filter(|s| s.iter().any(|s| s.start.is_some()))
         .ok_or_else(|| {
             AimdError::unsupported(format!(
-                "--format {} needs timed segments (drop --raw-transcript/--no-anchors)",
+                "--format {} needs timed segments (drop --raw-transcript)",
                 format.extension()
             ))
         })?;

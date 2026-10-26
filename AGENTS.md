@@ -106,7 +106,7 @@ flowchart TD
 | Precision parsing | `crates/aimd-core/src/precision.rs` | Normalizes `4bit`/`6bit`/`8bit`/`bf16` and dash/space/case variants. |
 | HF checkpoints | `crates/aimd-process/src/hf.rs` | Cache lookup (`HF_HUB_CACHE` > `HF_HOME/hub` > `~/.cache/huggingface/hub`), HTTPS snapshot download, `HF_TOKEN`, `HF_ENDPOINT`, `HF_HUB_OFFLINE`. |
 | Local ASR | `crates/aimd-process/src/asr.rs`, `audio.rs` | ffmpeg decode to 16 kHz mono, >600 s segmenting, context, 4-bit -> 8-bit repetition retry. |
-| Local OCR | `crates/aimd-process/src/ocr.rs` | Images and `mutool draw` PDF pages; per-page progress and cancellation. |
+| Local OCR | `crates/aimd-process/src/ocr.rs` | Images and `mutool draw` PDF pages rendered in the background (`PdfRenderJob`); per-page progress and cancellation. |
 | Remote backends | `crates/aimd-core/src/remote.rs`, `crates/aimd-process/src/remote.rs` | `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix; ureq + rustls. |
 | Request/result models | `crates/aimd-core/src/model.rs` | `ProcessInput`, `ProcessResult`, `TextContext`, `TaskType`, `SourceKind`; serde names are the wire format. |
 | Errors | `crates/aimd-core/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
@@ -155,11 +155,14 @@ flowchart TD
   `platform`, and optional `segments`, alongside
   `TextContext { title, chunk_list, split_header_level }`. Viewers consume `markdown`;
   context-window consumers use `chunk_list`.
-- **Source anchors** (spec 005): `ProcessInput.anchors` (default `true`; CLI
-  `--no-anchors`, MCP `anchors`) adds OCR `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->`
-  comments (1-based page, bbox normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript
-  paragraphs, and fills `ProcessResult.segments`. `anchors: false` must reproduce the
-  pre-anchor output byte for byte and skip forced alignment. Positions come through the
+- **Source anchors** (spec 005): `ProcessInput.anchors` (default `false`; CLI
+  `--anchors`, MCP `anchors`; `--no-anchors` is still accepted as a no-op) adds OCR
+  `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->` comments (1-based page, bbox
+  normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript paragraphs to `markdown`.
+  `ProcessInput::wants_positions()` (`anchors || include_segments`) gates forced
+  alignment and `ProcessResult.segments`; CLI `--format json/srt/vtt` set
+  `include_segments`. With both off the output must match the pre-anchor output byte
+  for byte and skip forced alignment. Positions come through the
   `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
   local ASR aligns 295 s segments (the aligner caps at 300 s; ffmpeg overshoots a 300 s
   cut by milliseconds) with Qwen3-ForcedAligner-0.6B-8bit, loaded lazily once per process.
@@ -218,6 +221,16 @@ flowchart TD
   the unfused graph value for value (tested in `aimd-mlx/tests`). Do not
   compile whole models shape-keyed: every new page/clip shape would retrace
   (spec 006).
+- **Host/GPU overlap** (spec 007): decode loops submit step k+1
+  (`async_eval`) before reading token k back, like mlx-lm `generate_step`.
+  On Apple the shim defaults `MLX_MAX_MB_PER_BUFFER` to 30 (a user value
+  wins). Larger Metal command buffers keep the previous step's KV arrays
+  alive, so `slice_update` copies the cache instead of donating it (MoE
+  Unlimited-OCR lost 15%). Host-side image work threads through
+  `aimd_engine::parallel` (`for_row_bands`, ordered `map`), computing each
+  element exactly as one thread would. PDF OCR renders pages on a
+  background thread (`PdfRenderJob`, PPM for local engines, PNG for remote)
+  at most two pages ahead.
 - **Linux build**: `aimd-mlx` links `libmlx.so` from `MLX_PREFIX` (brew `mlx-cuda`, or
   an unpacked `mlx-cuda-13` wheel for dev). Cargo applies the shim's rpath only to
   `aimd-mlx`'s own targets, so dev runs of dependents need

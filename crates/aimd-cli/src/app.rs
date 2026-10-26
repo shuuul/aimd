@@ -143,10 +143,10 @@ pub fn run(
             return 1;
         }
     };
-    if format.is_subtitle() && (cli.no_anchors || cli.raw_transcript) {
+    if format.is_subtitle() && cli.raw_transcript {
         let _ = writeln!(
             stderr,
-            "Error: --format {} needs timed segments; drop --no-anchors/--raw-transcript.",
+            "Error: --format {} needs timed segments; drop --raw-transcript.",
             format.extension()
         );
         return 1;
@@ -195,8 +195,8 @@ fn process(
         precision: cli.precision.clone(),
         context: cli.context.clone(),
         metadata_context: !cli.no_context,
-        anchors: !cli.no_anchors,
-        include_segments: format == OutputFormat::Json,
+        anchors: cli.anchors && !cli.no_anchors,
+        include_segments: format != OutputFormat::Markdown,
         asr_base_url: cli.asr_base_url.clone(),
         asr_model: cli.asr_model.clone(),
         asr_api_key: cli.asr_api_key.clone(),

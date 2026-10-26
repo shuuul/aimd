@@ -31,8 +31,8 @@ Apple Silicon through MLX (Metal), with no Python runtime.
 - **Document conversion** through Pandoc. EPUB keeps spine order and extracts
   chapters and images. Text-layer PDFs are converted by
   [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
-- **Source anchors**: OCR blocks carry their page and position, and
-  transcripts are timed paragraphs (forced alignment with
+- **Source anchors** (opt-in `--anchors`): OCR blocks carry their page and
+  position, and transcripts are timed paragraphs (forced alignment with
   Qwen3-ForcedAligner). Export JSON segments, SRT, or WebVTT.
 - **Remote backends**: optional OpenAI-compatible ASR/OCR servers.
 - **Two interfaces**: CLI (`aimd`) and MCP stdio server (`aimd-mcp`).
@@ -98,7 +98,7 @@ aimd [OPTIONS] INPUT_SOURCE
 | `--task TEXT` | Explicit task: `transcript`, `convert`, or `ocr`. Defaults to auto-routing. |
 | `-o, --output PATH` | Output file. Generated from the title when omitted. |
 | `-f, --format TEXT` | `markdown` (default), `json` (the MCP response with segments), `srt` or `vtt` (transcripts only). See [Source anchors](#source-anchors). |
-| `--no-anchors` | Plain output without OCR position comments or `[hh:mm:ss]` paragraphs; skips forced alignment. |
+| `--anchors` | Add OCR position comments and `[hh:mm:ss]` transcript paragraphs to the Markdown (runs forced alignment). Off by default. |
 | `-m, --model TEXT` | ASR or OCR model (see [Models and precision](#models-and-precision)). |
 | `--precision TEXT` | `4bit`, `6bit`, or `8bit` (dash variants such as `4-bit` are accepted). |
 | `-l, --language TEXT` | ASR language (`zh`, `en`, `ja`, `yue`, ...). Omit it to auto-detect. OCR ignores it. |
@@ -284,8 +284,10 @@ OCR is multilingual and ignores `--language`.
 
 ### Source anchors
 
-By default the Markdown records where each piece came from, so an LLM (or
-you) can cite the page region or the moment in the audio.
+With `--anchors` (MCP `anchors: true`) the Markdown records where each piece
+came from, so an LLM (or you) can cite the page region or the moment in the
+audio. The default output has no anchors; `--format json/srt/vtt` compute the
+positions and timestamps either way.
 
 OCR output puts an HTML comment before each block. Markdown viewers hide
 it; `chunk_list` keeps it. `page` is 1-based and `bbox` is
@@ -325,7 +327,7 @@ URL subtitles keep their cue times.
 aimd interview.m4a -f srt          # interview_transcript.srt
 aimd "https://youtu.be/..." -f vtt
 aimd scan.pdf -f json              # Markdown + segments with page/bbox
-aimd audio.mp3 --no-anchors        # plain text, no alignment pass
+aimd audio.mp3 --anchors           # [hh:mm:ss] paragraphs in the Markdown
 ```
 
 `--format json` writes the `process_input` response (see
@@ -406,9 +408,9 @@ A stdio MCP server with two tools:
   (`input_source`, `task_type`, `model`, `precision`, `language`, `context`,
   `metadata_context`, `start`, `end`, `output_file`, `save_original`,
   `cookies`, `cookies_from_browser`, `raw_transcript`, and the remote backend
-  fields). `anchors` (default `true`) matches `--no-anchors`, and
+  fields). `anchors` (default `false`) matches `--anchors`, and
   `include_segments` (default `false`) adds the `segments` list described
-  in [Source anchors](#source-anchors).
+  in [Source anchors](#source-anchors), with or without anchors.
 
 Example client configuration:
 

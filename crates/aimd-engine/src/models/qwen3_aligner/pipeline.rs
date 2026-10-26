@@ -191,7 +191,7 @@ impl ForcedAlignerPipeline {
         Ok(decode_timestamps(&units, &stages.classes, self.segment_ms))
     }
 
-    /// Mel -> tower -> merged prompt -> decoder -> lm_head at the slots.
+    /// Mel -> tower -> merged prompt -> decoder -> slot rows -> lm_head.
     pub(crate) fn stages(
         &self,
         samples: &[f32],
@@ -223,8 +223,10 @@ impl ForcedAlignerPipeline {
         let hidden = self.decoder.forward_full(embeds)?;
         let seq = prompt_ids.len();
         let hidden = hidden.reshape(&[seq, self.decoder.cfg.hidden_size])?;
-        let logits = self.lm_head.matmul(&hidden)?;
-        let ts_logits = logits.take(&MlxArray::from_u32(&[slots.len()], &slots)?, 0)?;
+        // Only the timestamp slots are classified, so gather them before the
+        // head instead of projecting every prompt row.
+        let at_slots = hidden.take(&MlxArray::from_u32(&[slots.len()], &slots)?, 0)?;
+        let ts_logits = self.lm_head.matmul(&at_slots)?;
         let classes = ts_logits.argmax(-1, false)?.to_u32_vec()?;
         aimd_mlx::clear_cache()?;
         Ok(AlignStages {

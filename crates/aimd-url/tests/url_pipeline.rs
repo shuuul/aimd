@@ -361,18 +361,13 @@ fn extracts_info_once_and_reports_unknown_platform() {
         std::fs::read_dir(fake.dir().join("tmp")).unwrap().count(),
         0
     );
-    // Anchors (default): timed paragraph and cue-timed sentences.
-    assert!(
-        out.markdown.contains("[00:00:01] subtitle text"),
-        "{}",
-        out.markdown
-    );
-    let segments = out.segments.expect("subtitle sentences");
-    assert_eq!((segments[0].start, segments[0].end), (Some(1.0), Some(2.0)));
-    // `anchors: false` keeps the plain stripped body.
-    let plain = convert_url_with(
+    // Default (no anchors): plain stripped body, no segments.
+    assert!(!out.markdown.contains("[00:00:01]"), "{}", out.markdown);
+    assert_eq!(out.segments, None);
+    // `anchors: true`: timed paragraph and cue-timed sentences.
+    let anchored = convert_url_with(
         &ProcessInput {
-            anchors: false,
+            anchors: true,
             ..input_in("https://example.com/video", &fake)
         },
         &fake.config(),
@@ -380,9 +375,26 @@ fn extracts_info_once_and_reports_unknown_platform() {
         &hooks,
     )
     .unwrap();
-    assert!(plain.markdown.contains("subtitle text"));
-    assert!(!plain.markdown.contains("[00:00:01]"));
-    assert_eq!(plain.segments, None);
+    assert!(
+        anchored.markdown.contains("[00:00:01] subtitle text"),
+        "{}",
+        anchored.markdown
+    );
+    let segments = anchored.segments.expect("subtitle sentences");
+    assert_eq!((segments[0].start, segments[0].end), (Some(1.0), Some(2.0)));
+    // `include_segments` alone: segments, plain body.
+    let segmented = convert_url_with(
+        &ProcessInput {
+            include_segments: true,
+            ..input_in("https://example.com/video", &fake)
+        },
+        &fake.config(),
+        &asr,
+        &hooks,
+    )
+    .unwrap();
+    assert!(!segmented.markdown.contains("[00:00:01]"));
+    assert_eq!(segmented.segments, Some(segments));
 }
 
 #[test]

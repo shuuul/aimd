@@ -133,35 +133,38 @@ pub fn resize_linear(img: &BgrImage, w: usize, h: usize) -> BgrImage {
     };
 
     let ytaps = linear_taps(sh, h);
-    // Horizontally filtered rows for the two source rows of the current
-    // output row; rows shared with the previous output row are reused.
-    let mut cache: [(usize, Vec<i32>); 2] =
-        [(usize::MAX, vec![0; w * 3]), (usize::MAX, vec![0; w * 3])];
-    let fetch = |y: usize, cache: &[(usize, Vec<i32>); 2]| -> Vec<i32> {
-        match cache.iter().find(|(r, _)| *r == y) {
-            Some((_, row)) => row.clone(),
-            None => {
-                let mut buf = vec![0i32; w * 3];
-                hrow(y, &mut buf);
-                buf
+    // Output rows are independent: each band of rows keeps its own cache of
+    // the horizontally filtered source rows its output rows read (rows
+    // shared with the previous output row are reused).
+    crate::parallel::for_row_bands(&mut out.data, w * 3, 32, |first, band| {
+        let mut cache: [(usize, Vec<i32>); 2] =
+            [(usize::MAX, vec![0; w * 3]), (usize::MAX, vec![0; w * 3])];
+        let fetch = |y: usize, cache: &[(usize, Vec<i32>); 2]| -> Vec<i32> {
+            match cache.iter().find(|(r, _)| *r == y) {
+                Some((_, row)) => row.clone(),
+                None => {
+                    let mut buf = vec![0i32; w * 3];
+                    hrow(y, &mut buf);
+                    buf
+                }
+            }
+        };
+        for (k, dst) in band.chunks_mut(w * 3).enumerate() {
+            let (s, b0, b1) = ytaps[first + k];
+            let r0 = s.clamp(0, sh as i64 - 1) as usize;
+            let r1 = (s + 1).clamp(0, sh as i64 - 1) as usize;
+            if cache[0].0 != r0 || cache[1].0 != r1 {
+                let row0 = fetch(r0, &cache);
+                let row1 = fetch(r1, &cache);
+                cache = [(r0, row0), (r1, row1)];
+            }
+            let (h0, h1) = (&cache[0].1, &cache[1].1);
+            for i in 0..w * 3 {
+                let v = ((b0 * (h0[i] >> 4)) >> 16) + ((b1 * (h1[i] >> 4)) >> 16) + 2;
+                dst[i] = (v >> 2) as u8;
             }
         }
-    };
-    for (d, &(s, b0, b1)) in ytaps.iter().enumerate() {
-        let r0 = s.clamp(0, sh as i64 - 1) as usize;
-        let r1 = (s + 1).clamp(0, sh as i64 - 1) as usize;
-        if cache[0].0 != r0 || cache[1].0 != r1 {
-            let row0 = fetch(r0, &cache);
-            let row1 = fetch(r1, &cache);
-            cache = [(r0, row0), (r1, row1)];
-        }
-        let (h0, h1) = (&cache[0].1, &cache[1].1);
-        let dst = &mut out.data[d * w * 3..(d + 1) * w * 3];
-        for i in 0..w * 3 {
-            let v = ((b0 * (h0[i] >> 4)) >> 16) + ((b1 * (h1[i] >> 4)) >> 16) + 2;
-            dst[i] = (v >> 2) as u8;
-        }
-    }
+    });
     out
 }
 

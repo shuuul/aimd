@@ -50,7 +50,7 @@ impl AsrOptions {
             asr_base_url: request.asr_base_url.clone(),
             asr_model: request.asr_model.clone(),
             asr_api_key: request.asr_api_key.clone(),
-            anchors: request.anchors,
+            anchors: request.wants_positions(),
         }
     }
 }
