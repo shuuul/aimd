@@ -92,8 +92,8 @@ pub struct TranscribeRequest {
     pub asr_base_url: Option<String>,
     pub asr_model: Option<String>,
     pub asr_api_key: Option<String>,
-    /// `ProcessInput.anchors`: ask for timed sentences
-    /// ([`AudioTranscriber::transcribe_timed`]).
+    /// Ask for timed sentences ([`AudioTranscriber::transcribe_timed`]):
+    /// `ProcessInput::wants_positions`.
     pub anchors: bool,
 }
 
@@ -277,13 +277,13 @@ pub fn convert_url_with(
         ));
     }
     if let Some(sub) = subtitle.filter(|s| !pytext::strip(s).is_empty()) {
-        let sentences = (input.anchors && !input.raw_transcript)
+        let sentences = (input.wants_positions() && !input.raw_transcript)
             .then(|| anchors::sentences_from_cues(&anchors::parse_srt(&sub)))
             .filter(|s| !s.is_empty());
         let body = match &sentences {
             _ if input.raw_transcript => sub,
-            Some(sentences) => anchors::timed_paragraphs(sentences),
-            None => strip_subtitle_formatting(&sub),
+            Some(sentences) if input.anchors => anchors::timed_paragraphs(sentences),
+            _ => strip_subtitle_formatting(&sub),
         };
         return Ok(UrlOutput {
             markdown: markitdown_normalize(&format_content(info, Some(&body), Some(&platform))),
@@ -305,7 +305,7 @@ pub fn convert_url_with(
         asr_base_url: input.asr_base_url.clone(),
         asr_model: input.asr_model.clone(),
         asr_api_key: input.asr_api_key.clone(),
-        anchors: input.anchors,
+        anchors: input.wants_positions(),
     };
     let fallback = audio::AudioFallback {
         ytdlp: &config.ytdlp,
@@ -319,10 +319,10 @@ pub fn convert_url_with(
     };
     let audio_text = audio::extract_content_from_audio(&fallback, transcriber, hooks)?;
     if let Some(timed) = audio_text.filter(|t| !pytext::strip(&t.text).is_empty()) {
-        let sentences = timed.sentences.filter(|s| input.anchors && !s.is_empty());
+        let sentences = timed.sentences.filter(|s| !s.is_empty());
         let body = match &sentences {
-            Some(sentences) => anchors::timed_paragraphs(sentences),
-            None => timed.text,
+            Some(sentences) if input.anchors => anchors::timed_paragraphs(sentences),
+            _ => timed.text,
         };
         return Ok(UrlOutput {
             markdown: markitdown_normalize(&format_content(info, Some(&body), Some(&platform))),

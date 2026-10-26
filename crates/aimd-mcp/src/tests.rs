@@ -135,7 +135,6 @@ async fn accepts_valid_task_type() {
                 "input_source": png,
                 "task_type": "ocr",
                 "output_file": dir.join("out.md"),
-                "anchors": false,
             })),
         )
         .await
@@ -144,11 +143,23 @@ async fn accepts_valid_task_type() {
     assert_eq!(result["markdown"], "ocr");
     assert_eq!(std::fs::read_to_string(dir.join("out.md")).unwrap(), "ocr");
     assert!(result.get("segments").is_none());
-    // Default anchors; include_segments returns the page segment.
+    // include_segments returns the page segment without anchoring.
     let result = s
         .call(
             "process_input",
             args(json!({"input_source": png, "task_type": "ocr", "include_segments": true})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["markdown"], "ocr");
+    assert_eq!(
+        result["segments"],
+        json!([{"text": "ocr", "kind": "page", "page": 1, "bbox": [0.0, 0.0, 1.0, 1.0]}])
+    );
+    let result = s
+        .call(
+            "process_input",
+            args(json!({"input_source": png, "task_type": "ocr", "anchors": true, "include_segments": true})),
         )
         .await
         .unwrap();

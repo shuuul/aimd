@@ -377,8 +377,10 @@ fn process_local_file(
             let timed = asr::transcribe_timed(rt, input_path, &options, context, hooks)?;
             segments = timed.sentences.filter(|s| !s.is_empty());
             let text = match &segments {
-                Some(sentences) => aimd_core::anchors::timed_paragraphs(sentences),
-                None => timed.text,
+                Some(sentences) if request.anchors => {
+                    aimd_core::anchors::timed_paragraphs(sentences)
+                }
+                _ => timed.text,
             };
             (text, Some(stem.clone()))
         }

@@ -32,7 +32,7 @@ pub struct OcrOutput {
     pub pages: Vec<OcrPage>,
     pub markdown: String,
     /// Located blocks/lines (or one page-level segment per page) when
-    /// `ProcessInput.anchors`.
+    /// `ProcessInput::wants_positions`.
     pub segments: Option<Vec<Segment>>,
 }
 
@@ -172,13 +172,15 @@ pub fn recognize_file(
 
     let suffix = suffix_lower(path);
     let spotting = request.include_segments;
-    let mut segments = request.anchors.then(Vec::new);
+    let anchored = request.anchors;
+    let mut segments = request.wants_positions().then(Vec::new);
     // Page text, anchored when requested (`page` is 1-based).
     let mut place = |page: usize, ocr: LocatedOcr| match &mut segments {
         Some(all) => {
+            let plain = (!anchored).then(|| ocr.markdown.clone());
             let (text, located) = locate_page(page, ocr);
             all.extend(located);
-            text
+            plain.unwrap_or(text)
         }
         None => ocr.markdown,
     };

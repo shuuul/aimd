@@ -388,13 +388,9 @@ fn write_pdf(path: &Path, pages: &[Option<&str>]) {
     std::fs::write(path, out).unwrap();
 }
 
-/// A request with anchors off (the pre-spec-005 output); anchored tests
-/// opt in.
+/// A default request (anchors off); anchored tests opt in.
 fn request(path: &Path) -> ProcessInput {
-    ProcessInput {
-        anchors: false,
-        ..ProcessInput::new(path.to_string_lossy())
-    }
+    ProcessInput::new(path.to_string_lossy())
 }
 
 fn warnings(logs: &[(Level, String)]) -> Vec<String> {
@@ -766,14 +762,25 @@ fn local_transcript_uses_resolved_model_language_and_context() {
     assert_eq!(result.segments, None);
     // Anchored local ASR uses the model's alignment units.
     let rt = Mock::default().with_asr(ASR_4BIT, Arc::new(AlignedAsr));
-    let anchored = ProcessInput::new(wav.to_string_lossy());
+    let anchored = ProcessInput {
+        anchors: true,
+        ..ProcessInput::new(wav.to_string_lossy())
+    };
     let aligned = process_input_with(&anchored, &NoHooks, &rt).unwrap();
     assert_eq!(
         aligned.markdown,
         "[00:00:01] Hello there.\n\n[00:00:05] Bye now."
     );
-    let segments = aligned.segments.unwrap();
+    let segments = aligned.segments.clone().unwrap();
     assert_eq!((segments[0].start, segments[0].end), (Some(1.0), Some(1.9)));
+    // Segments alone keep the plain transcript.
+    let segments_only = ProcessInput {
+        include_segments: true,
+        ..ProcessInput::new(wav.to_string_lossy())
+    };
+    let plain = process_input_with(&segments_only, &NoHooks, &rt).unwrap();
+    assert_eq!(plain.markdown, "Hello there. Bye now.");
+    assert_eq!(plain.segments, aligned.segments);
     assert_eq!(result.text_context.title, "clip");
     assert_eq!(result.asset_base_uri, None);
     let calls = model.calls.lock().unwrap();

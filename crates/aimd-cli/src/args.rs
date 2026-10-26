@@ -9,6 +9,8 @@ pub struct Cli {
     pub task: Option<String>,
     pub output: Option<String>,
     pub format: Option<String>,
+    pub anchors: bool,
+    /// v1.2.0's opt-out, now the default; still accepted.
     pub no_anchors: bool,
     pub model: Option<String>,
     pub precision: Option<String>,
@@ -65,6 +67,7 @@ const OPTIONS: &[OptionSpec] = &[
     ("--task", None, "task", Kind::Str, None),
     ("--output", Some("-o"), "output", Kind::Str, None),
     ("--format", Some("-f"), "format", Kind::Str, None),
+    ("--anchors", None, "anchors", Kind::Flag, None),
     ("--no-anchors", None, "no_anchors", Kind::Flag, None),
     ("--model", Some("-m"), "model", Kind::Str, None),
     ("--precision", None, "precision", Kind::Str, None),
@@ -250,6 +253,7 @@ pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>) -> Parsed {
                 }
                 match field {
                     "no_context" => cli.no_context = true,
+                    "anchors" => cli.anchors = true,
                     "no_anchors" => cli.no_anchors = true,
                     _ => cli.raw_transcript = true,
                 }
@@ -325,8 +329,8 @@ pub fn help_text() -> String {
             "Output format: markdown (default), json (the MCP response with located/timed segments), srt or vtt (transcripts only).",
         ),
         (
-            "--no-anchors",
-            "Omit source anchors: OCR <!-- aimd:loc --> block comments and [hh:mm:ss] transcript paragraphs (skips forced alignment).",
+            "--anchors",
+            "Add source anchors to the Markdown: OCR <!-- aimd:loc --> block comments and [hh:mm:ss] transcript paragraphs (runs forced alignment).",
         ),
         ("-m, --model TEXT", MODEL_HELP_TEXT),
         ("--precision TEXT", PRECISION_HELP_TEXT),

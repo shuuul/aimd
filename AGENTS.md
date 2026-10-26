@@ -155,11 +155,14 @@ flowchart TD
   `platform`, and optional `segments`, alongside
   `TextContext { title, chunk_list, split_header_level }`. Viewers consume `markdown`;
   context-window consumers use `chunk_list`.
-- **Source anchors** (spec 005): `ProcessInput.anchors` (default `true`; CLI
-  `--no-anchors`, MCP `anchors`) adds OCR `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->`
-  comments (1-based page, bbox normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript
-  paragraphs, and fills `ProcessResult.segments`. `anchors: false` must reproduce the
-  pre-anchor output byte for byte and skip forced alignment. Positions come through the
+- **Source anchors** (spec 005): `ProcessInput.anchors` (default `false`; CLI
+  `--anchors`, MCP `anchors`; `--no-anchors` is still accepted as a no-op) adds OCR
+  `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->` comments (1-based page, bbox
+  normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript paragraphs to `markdown`.
+  `ProcessInput::wants_positions()` (`anchors || include_segments`) gates forced
+  alignment and `ProcessResult.segments`; CLI `--format json/srt/vtt` set
+  `include_segments`. With both off the output must match the pre-anchor output byte
+  for byte and skip forced alignment. Positions come through the
   `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
   local ASR aligns 295 s segments (the aligner caps at 300 s; ffmpeg overshoots a 300 s
   cut by milliseconds) with Qwen3-ForcedAligner-0.6B-8bit, loaded lazily once per process.

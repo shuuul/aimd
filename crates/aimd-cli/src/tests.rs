@@ -164,7 +164,7 @@ fn transcript_writes_output_and_reports_success() {
         &Fake::default(),
     );
     assert_eq!(o.code, 0, "{:?}", o.logs);
-    assert_eq!(std::fs::read_to_string(&out).unwrap(), "[00:00:00] hello");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "hello");
     assert_eq!(
         o.stdout,
         format!(
@@ -182,19 +182,23 @@ fn transcript_writes_output_and_reports_success() {
     assert!(infos.contains(&"Task: transcript"));
     assert!(infos.contains(&format!("Transcript saved to: {}", out.display()).as_str()));
 
-    // --no-anchors keeps the plain transcript; srt renders the timed cues.
-    let plain = dir.join("plain.md");
+    // --anchors adds [hh:mm:ss] paragraphs; srt renders the timed cues
+    // without them.
+    let anchored = dir.join("anchored.md");
     let o = invoke(
         &[
             &wav.to_string_lossy(),
-            "--no-anchors",
+            "--anchors",
             "-o",
-            &plain.to_string_lossy(),
+            &anchored.to_string_lossy(),
         ],
         &Fake::default(),
     );
     assert_eq!(o.code, 0, "{:?}", o.logs);
-    assert_eq!(std::fs::read_to_string(&plain).unwrap(), "hello");
+    assert_eq!(
+        std::fs::read_to_string(&anchored).unwrap(),
+        "[00:00:00] hello"
+    );
     let srt = dir.join("clip.srt");
     let o = invoke(
         &[
@@ -212,7 +216,7 @@ fn transcript_writes_output_and_reports_success() {
         "1\n00:00:00,000 --> 00:00:00,500\nhello\n"
     );
     let o = invoke(
-        &[&wav.to_string_lossy(), "-f", "vtt", "--no-anchors"],
+        &[&wav.to_string_lossy(), "-f", "vtt", "--raw-transcript"],
         &Fake::default(),
     );
     assert_eq!(o.code, 1);
@@ -246,9 +250,10 @@ fn ocr_default_output_lands_next_to_input() {
     let o = invoke(&[&png.to_string_lossy()], &Fake::default());
     assert_eq!(o.code, 0, "{:?}", o.logs);
     let expected = dir.join("scan_ocr.md");
-    let anchored =
-        "<!-- aimd:loc page=1 bbox=0.000,0.000,1.000,1.000 kind=page -->\n# Scanned Page\n\ntext";
-    assert_eq!(std::fs::read_to_string(&expected).unwrap(), anchored);
+    assert_eq!(
+        std::fs::read_to_string(&expected).unwrap(),
+        "# Scanned Page\n\ntext"
+    );
     assert_eq!(
         o.stdout,
         format!(
@@ -262,7 +267,7 @@ fn ocr_default_output_lands_next_to_input() {
     assert_eq!(o.code, 0, "{:?}", o.logs);
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("scan_ocr.json")).unwrap()).unwrap();
-    assert_eq!(json["markdown"], anchored);
+    assert_eq!(json["markdown"], "# Scanned Page\n\ntext");
     assert!(json["segments"].is_array());
     assert!(
         json["output_file"]
