@@ -191,28 +191,6 @@ fn clip8(v: i32) -> u8 {
     v.clamp(0, 255) as u8
 }
 
-/// One fixed-point 8bpc pass (Pillow `_ImagingResample{Horizontal,
-/// Vertical}_8bpc`): `src` is `[in_size, other]` with the leading axis
-/// resampled; returns `[out_size, other]`.
-fn resample_pass_u8(src: &[u8], other: usize, co: &ResizeCoeffs) -> Vec<u8> {
-    let kf = co.fixed_point();
-    let mut dst = vec![0u8; co.bounds.len() / 2 * other];
-    for (xx, dblock) in dst.chunks_exact_mut(other).enumerate() {
-        let xmin = co.bounds[xx * 2] as usize;
-        let xmax = co.bounds[xx * 2 + 1] as usize;
-        let k = &kf[xx * co.ksize..xx * co.ksize + xmax];
-        let src_off = xmin * other;
-        for o in 0..other {
-            let mut ss = 1i32 << (PRECISION_BITS - 1);
-            for (t, &kt) in k.iter().enumerate() {
-                ss += src[src_off + t * other + o] as i32 * kt;
-            }
-            dblock[o] = clip8(ss >> PRECISION_BITS);
-        }
-    }
-    dst
-}
-
 /// Pillow `Image.resize(.., BICUBIC)` on an RGB8 HWC image.
 pub(crate) fn resize_bicubic_pil(
     src: &[u8],
@@ -277,7 +255,9 @@ pub(crate) fn resize_pil(
     Ok(cur)
 }
 
-/// Horizontal pass on an RGB8 HWC image (`w -> out_w`).
+/// Horizontal pass on an RGB8 HWC image (`w -> out_w`): Pillow
+/// `_ImagingResampleHorizontal_8bpc`, threaded by rows. The i32
+/// fixed-point sums are exact, so the tap order does not matter.
 fn resize_horizontal(
     src: &[u8],
     w: usize,
@@ -285,29 +265,34 @@ fn resize_horizontal(
     out_w: usize,
     filter: PilFilter,
 ) -> Result<Vec<u8>, PreprocessError> {
-    // Planarize so the resampled axis leads: [w, h] per channel.
-    let mut planes = vec![0u8; 3 * w * h];
-    for y in 0..h {
-        for x in 0..w {
-            for c in 0..3 {
-                planes[c * w * h + x * h + y] = src[(y * w + x) * 3 + c];
-            }
-        }
-    }
     let co = ResizeCoeffs::new(w, out_w, filter)?;
+    let kf = co.fixed_point();
     let mut out = vec![0u8; h * out_w * 3];
-    for c in 0..3 {
-        let band = resample_pass_u8(&planes[c * w * h..(c + 1) * w * h], h, &co);
-        for y in 0..h {
-            for x in 0..out_w {
-                out[(y * out_w + x) * 3 + c] = band[x * h + y];
+    crate::parallel::for_row_bands(&mut out, out_w * 3, 16, |first, band| {
+        for (r, dst) in band.chunks_exact_mut(out_w * 3).enumerate() {
+            let row = &src[(first + r) * w * 3..(first + r + 1) * w * 3];
+            for (xx, px) in dst.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                let xmin = co.bounds[xx * 2] as usize;
+                let n = co.bounds[xx * 2 + 1] as usize;
+                let k = &kf[xx * co.ksize..xx * co.ksize + n];
+                let taps = &row[xmin * 3..(xmin + n) * 3];
+                let mut ss = [1i32 << (PRECISION_BITS - 1); 3];
+                for (&kt, t) in k.iter().zip(taps.as_chunks::<3>().0) {
+                    for c in 0..3 {
+                        ss[c] += t[c] as i32 * kt;
+                    }
+                }
+                for c in 0..3 {
+                    px[c] = clip8(ss[c] >> PRECISION_BITS);
+                }
             }
         }
-    }
+    });
     Ok(out)
 }
 
-/// Vertical pass on an RGB8 HWC image (`h -> out_h`).
+/// Vertical pass on an RGB8 HWC image (`h -> out_h`): Pillow
+/// `_ImagingResampleVertical_8bpc`, threaded by output rows.
 fn resize_vertical(
     src: &[u8],
     w: usize,
@@ -315,24 +300,29 @@ fn resize_vertical(
     out_h: usize,
     filter: PilFilter,
 ) -> Result<Vec<u8>, PreprocessError> {
-    let mut planes = vec![0u8; 3 * h * w];
-    for y in 0..h {
-        for x in 0..w {
-            for c in 0..3 {
-                planes[c * h * w + y * w + x] = src[(y * w + x) * 3 + c];
-            }
-        }
-    }
     let co = ResizeCoeffs::new(h, out_h, filter)?;
-    let mut out = vec![0u8; out_h * w * 3];
-    for c in 0..3 {
-        let band = resample_pass_u8(&planes[c * h * w..(c + 1) * h * w], w, &co);
-        for y in 0..out_h {
-            for x in 0..w {
-                out[(y * w + x) * 3 + c] = band[y * w + x];
+    let kf = co.fixed_point();
+    let row_len = w * 3;
+    let mut out = vec![0u8; out_h * row_len];
+    crate::parallel::for_row_bands(&mut out, row_len, 16, |first, band| {
+        let mut ss = vec![0i32; row_len];
+        for (r, dst) in band.chunks_exact_mut(row_len).enumerate() {
+            let yy = first + r;
+            let ymin = co.bounds[yy * 2] as usize;
+            let n = co.bounds[yy * 2 + 1] as usize;
+            let k = &kf[yy * co.ksize..yy * co.ksize + n];
+            ss.fill(1i32 << (PRECISION_BITS - 1));
+            for (t, &kt) in k.iter().enumerate() {
+                let row = &src[(ymin + t) * row_len..(ymin + t + 1) * row_len];
+                for (acc, &v) in ss.iter_mut().zip(row) {
+                    *acc += v as i32 * kt;
+                }
+            }
+            for (o, &acc) in dst.iter_mut().zip(&ss) {
+                *o = clip8(acc >> PRECISION_BITS);
             }
         }
-    }
+    });
     Ok(out)
 }
 

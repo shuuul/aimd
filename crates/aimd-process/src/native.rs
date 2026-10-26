@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use aimd_core::{AimdError, Result, Segment, anchors, log_info, log_warn};
 use aimd_engine::models::paddleocr_vl::pipeline::{
-    PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest, VlTask,
+    PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest, VlTask, load_rgb8,
 };
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpPipelineError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_aligner::pipeline::ForcedAlignerPipeline;
@@ -283,8 +283,13 @@ impl OcrModel for NativeOcr {
                 Err(e) => Err(OcrFailure::Other(e.to_string())),
             },
             Self::PaddleVl(p) => {
-                let run = |task| match p.recognize_path(
-                    image_path,
+                // Both passes share one decode of the page image.
+                let (rgb, w, h) =
+                    load_rgb8(image_path).map_err(|e| OcrFailure::Other(e.to_string()))?;
+                let run = |task| match p.recognize_rgb8(
+                    &rgb,
+                    w,
+                    h,
                     VlRequest {
                         task,
                         ..VlRequest::default()

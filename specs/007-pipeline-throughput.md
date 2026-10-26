@@ -96,7 +96,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-01 | Decode loops submit step k+1 before reading token k (Qwen3-ASR, PaddleOCR-VL, Unlimited-OCR with its n-gram guard) | coordinator | Done | None | bench tok/s; goldens; corpus gate identical |
 | WS-02 | PDF pages rendered in the background and fed to OCR as they finish; PNM instead of PNG | coordinator | Done | None | multi-page PDF wall time; corpus gate identical; cancellation tests |
 | WS-03 | PP-OCRv6: async rec batches, threaded crop/warp/resize/normalize | coordinator | Done | None | `ppocrv6` example; checkpoint test; corpus gate identical |
-| WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Pending | None | preprocess goldens; OCR page latency |
+| WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Done | None | preprocess goldens; OCR page latency |
 | WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Pending | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
 | WS-06 | Aligner `lm_head` at slots only (if argmax identical); PaddleOCR-VL batched quantize at load | coordinator | Pending | None | aligner parity; load time |
 | WS-07 | New findings discovered during WS-01..06 (one row each when found) | coordinator | In progress | None | per finding |
@@ -225,6 +225,29 @@ Append entries rather than rewriting another worker's record.
     and `corpus_gate --ocr-model pp-ocrv6` matches 5/5.
 - Remaining: WS-04..09.
 - Next action: WS-04 Pillow resize threading and single image decode.
+
+### 2026-10-26 — coordinator — WS-04
+
+- Changed:
+  - The Unlimited-OCR Pillow resize passes now work on HWC directly with
+    Pillow's fixed-point taps, without the per-channel planar round trip.
+    Both passes are threaded by output-row bands. The i32 sums are exact, so
+    tap order cannot change a pixel.
+  - The PaddleOCR-VL spotting pass reuses the OCR pass's decoded page (new
+    `paddleocr_vl::pipeline::load_rgb8`) instead of decoding it twice.
+- Decision: running the global-view and crop resizes concurrently was
+  dropped. Each pass already uses every core, so overlapping them would
+  only contend.
+- Evidence:
+  - Unlimited-OCR `preprocess_gundam` on a corpus page: 0.104-0.111 ->
+    0.013-0.016 s.
+  - PaddleOCR-VL preprocessing is a few ms of a 2.07 s vision + prefill,
+    so it was left as is.
+  - The preprocess goldens (Pillow and PaddleOCR-VL bit-exact fixtures)
+    pass. Metal lib tests pass (120). `corpus_gate` matches 5/5 pages for
+    unlimited-ocr, paddleocr-vl bf16 and paddleocr-vl 4-bit.
+- Remaining: WS-05..09.
+- Next action: WS-05 ASR host pipeline.
 
 ## Completion summary
 
