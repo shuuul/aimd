@@ -225,7 +225,9 @@ mistakes on the weaker voices (构建 -> 断线, 她 -> 他); en errors include
 
 On Linux with the mlx CUDA backend (metacube, see below) the same corpus
 and the macOS-built baseline give identical results for all five
-checkpoints: 72/72 clips and 5/5 pages identical to the reference.
+checkpoints: 72/72 clips and 5/5 pages identical to the reference. The
+same holds for PaddleOCR-VL-1.6 (bf16 and 4bit) and PP-OCRv6 medium: 5/5
+pages identical.
 
 ## Linux, mlx CUDA backend
 
@@ -251,6 +253,42 @@ identical, so those bounds are enforced on Metal only
 dspark1 (DGX Spark GB10, aarch64, Ubuntu 24.04, CUDA 13.4) with the tap's
 brew `mlx-cuda`: the corpus gate matches the baseline for all five
 checkpoints. No benchmark was recorded there (shared GPU).
+
+### PaddleOCR-VL-1.6 and PP-OCRv6 on CUDA
+
+metacube, 2026-10-26, brew `shuuul/tap/mlx-cuda` 0.32.4 (CUDA 13.4). The
+GPU was shared with another process holding ~15 GB, so treat the timings as
+indicative.
+
+| Check | PaddleOCR-VL-1.6 bf16 | PaddleOCR-VL-1.6 4bit | PP-OCRv6 medium |
+| --- | --- | --- | --- |
+| Corpus gate (5 pages) | 5/5 identical, finish=stop 5/5 | 5/5 identical, finish=stop 5/5 | 5/5 identical |
+| E2E `page_text.png` | 0.76 s (prefill 2.2k tok/s, decode 557 tok/s) | 0.26 s (prefill 12k tok/s, decode 667 tok/s) | — |
+| E2E golden images (warm) | — | — | 40 / 129 / 51 ms (sample_doc / general_ocr_002 / img_10) |
+
+Stage drift against the Metal goldens, with end-to-end output unchanged:
+
+- **PaddleOCR-VL**: the bf16 patch-embed conv rounds ~1 ulp differently
+  (rel rms 5e-5), and the 27-layer vision tower amplifies that to 3-4%
+  (bf16) and 3-8% (4bit) rel rms at the projector. The vision-stage test
+  reports this on CUDA and enforces it on Metal only, as for Unlimited-OCR.
+  Decoder logprobs stay within the noise bound (rel rms <= 6e-3).
+- **PP-OCRv6**: mlx's CUDA backend runs f32 convs and matmuls in TF32 by
+  default (`MLX_ENABLE_TF32=1`). Against the goldens the detector
+  probability map drifts up to 2.3e-2, rec step maxima up to 3e-2 (one
+  step argmax flips on img_10 and collapses to the same text), and one box
+  corner moves 1 px. Recognized text matches exactly. With
+  `MLX_ENABLE_TF32=0`, the drift falls to 1e-5 (det) / 1e-4 (rec), at a
+  cost of ~12-15% in end-to-end time on the corpus pages. aimd keeps mlx's
+  default; the checkpoint test holds CUDA to noise bounds plus exact text.
+
+On CUDA, mlx's allocator sizes its memory limit from total VRAM and
+reclaims its buffer cache only past that limit. When another process
+already holds VRAM, the cache keeps growing until `cudaMallocAsync` runs
+out of memory. PP-OCRv6 on the corpus needs 7-12 GB of transient buffers
+per page, so it hit this on the third page. On Linux the shim now caps
+mlx's memory limit at 90% of the VRAM that is free when the device is
+first selected.
 
 ## Measurement guidance
 

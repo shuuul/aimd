@@ -219,6 +219,20 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: none in this spec.
 
+### 2026-10-26 — linux-cuda session — CUDA follow-up
+
+- Changed: the shim caps mlx's CUDA memory limit at 90% of the VRAM free at device
+  selection. The PP-OCRv6 checkpoint test and the PaddleOCR-VL vision-stage test use
+  off-Metal noise bounds or report drift, the way the Unlimited-OCR tests do.
+  `docs/performance.md` records the results.
+- Evidence: metacube (RTX 5090, brew `mlx-cuda` 0.32.4): the hermetic tier passes, and
+  the `pp_ocrv6` and `paddleocr_vl` checkpoint and E2E tiers pass. Corpus gate PASS,
+  with 5/5 pages identical for PP-OCRv6, PaddleOCR-VL bf16 and PaddleOCR-VL 4bit.
+  Metal checkpoint parity is still exact (0 diff).
+- Remaining: none.
+- Blockers: none.
+- Next action: none.
+
 ## Completion summary
 
 Shipped two native OCR families and ASR language auto-detection.
@@ -231,5 +245,6 @@ Shipped two native OCR families and ASR language auto-detection.
 - Omitted `--language` auto-detects for every local ASR path; 30 explicit codes.
 - README documents the new models and how to use YouTube/podcast descriptions as ASR
   context; AGENTS.md, help text, and the MCP description list the new aliases.
-- Follow-up outside this spec: run the checkpoint tier and corpus gate for both new
-  models on Linux CUDA (metacube).
+- Linux CUDA (metacube): checkpoint tier and corpus gate pass for both models
+  (5/5 pages identical), after a fix that caps the shim's mlx memory limit; see
+  `docs/performance.md`.
