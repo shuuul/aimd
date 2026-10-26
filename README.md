@@ -7,16 +7,21 @@
   <a href="https://github.com/shuuul/aimd/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache License 2.0">
   </a>
+  <img src="https://img.shields.io/badge/Rust-native-orange?logo=rust" alt="Native Rust">
+  <img src="https://img.shields.io/badge/MLX-Metal%20%7C%20CUDA-black?logo=apple" alt="MLX on Metal and CUDA">
+  <img src="https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Linux%20NVIDIA-lightgrey" alt="Platforms">
+
+  <p><b>URLs, audio/video and documents in. LLM-ready Markdown out.<br>Local ASR and OCR on Apple Silicon, in native Rust on MLX.</b></p>
 </div>
 
 # aimd
 
-Prepare LLM-ready context from URLs, audio/video, and documents.
-
 `aimd` takes one input, works out what kind it is, extracts or transcribes the
 content, and writes Markdown. Results also carry a chunked text context for
-downstream AI workflows. It is a native Rust tool: ASR and OCR run locally on
-Apple Silicon through MLX (Metal), with no Python runtime.
+downstream AI workflows. It is a single native Rust binary: speech
+recognition and OCR run locally through [MLX](https://github.com/ml-explore/mlx)
+(Metal on macOS, CUDA on Linux). There is no Python runtime, no PyTorch and
+no Transformers.
 
 ## Highlights
 
@@ -25,9 +30,11 @@ Apple Silicon through MLX (Metal), with no Python runtime.
 - **URL transcripts** through yt-dlp (YouTube, Bilibili, podcasts, and other
   yt-dlp sites). Subtitles are used first; without them, aimd downloads the
   audio and transcribes it locally.
-- **Local ASR** with Qwen3-ASR (1.7B or 0.6B) on MLX.
-- **Local OCR** on MLX for images and scanned PDFs: Unlimited-OCR (default),
-  PaddleOCR-VL-1.6, or the fast PP-OCRv6 line detector + recognizer.
+- **Local ASR** with [Qwen3-ASR](#models) (1.7B or 0.6B), with automatic
+  language detection and context biasing from page metadata.
+- **Local OCR** for images and scanned PDFs: [Unlimited-OCR](#models)
+  (default), [PaddleOCR-VL-1.6](#models), or the fast [PP-OCRv6](#models)
+  line detector and recognizer.
 - **Document conversion** through Pandoc. EPUB keeps spine order and extracts
   chapters and images. Text-layer PDFs are converted by
   [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
@@ -36,6 +43,47 @@ Apple Silicon through MLX (Metal), with no Python runtime.
   Qwen3-ForcedAligner). Export JSON segments, SRT, or WebVTT.
 - **Remote backends**: optional OpenAI-compatible ASR/OCR servers.
 - **Two interfaces**: CLI (`aimd`) and MCP stdio server (`aimd-mcp`).
+
+## Why native Rust + MLX
+
+Each supported model is reimplemented in Rust on MLX's C++ API and tuned for
+that model. Every speedup is checked against the Python MLX reference
+implementations (mlx-audio, mlx-vlm, mlx4ocr). The output must stay
+identical: transcripts token for token, OCR Markdown byte for byte, with a
+labeled accuracy corpus as the gate.
+
+**Fast cold start.** One binary starts in milliseconds; there is no
+interpreter to boot or framework to import. Safetensors weights are
+memory-mapped, and quantized checkpoints go straight into MLX's
+`quantized_matmul` with no dequantize pass.
+
+**Kernels tuned per model.**
+
+- Fused MoE expert and router kernels for Unlimited-OCR.
+- A custom Metal attention kernel for single-token decode steps.
+- Compiled elementwise kernels for SwiGLU, GELU, rotary embeddings and the
+  conv bias + activation + residual epilogues in PP-OCRv6. They are
+  shape-agnostic, so a new page size never triggers a recompile.
+
+**GPU never waits on the host.**
+
+- Decode loops submit the next step before reading the current token, and
+  Metal command buffers are sized so the KV cache updates in place.
+- PDF pages render in the background while the previous page is in OCR.
+- CPU work (log-mel features, Pillow-exact image resizing, PP-OCRv6 crops)
+  runs on every core.
+
+Apple M2 Pro, same machine and inputs as the Python reference
+([full numbers](docs/performance.md)):
+
+| | Python reference | aimd |
+|---|---|---|
+| Qwen3-ASR-1.7B 4-bit, model load | mlx-audio 10.0 s | 0.4 s (3.8 s with a cold disk cache) |
+| Unlimited-OCR 4-bit, model load | mlx-vlm 3.3 s | 0.6 s |
+| Unlimited-OCR 4-bit, full page (4x5 crops) | mlx-vlm 4.5-4.7 s | 3.8 s |
+| Unlimited-OCR 4-bit, decode (same page) | mlx-vlm 170-177 tok/s | 254 tok/s |
+| PP-OCRv6 medium, warm page | mlx4ocr (compiled) 0.22-0.49 s | 0.20-0.45 s |
+| Qwen3-ForcedAligner, 300 s clip | mlx-audio 4.7 / 5.6 s (en / zh) | 4.5 / 5.3 s |
 
 ## Install
 
@@ -99,7 +147,7 @@ aimd [OPTIONS] INPUT_SOURCE
 | `-o, --output PATH` | Output file. Generated from the title when omitted. |
 | `-f, --format TEXT` | `markdown` (default), `json` (the MCP response with segments), `srt` or `vtt` (transcripts only). See [Source anchors](#source-anchors). |
 | `--anchors` | Add OCR position comments and `[hh:mm:ss]` transcript paragraphs to the Markdown (runs forced alignment). Off by default. |
-| `-m, --model TEXT` | ASR or OCR model (see [Models and precision](#models-and-precision)). |
+| `-m, --model TEXT` | ASR or OCR model (see [Models](#models)). |
 | `--precision TEXT` | `4bit`, `6bit`, or `8bit` (dash variants such as `4-bit` are accepted). |
 | `-l, --language TEXT` | ASR language (`zh`, `en`, `ja`, `yue`, ...). Omit it to auto-detect. OCR ignores it. |
 | `--context TEXT` | ASR biasing text: proper nouns, names, domain vocabulary. |
@@ -336,16 +384,29 @@ aimd audio.mp3 --anchors           # [hh:mm:ss] paragraphs in the Markdown
 transcripts. SRT/VTT cues are one sentence each, split at commas when longer
 than 7 s or 84 characters (42 for CJK).
 
-## Models and precision
+## Models
+
+aimd downloads these checkpoints from Hugging Face on first use:
+
+| Model | Task | `--model` | Checkpoints | Upstream |
+|-------|------|-----------|-------------|----------|
+| Qwen3-ASR 1.7B | Transcription (default) | `qwen3-asr-1.7b` | [4bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-4bit), [6bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-6bit), [8bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit) | [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) |
+| Qwen3-ASR 0.6B | Transcription | `qwen3-asr-0.6b` | [4bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-4bit), [6bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-6bit), [8bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-8bit) | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) |
+| Qwen3-ForcedAligner 0.6B | Transcript timestamps (`--anchors`, SRT/VTT/JSON) | automatic | [8bit](https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-8bit) | [Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) |
+| Unlimited-OCR | OCR (default) | `unlimited-ocr` | [4bit](https://huggingface.co/mlx-community/Unlimited-OCR-4bit), [6bit](https://huggingface.co/mlx-community/Unlimited-OCR-6bit), [8bit](https://huggingface.co/mlx-community/Unlimited-OCR-8bit) | [baidu/Unlimited-OCR](https://huggingface.co/baidu/Unlimited-OCR) |
+| PaddleOCR-VL-1.6 | OCR | `paddleocr-vl` | [bf16](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6), quantized to 4/6/8-bit at load | [PaddlePaddle/PaddleOCR-VL-1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6) |
+| PP-OCRv6 medium | OCR (plain text lines) | `pp-ocrv6` | [det](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det_safetensors) + [rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec_safetensors) | PaddlePaddle |
+
+### Precision
 
 The model (`--model`) and the precision (`--precision`) are separate options.
 
-| Task | `--model` | Precisions | Default checkpoint |
-|------|-----------|------------|--------------------|
-| Transcription | `qwen3-asr-1.7b` (default), `qwen3-asr-0.6b` | `4bit` (default), `6bit`, `8bit` | `mlx-community/Qwen3-ASR-1.7B-4bit` |
-| OCR | `unlimited-ocr` (default) | `4bit` (default), `6bit`, `8bit` | `mlx-community/Unlimited-OCR-4bit` |
-| OCR | `paddleocr-vl` | `bf16` (default), `4bit`, `6bit`, `8bit` | `PaddlePaddle/PaddleOCR-VL-1.6` |
-| OCR | `pp-ocrv6` | none (ignored with a warning) | `PaddlePaddle/PP-OCRv6_medium_{det,rec}_safetensors` |
+| `--model` | Precisions | Default |
+|-----------|------------|---------|
+| `qwen3-asr-1.7b`, `qwen3-asr-0.6b` | `4bit`, `6bit`, `8bit` | `4bit` |
+| `unlimited-ocr` | `4bit`, `6bit`, `8bit` | `4bit` |
+| `paddleocr-vl` | `bf16`, `4bit`, `6bit`, `8bit` | `bf16` |
+| `pp-ocrv6` | none (ignored with a warning) | - |
 
 ```bash
 aimd audio.wav --model qwen3-asr-1.7b --precision 4bit
@@ -361,8 +422,9 @@ native engine yet. PaddleOCR-VL always downloads the official bf16 checkpoint;
 `4bit`/`6bit`/`8bit` quantize it at load time (4-bit is bit-identical to
 `mlx-community/PaddleOCR-VL-1.6-4bit`).
 
-Local inference needs the MLX GPU (Metal) device. With `AIMD_MLX_DEVICE=cpu`,
-or on a machine without a Metal GPU, local ASR/OCR fails early. Use a remote
+Local inference needs the MLX GPU device (Metal on macOS, CUDA on Linux). With
+`AIMD_MLX_DEVICE=cpu`, or on a machine without a usable GPU, local ASR/OCR
+fails early. Use a remote
 backend in that case.
 
 ## Remote ASR and OCR
