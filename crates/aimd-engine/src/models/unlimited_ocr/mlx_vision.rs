@@ -941,7 +941,7 @@ mod tests {
     /// The vision bounds hold Metal mlx rounding: the 24-layer tower
     /// amplifies any rounding change (even f32 attention on Metal) past
     /// them. Other GPU backends (CUDA) only report the drift; the corpus
-    /// gate covers their end-to-end accuracy (spec 003).
+    /// gate covers their end-to-end accuracy (specs/archive/003-linux-mlx-cuda.md).
     fn assert_vision_parity(what: &str, fails: &[String]) {
         if fails.is_empty() {
             return;

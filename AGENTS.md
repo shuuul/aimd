@@ -20,10 +20,12 @@ Interfaces (one binary each):
 Distribution:
 
 - **Homebrew**: `brew install shuuul/tap/aimd` (formula in `shuuul/homebrew-tap`).
-  Bottles for macOS arm64. Linux bottles wait on spec 003 (tap mlx formula with the CUDA
-  backend).
-- **Runtime deps** (formula `depends_on`): `mlx`, `ffmpeg`, `mupdf` (`mutool`),
-  `pandoc`, `yt-dlp`. Model weights download from Hugging Face on first use into the HF
+  Bottles for macOS arm64. Linux (x86_64/aarch64, NVIDIA) builds from source against
+  the tap's `mlx-cuda`, which repackages MLX's official `mlx-cuda-13` wheel; the NVIDIA
+  driver, CUDA 13, cuDNN 9 and NCCL 2 come from the system. No Linux bottles: hosted
+  runners have no NVIDIA driver to load `libmlx.so`.
+- **Runtime deps** (formula `depends_on`): `mlx` (macOS) / `shuuul/tap/mlx-cuda`
+  (Linux), `ffmpeg`, `mupdf` (`mutool`), `pandoc`, `yt-dlp`. Model weights download from Hugging Face on first use into the HF
   cache.
 - **Version source**: `[workspace.package] version` in the root `Cargo.toml`.
 
@@ -200,8 +202,16 @@ flowchart TD
   preflight. Optional `AIMD_{ASR,OCR}_{MODEL,API_KEY}` have matching fields. Bare server
   URLs gain `/v1`. Explicit values override the environment. Remote precision is
   server-owned, so a local `precision` is ignored with one warning.
-- **MLX only**: MLX is the only compute backend (Metal on macOS; CUDA via the mlx CUDA
-  backend is spec 003). Do not add CPU compute paths or hand-written CUDA.
+- **MLX only**: MLX is the only compute backend (Metal on macOS, the mlx CUDA backend on
+  Linux). Do not add CPU compute paths or hand-written CUDA. The WS-08 custom Metal
+  kernels are gated on `aimd_mlx::metal_kernels_available()`; other GPU backends use
+  the stock mlx ops.
+- **Linux build**: `aimd-mlx` links `libmlx.so` from `MLX_PREFIX` (brew `mlx-cuda`, or
+  an unpacked `mlx-cuda-13` wheel for dev). Cargo applies the shim's rpath only to
+  `aimd-mlx`'s own targets, so dev runs of dependents need
+  `LD_LIBRARY_PATH=$MLX_PREFIX/lib` (brew's linker shim adds the rpath for installs).
+  The shim points `CUDA_HOME` at `/opt/cuda` when unset and `/usr/local/cuda` is
+  absent, because mlx's CUDA JIT needs the toolkit headers.
 - **Document tools**: Pandoc (brew) reads every supported document format; `.txt`/`.md`
   pass through; legacy `.doc`/`.ppt`/`.xls` and MOBI/AZW3 are unsupported. Text-layer
   PDFs use the `pdf-inspector` crate; scanned pages render with `mutool draw`.
@@ -342,6 +352,11 @@ Tests are lean by rule; weights are the expensive resource.
   are the same on both devices. MLX's CPU `quantized_matmul` is imprecise with
   bf16 inputs (error grows with K), so CPU-device tests feed it f32 activations,
   scales and biases rather than loosening bounds.
+- **Backend-specific bounds**: the Unlimited-OCR vision stage/final-feature goldens
+  pin Metal mlx rounding (the tower amplifies any rounding change past them), so they
+  are enforced only when `metal_kernels_available()`; on CUDA they print the drift and
+  the corpus gate is the accuracy check. Run the checkpoint tier and the corpus gate on
+  a Linux GPU box (metacube, dspark) after changes that can move CUDA outputs.
 - **Never download in tests**: no hf-hub fetches, no network in tiers 1-2.
 - **No idle waits**: mock servers and job tests use short poll intervals; no
   `sleep`-based synchronization.

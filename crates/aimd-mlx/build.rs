@@ -7,9 +7,10 @@
 //! `@rpath/libjaccl.dylib` dependency without `DYLD_*` env fiddling; the
 //! bundled `mlx.metallib` is located by MLX relative to the loaded dylib.
 //!
-//! On Linux (spec 003) the prefix is an mlx build with the CUDA backend
-//! (`MLX_PREFIX`, e.g. the `mlx/` dir of the `mlx-cuda-13` wheel): it links
-//! `libmlx.so` against libstdc++ with the same rpath.
+//! On Linux the prefix is an mlx build with the CUDA backend
+//! (brew `shuuul/tap/mlx-cuda`, or the `mlx/` dir of an unpacked
+//! `mlx-cuda-13` wheel for dev): it links `libmlx.so` against libstdc++ with
+//! the same rpath.
 
 use std::path::PathBuf;
 use std::process::Command;
