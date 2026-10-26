@@ -229,7 +229,7 @@ fn schema_exposes_precision_and_task_enum() {
         json!(["transcript", "convert", "ocr"])
     );
     assert_eq!(process.input_schema["required"], json!(["input_source"]));
-    assert_eq!(props.as_object().unwrap().len(), 20);
+    assert_eq!(props.as_object().unwrap().len(), 22);
 }
 
 #[test]
@@ -250,15 +250,17 @@ fn text_content_keeps_python_key_order() {
         },
         None,
         None,
+        true,
     );
-    let text = to_ordered_text(&value);
-    let positions: Vec<usize> = PAYLOAD_KEY_ORDER
+    let text = aimd_core::output::payload_text(&value);
+    let positions: Vec<usize> = aimd_core::output::PAYLOAD_KEY_ORDER
         .iter()
         .map(|k| text.find(&format!("\"{k}\"")).unwrap())
         .collect();
     assert!(positions.windows(2).all(|w| w[0] < w[1]));
     assert!(text.contains("\"chunk_list\": [\n    \"a\"\n  ]"));
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), value);
+    assert_eq!(value["segments"], json!([]));
 }
 
 /// Full JSON-RPC round trip over an in-memory duplex transport.

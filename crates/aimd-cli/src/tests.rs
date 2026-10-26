@@ -136,7 +136,7 @@ fn write_wav(path: &Path) {
 #[test]
 fn title_sanitization_matches_python() {
     let p = |t: &str| {
-        output_path_from_title(t, "ocr", None)
+        output_path_from_title(t, "ocr", "md", None)
             .to_string_lossy()
             .into_owned()
     };
@@ -148,7 +148,7 @@ fn title_sanitization_matches_python() {
     let long = format!("{}._tail", "a".repeat(98));
     assert_eq!(p(&long), format!("{}_ocr.md", "a".repeat(98)));
     assert_eq!(
-        output_path_from_title("t", "transcript", Some(Path::new("/x/y"))),
+        output_path_from_title("t", "transcript", "md", Some(Path::new("/x/y"))),
         PathBuf::from("/x/y/t_transcript.md")
     );
 }
@@ -220,6 +220,37 @@ fn ocr_default_output_lands_next_to_input() {
         format!(
             "Successfully OCR processed\nOutput saved to {}\n",
             expected.display()
+        )
+    );
+
+    // --format json writes the MCP payload with segments; srt is transcript-only.
+    let o = invoke(&[&png.to_string_lossy(), "-f", "json"], &Fake::default());
+    assert_eq!(o.code, 0, "{:?}", o.logs);
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("scan_ocr.json")).unwrap()).unwrap();
+    assert_eq!(json["markdown"], "# Scanned Page\n\ntext");
+    assert!(json["segments"].is_array());
+    assert!(
+        json["output_file"]
+            .as_str()
+            .unwrap()
+            .ends_with("scan_ocr.json")
+    );
+    let o = invoke(
+        &[&png.to_string_lossy(), "--format", "srt"],
+        &Fake::default(),
+    );
+    assert_eq!(o.code, 1);
+    assert!(!dir.join("scan_ocr.srt").exists());
+    let o = invoke(
+        &[&png.to_string_lossy(), "--format", "docx"],
+        &Fake::default(),
+    );
+    assert_eq!(
+        (o.code, o.stderr.as_str()),
+        (
+            1,
+            "Error: Unsupported format. Supported formats: markdown, json, srt, vtt.\n"
         )
     );
 }

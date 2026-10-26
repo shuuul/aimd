@@ -4,6 +4,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use serde_json::{Value, json};
+
+use crate::anchors;
 use crate::error::AimdError;
 use crate::model::{ProcessResult, TaskType};
 
@@ -44,6 +47,145 @@ pub fn build_output_text(task_type: TaskType, markdown: &str) -> Result<&str, Ai
         return Err(AimdError::failed("Transcription returned empty content"));
     }
     Ok(markdown)
+}
+
+/// Output file format (`aimd --format`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    #[default]
+    Markdown,
+    /// The MCP `process_input` response object, with `segments`.
+    Json,
+    Srt,
+    Vtt,
+}
+
+impl OutputFormat {
+    pub const NAMES: &'static str = "markdown, json, srt, vtt";
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "markdown" | "md" => Some(Self::Markdown),
+            "json" => Some(Self::Json),
+            "srt" => Some(Self::Srt),
+            "vtt" | "webvtt" => Some(Self::Vtt),
+            _ => None,
+        }
+    }
+
+    /// File extension (without the dot).
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Json => "json",
+            Self::Srt => "srt",
+            Self::Vtt => "vtt",
+        }
+    }
+
+    /// Subtitle formats need a transcript with timed segments.
+    pub fn is_subtitle(self) -> bool {
+        matches!(self, Self::Srt | Self::Vtt)
+    }
+}
+
+/// SRT/VTT text for a transcript result's timed segments.
+pub fn subtitle_text(result: &ProcessResult, format: OutputFormat) -> Result<String, AimdError> {
+    if result.task_type != TaskType::Transcript {
+        return Err(AimdError::unsupported(format!(
+            "--format {} is only available for transcripts",
+            format.extension()
+        )));
+    }
+    let segments = result
+        .segments
+        .as_deref()
+        .filter(|s| s.iter().any(|s| s.start.is_some()))
+        .ok_or_else(|| {
+            AimdError::unsupported(format!(
+                "--format {} needs timed segments (drop --raw-transcript/--no-anchors)",
+                format.extension()
+            ))
+        })?;
+    let cues = anchors::subtitle_cues(segments);
+    Ok(match format {
+        OutputFormat::Vtt => anchors::to_vtt(&cues),
+        _ => anchors::to_srt(&cues),
+    })
+}
+
+/// The `process_input` response object: the Python `_process_result_payload`
+/// keys, plus `segments` when `include_segments` (spec 005).
+pub fn result_payload(
+    result: &ProcessResult,
+    output_file: Option<String>,
+    output_dir: Option<String>,
+    include_segments: bool,
+) -> Value {
+    // serde_json maps are key-sorted; `payload_text` restores Python order.
+    let mut value = json!({
+        "task_type": result.task_type.as_str(),
+        "title": result.text_context.title,
+        "markdown": result.markdown,
+        "asset_base_uri": result.asset_base_uri,
+        "chunk_list": result.text_context.chunk_list,
+        "split_header_level": result.text_context.split_header_level,
+        "platform": result.platform,
+        "output_file": output_file,
+        "output_dir": output_dir,
+    });
+    if include_segments {
+        value["segments"] = json!(result.segments.as_deref().unwrap_or_default());
+    }
+    value
+}
+
+/// Ordered keys of the `process_input` payload.
+pub const PAYLOAD_KEY_ORDER: [&str; 10] = [
+    "task_type",
+    "title",
+    "markdown",
+    "asset_base_uri",
+    "chunk_list",
+    "split_header_level",
+    "platform",
+    "output_file",
+    "output_dir",
+    "segments",
+];
+
+/// Indented (2 spaces) JSON text with the payload keys in Python order, as
+/// FastMCP renders the text content block.
+pub fn payload_text(value: &Value) -> String {
+    let Value::Object(map) = value else {
+        return serde_json::to_string_pretty(value).unwrap_or_default();
+    };
+    let mut keys: Vec<&str> = PAYLOAD_KEY_ORDER
+        .iter()
+        .copied()
+        .filter(|k| map.contains_key(*k))
+        .collect();
+    keys.extend(
+        map.keys()
+            .map(String::as_str)
+            .filter(|k| !PAYLOAD_KEY_ORDER.contains(k)),
+    );
+    if keys.is_empty() {
+        return "{}".to_string();
+    }
+    let mut out = String::from("{\n");
+    for (i, key) in keys.iter().enumerate() {
+        let rendered = serde_json::to_string_pretty(&map[*key]).unwrap_or_default();
+        let indented = rendered.replace('\n', "\n  ");
+        out.push_str(&format!(
+            "  {}: {}{}\n",
+            serde_json::to_string(key).unwrap_or_default(),
+            indented,
+            if i + 1 < keys.len() { "," } else { "" }
+        ));
+    }
+    out.push('}');
+    out
 }
 
 /// `Path.resolve()`: absolute, symlinks resolved (falls back to joining

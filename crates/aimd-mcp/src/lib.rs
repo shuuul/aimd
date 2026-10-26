@@ -9,8 +9,11 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aimd_core::output::{PersistError, get_request_temp_dir, persist_result_output_if_requested};
-use aimd_core::{NoHooks, ProcessInput, ProcessResult, TaskType};
+use aimd_core::output::{
+    PersistError, get_request_temp_dir, payload_text, persist_result_output_if_requested,
+    result_payload,
+};
+use aimd_core::{NoHooks, ProcessInput, TaskType};
 use aimd_process::{Runtime, process_input_with};
 use rmcp::ErrorData;
 use rmcp::RoleServer;
@@ -24,7 +27,7 @@ use serde_json::{Map, Value, json};
 
 /// Docstring of the Python `process_input` tool (kept verbatim, including its
 /// indentation, because FastMCP publishes it as the tool description).
-const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    model selects the ASR model (qwen3-asr-1.7b default, qwen3-asr-0.6b)\n    or the OCR model (unlimited-ocr default, pp-ocrv6, paddleocr-vl).\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR select the\n    matching mlx-community checkpoint (default 4bit; bf16 not yet supported).\n    paddleocr-vl defaults to bf16 and quantizes at load; pp-ocrv6 ignores\n    precision. Remote backends own their precision.\n\n    language forces the ASR language (e.g. zh, en, ja, yue); omit it to\n    auto-detect. OCR ignores it.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n    ";
+const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    model selects the ASR model (qwen3-asr-1.7b default, qwen3-asr-0.6b)\n    or the OCR model (unlimited-ocr default, pp-ocrv6, paddleocr-vl).\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR select the\n    matching mlx-community checkpoint (default 4bit; bf16 not yet supported).\n    paddleocr-vl defaults to bf16 and quantizes at load; pp-ocrv6 ignores\n    precision. Remote backends own their precision.\n\n    language forces the ASR language (e.g. zh, en, ja, yue); omit it to\n    auto-detect. OCR ignores it.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n\n    anchors (default True) marks OCR blocks with invisible\n    <!-- aimd:loc page=.. bbox=.. --> comments and transcript paragraphs\n    with [hh:mm:ss]; include_segments adds the located/timed segments.\n    ";
 
 /// A tool call failure; rendered as an `isError` tool result.
 #[derive(Debug)]
@@ -72,6 +75,8 @@ impl AimdMcp {
 struct ProcessArgs {
     request: ProcessInput,
     output_file: Option<String>,
+    /// Add `segments` (spec 005) to the response.
+    include_segments: bool,
 }
 
 impl ProcessArgs {
@@ -95,6 +100,8 @@ impl ProcessArgs {
         let precision = field.optional_string("precision");
         let context = field.optional_string("context");
         let metadata_context = field.bool_or("metadata_context", true);
+        let anchors = field.bool_or("anchors", true);
+        let include_segments = field.bool_or("include_segments", false);
         let asr_base_url = field.optional_string("asr_base_url");
         let asr_model = field.optional_string("asr_model");
         let asr_api_key = field.optional_string("asr_api_key");
@@ -128,7 +135,7 @@ impl ProcessArgs {
             precision,
             context,
             metadata_context,
-            anchors: true,
+            anchors,
             asr_base_url,
             asr_model,
             asr_api_key,
@@ -139,6 +146,7 @@ impl ProcessArgs {
         Ok(Self {
             request,
             output_file,
+            include_segments,
         })
     }
 }
@@ -237,6 +245,7 @@ fn run_process_input(args: ProcessArgs, runtime: &dyn Runtime) -> Result<Value, 
     let ProcessArgs {
         mut request,
         output_file,
+        include_segments,
     } = args;
     request.temp_dir = get_request_temp_dir().map_err(|e| e.to_string())?;
     let result = process_input_with(&request, &NoHooks, runtime).map_err(|e| e.to_string())?;
@@ -257,74 +266,8 @@ fn run_process_input(args: ProcessArgs, runtime: &dyn Runtime) -> Result<Value, 
         &result,
         persisted.output_file,
         persisted.output_dir,
+        include_segments,
     ))
-}
-
-/// Same keys and key order as the Python `_process_result_payload`.
-fn result_payload(
-    result: &ProcessResult,
-    output_file: Option<String>,
-    output_dir: Option<String>,
-) -> Value {
-    // serde_json maps are key-sorted; `to_ordered_text` restores Python order.
-    json!({
-        "task_type": result.task_type.as_str(),
-        "title": result.text_context.title,
-        "markdown": result.markdown,
-        "asset_base_uri": result.asset_base_uri,
-        "chunk_list": result.text_context.chunk_list,
-        "split_header_level": result.text_context.split_header_level,
-        "platform": result.platform,
-        "output_file": output_file,
-        "output_dir": output_dir,
-    })
-}
-
-/// Python-ordered keys of the `process_input` payload.
-const PAYLOAD_KEY_ORDER: [&str; 9] = [
-    "task_type",
-    "title",
-    "markdown",
-    "asset_base_uri",
-    "chunk_list",
-    "split_header_level",
-    "platform",
-    "output_file",
-    "output_dir",
-];
-
-/// Indented (2 spaces) JSON text with the payload keys in Python order, as
-/// FastMCP renders the text content block.
-fn to_ordered_text(value: &Value) -> String {
-    let Value::Object(map) = value else {
-        return serde_json::to_string_pretty(value).unwrap_or_default();
-    };
-    let mut keys: Vec<&str> = PAYLOAD_KEY_ORDER
-        .iter()
-        .copied()
-        .filter(|k| map.contains_key(*k))
-        .collect();
-    keys.extend(
-        map.keys()
-            .map(String::as_str)
-            .filter(|k| !PAYLOAD_KEY_ORDER.contains(k)),
-    );
-    if keys.is_empty() {
-        return "{}".to_string();
-    }
-    let mut out = String::from("{\n");
-    for (i, key) in keys.iter().enumerate() {
-        let rendered = serde_json::to_string_pretty(&map[*key]).unwrap_or_default();
-        let indented = rendered.replace('\n', "\n  ");
-        out.push_str(&format!(
-            "  {}: {}{}\n",
-            serde_json::to_string(key).unwrap_or_default(),
-            indented,
-            if i + 1 < keys.len() { "," } else { "" }
-        ));
-    }
-    out.push('}');
-    out
 }
 
 fn schema(value: Value) -> Arc<Map<String, Value>> {
@@ -379,6 +322,14 @@ pub fn tools() -> Vec<Tool> {
     props.insert(
         "input_source".into(),
         json!({"title": "Input Source", "type": "string"}),
+    );
+    props.insert(
+        "anchors".into(),
+        json!({"default": true, "title": "Anchors", "type": "boolean"}),
+    );
+    props.insert(
+        "include_segments".into(),
+        json!({"default": false, "title": "Include Segments", "type": "boolean"}),
     );
     props.insert(
         "metadata_context".into(),
@@ -441,7 +392,7 @@ impl ServerHandler for AimdMcp {
         let result = match self.call(&name, arguments).await {
             Ok(value) => {
                 let mut result =
-                    CallToolResult::success(vec![ContentBlock::text(to_ordered_text(&value))]);
+                    CallToolResult::success(vec![ContentBlock::text(payload_text(&value))]);
                 result.structured_content = Some(value);
                 result
             }

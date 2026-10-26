@@ -4,7 +4,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use aimd_core::log::{LEVEL_NAMES, Level, set_level};
-use aimd_core::output::{PersistError, persist_output};
+use aimd_core::output::{
+    OutputFormat, PersistError, build_output_text, payload_text, persist_output, resolve_path,
+    result_payload, subtitle_text,
+};
 use aimd_core::{NoHooks, ProcessInput, TaskType, log_debug, log_error, log_info, log_warn};
 use aimd_process::Runtime;
 
@@ -12,7 +15,12 @@ use crate::args::{Cli, Parsed, USAGE, help_text, parse};
 
 /// `_create_output_path_from_title`: `dir` is `None` for a bare relative
 /// name (Python's `Path(".") / name` renders without `./`).
-pub fn output_path_from_title(title: &str, suffix: &str, dir: Option<&Path>) -> PathBuf {
+pub fn output_path_from_title(
+    title: &str,
+    suffix: &str,
+    extension: &str,
+    dir: Option<&Path>,
+) -> PathBuf {
     let replaced: String = title
         .chars()
         .map(|c| if "<>:\"/\\|?*".contains(c) { '_' } else { c })
@@ -42,7 +50,7 @@ pub fn output_path_from_title(title: &str, suffix: &str, dir: Option<&Path>) -> 
     if sanitized.is_empty() {
         sanitized = "output".into();
     }
-    let name = format!("{sanitized}_{suffix}.md");
+    let name = format!("{sanitized}_{suffix}.{extension}");
     match dir {
         Some(d) => d.join(name),
         None => PathBuf::from(name),
@@ -123,8 +131,28 @@ pub fn run(
             }
         },
     };
+    let format = match cli.format.as_deref().map(OutputFormat::parse) {
+        None => OutputFormat::Markdown,
+        Some(Some(format)) => format,
+        Some(None) => {
+            let _ = writeln!(
+                stderr,
+                "Error: Unsupported format. Supported formats: {}.",
+                OutputFormat::NAMES
+            );
+            return 1;
+        }
+    };
+    if format.is_subtitle() && (cli.no_anchors || cli.raw_transcript) {
+        let _ = writeln!(
+            stderr,
+            "Error: --format {} needs timed segments; drop --no-anchors/--raw-transcript.",
+            format.extension()
+        );
+        return 1;
+    }
     log_info!("Input: {}", cli.input_source);
-    match process(&cli, requested, rt, stdout) {
+    match process(&cli, requested, format, rt, stdout) {
         Ok(()) => 0,
         Err(message) => {
             log_error!("{message}");
@@ -136,6 +164,7 @@ pub fn run(
 fn process(
     cli: &Cli,
     requested: Option<TaskType>,
+    format: OutputFormat,
     rt: &dyn Runtime,
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
@@ -166,7 +195,7 @@ fn process(
         precision: cli.precision.clone(),
         context: cli.context.clone(),
         metadata_context: !cli.no_context,
-        anchors: true,
+        anchors: !cli.no_anchors,
         asr_base_url: cli.asr_base_url.clone(),
         asr_model: cli.asr_model.clone(),
         asr_api_key: cli.asr_api_key.clone(),
@@ -209,12 +238,33 @@ fn process(
             } else {
                 parent_of(&cli.input_source)
             };
-            output_path_from_title(&result.text_context.title, suffix, dir.as_deref())
+            output_path_from_title(
+                &result.text_context.title,
+                suffix,
+                format.extension(),
+                dir.as_deref(),
+            )
         }
     };
     let shown = py_path(&output);
     log_info!("Output: {shown}");
-    persist_output(&output, result.task_type, &result.markdown).map_err(|e| match e {
+    let text = match format {
+        OutputFormat::Markdown => None,
+        OutputFormat::Json => {
+            build_output_text(result.task_type, &result.markdown).map_err(|e| e.message)?;
+            let file = resolve_path(&output).to_string_lossy().into_owned();
+            Some(payload_text(&result_payload(&result, Some(file), None, true)) + "\n")
+        }
+        OutputFormat::Srt | OutputFormat::Vtt => {
+            Some(subtitle_text(&result, format).map_err(|e| e.message)?)
+        }
+    };
+    persist_output(
+        &output,
+        result.task_type,
+        text.as_deref().unwrap_or(&result.markdown),
+    )
+    .map_err(|e| match e {
         PersistError::Aimd(e) => e.message,
         PersistError::Io(e) => generic(&e),
     })?;

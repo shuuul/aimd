@@ -8,6 +8,8 @@ pub struct Cli {
     pub input_source: String,
     pub task: Option<String>,
     pub output: Option<String>,
+    pub format: Option<String>,
+    pub no_anchors: bool,
     pub model: Option<String>,
     pub precision: Option<String>,
     pub asr_base_url: Option<String>,
@@ -62,6 +64,8 @@ type OptionSpec = (
 const OPTIONS: &[OptionSpec] = &[
     ("--task", None, "task", Kind::Str, None),
     ("--output", Some("-o"), "output", Kind::Str, None),
+    ("--format", Some("-f"), "format", Kind::Str, None),
+    ("--no-anchors", None, "no_anchors", Kind::Flag, None),
     ("--model", Some("-m"), "model", Kind::Str, None),
     ("--precision", None, "precision", Kind::Str, None),
     (
@@ -148,6 +152,7 @@ fn set(cli: &mut Cli, field: &str, value: String) {
     let slot = match field {
         "task" => &mut cli.task,
         "output" => &mut cli.output,
+        "format" => &mut cli.format,
         "model" => &mut cli.model,
         "precision" => &mut cli.precision,
         "asr_base_url" => &mut cli.asr_base_url,
@@ -245,6 +250,7 @@ pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>) -> Parsed {
                 }
                 match field {
                     "no_context" => cli.no_context = true,
+                    "no_anchors" => cli.no_anchors = true,
                     _ => cli.raw_transcript = true,
                 }
             }
@@ -305,7 +311,7 @@ pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>) -> Parsed {
 
 /// Plain-text `--help`.
 pub fn help_text() -> String {
-    let rows: [(&str, &str); 22] = [
+    let rows: [(&str, &str); 24] = [
         (
             "--task TEXT",
             "Optional explicit task: transcript, convert, or ocr. Defaults to auto-routing.",
@@ -313,6 +319,14 @@ pub fn help_text() -> String {
         (
             "-o, --output PATH",
             "Output file path. If not specified, auto-generated from input",
+        ),
+        (
+            "-f, --format TEXT",
+            "Output format: markdown (default), json (the MCP response with located/timed segments), srt or vtt (transcripts only).",
+        ),
+        (
+            "--no-anchors",
+            "Omit source anchors: OCR <!-- aimd:loc --> block comments and [hh:mm:ss] transcript paragraphs (skips forced alignment).",
         ),
         ("-m, --model TEXT", MODEL_HELP_TEXT),
         ("--precision TEXT", PRECISION_HELP_TEXT),
