@@ -459,8 +459,7 @@ Releases are manual and tag-driven; release-please is not used.
 6. In the tap, brew test-bot builds bottles on that PR, and the tap's `publish.yml`
    (`brew pr-pull`) publishes them.
 
-`CHANGELOG.md` is the Python-era history (through v0.23.x) and is no longer
-auto-updated. Release notes come from the GitHub Release.
+Release notes come from the GitHub Release (there is no `CHANGELOG.md`).
 
 ## CI
 

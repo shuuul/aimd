@@ -67,8 +67,8 @@ deliberately dependency-free and runs in CI before tests.
 ## Documentation sync
 
 A spec closes only when its lasting behavior has moved into durable
-documentation: the nearest `AGENTS.md`, `docs/`, code comments, and
-`CHANGELOG.md` as relevant. Record the sync targets in the spec's
+documentation: the nearest `AGENTS.md`, `docs/`, and code comments as
+relevant. Record the sync targets in the spec's
 `Documentation sync` section. If experiment commits back the spec, record
 their final Git refs (annotated tags like `experiments/<topic>-v<N>` or
 custom refs like `refs/experiments/<topic>-v<N>`) under `Documentation sync`
