@@ -5,7 +5,7 @@ name: Release
 #      --workspace`, commit `chore(release): vX.Y.Z`;
 #   2. push tag `vX.Y.Z`.
 # This workflow then verifies the tag matches the workspace version, builds
-# and smoke-tests the three binaries, creates the GitHub Release with
+# and smoke-tests the two binaries, creates the GitHub Release with
 # generated notes, and opens a formula bump PR on shuuul/homebrew-tap. The
 # tap's brew test-bot CI builds bottles on that PR; its `brew pr-pull`
 # workflow publishes them.
@@ -103,7 +103,7 @@ jobs:
         run: |
           MLX_PREFIX="$(brew --prefix mlx)"
           export MLX_PREFIX
-          cargo build --release --locked -p aimd-cli -p aimd-api -p aimd-mcp
+          cargo build --release --locked -p aimd-cli -p aimd-mcp
 
       # Mirrors the formula's `test do` block: hermetic, no weights/network.
       - name: Smoke test
@@ -122,7 +122,6 @@ jobs:
           printf '<html><body><h1>Brew</h1><p>pandoc <b>works</b></p></body></html>' > page.html
           "$bin/aimd" page.html -o page_out.md
           grep -qF "pandoc **works**" page_out.md
-          "$bin/aimd-api" --help | grep -q "loopback-only"
           test -x "$bin/aimd-mcp"
 
       - name: Hash source tarball

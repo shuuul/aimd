@@ -1,5 +1,5 @@
 //! Interface-owned Markdown persistence (ports `aimd.interfaces.output`).
-//! Shared by the CLI, HTTP API, and MCP server.
+//! Shared by the CLI and MCP server.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -117,7 +117,7 @@ pub fn persist_result_output_if_requested(
     })
 }
 
-/// `AIMD_TEMP_DIR` (created when set) for API/MCP requests.
+/// `AIMD_TEMP_DIR` (created when set) for MCP requests.
 pub fn get_request_temp_dir() -> std::io::Result<Option<PathBuf>> {
     match std::env::var_os("AIMD_TEMP_DIR") {
         Some(dir) if !dir.is_empty() => {

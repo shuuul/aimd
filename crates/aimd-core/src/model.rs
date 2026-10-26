@@ -1,5 +1,5 @@
 //! Request/result models (ports `aimd.core.models`). Field names match the
-//! Python models so API/MCP JSON stays wire-compatible.
+//! Python models so MCP JSON stays wire-compatible.
 
 use std::path::PathBuf;
 

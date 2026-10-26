@@ -7,10 +7,10 @@ This document records practical performance expectations for `aimd` processing p
 | Path | Typical bottleneck | Warm-cache behavior | Notes |
 |------|--------------------|---------------------|-------|
 | URL with subtitles | Network and yt-dlp metadata/subtitle download | Usually fast after metadata is available | `aimd` prefers subtitles over ASR whenever usable subtitles are found. |
-| URL without subtitles | Media download, audio extraction, then ASR | Model reuse helps only inside the same long-running process | Each CLI invocation loads the checkpoint again; API/MCP reuse loaded models. |
-| Local audio/video transcription | ffmpeg decode to 16 kHz mono and ASR inference | Better in API/MCP because loaded pipelines are cached in-process | Inputs over 10 minutes are transcribed in segments. |
+| URL without subtitles | Media download, audio extraction, then ASR | Model reuse helps only inside the same long-running process | Each CLI invocation loads the checkpoint again; MCP reuses loaded models. |
+| Local audio/video transcription | ffmpeg decode to 16 kHz mono and ASR inference | Better in MCP because loaded pipelines are cached in-process | Inputs over 10 minutes are transcribed in segments. |
 | Document conversion | Pandoc / pdf-inspector / document structure | Mostly CPU and file I/O bound | EPUB conversion also writes chapter/image output trees. |
-| Image OCR | OCR model inference | API/MCP reuse the loaded pipeline | VLM OCR models are heavier than classic detector/recognizer OCR. |
+| Image OCR | OCR model inference | MCP reuses the loaded pipeline | VLM OCR models are heavier than classic detector/recognizer OCR. |
 | PDF OCR | PDF rasterization plus one OCR pass per page | Model reuse helps; page rendering still scales with page count and DPI | PDF pages render with `mutool draw` (144 dpi, RGB) before OCR inference. |
 
 ## Model/runtime tradeoffs
@@ -224,7 +224,7 @@ checkpoints. No benchmark was recorded there (shared GPU).
 When comparing models, measure warm and cold runs separately:
 
 1. **Cold run**: clear model cache/process state and include model download/load time.
-2. **Warm run**: run multiple inputs in one API/MCP process, or use the engine bench examples, so loaded pipelines are reused.
+2. **Warm run**: run multiple inputs in one MCP process, or use the engine bench examples, so loaded pipelines are reused.
 3. **Separate stages** when possible: download/extraction, PDF rasterization, audio conversion, and model inference.
 4. **Record input shape**: audio duration, page count, image dimensions, PDF DPI, language, and model ID.
 5. **Record environment**: OS, chip/GPU, aimd version, brew `mlx` version, and whether weights were already cached.
@@ -244,7 +244,7 @@ cargo run --release -p aimd-engine --example bench_asr_mlx
 cargo run --release -p aimd-engine --example bench_ocr
 ```
 
-For API/MCP model-reuse measurements, start the server once and send repeated requests against the same process.
+For MCP model-reuse measurements, keep one MCP server session and send repeated requests against the same process.
 
 ## Dependency-upgrade smoke tests
 

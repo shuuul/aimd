@@ -18,17 +18,6 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    /// HTTP status used by the API (same values as the Python classes).
-    pub fn status_code(self) -> u16 {
-        match self {
-            ErrorKind::UnsupportedInput => 400,
-            ErrorKind::BackendUnavailable => 422,
-            ErrorKind::InputNotFound => 404,
-            ErrorKind::ProcessingFailed => 500,
-            ErrorKind::Cancelled => 409,
-        }
-    }
-
     /// Stable snake_case name for JSON error bodies.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -69,9 +58,6 @@ impl AimdError {
     }
     pub fn cancelled(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::Cancelled, message)
-    }
-    pub fn status_code(&self) -> u16 {
-        self.kind.status_code()
     }
 }
 

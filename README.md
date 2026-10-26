@@ -31,8 +31,7 @@ Apple Silicon through MLX (Metal), with no Python runtime.
   chapters and images. Text-layer PDFs are converted by
   [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
 - **Remote backends**: optional OpenAI-compatible ASR/OCR servers.
-- **Three interfaces**: CLI (`aimd`), HTTP API (`aimd-api`), and MCP stdio
-  server (`aimd-mcp`).
+- **Two interfaces**: CLI (`aimd`) and MCP stdio server (`aimd-mcp`).
 
 ## Install
 
@@ -249,74 +248,8 @@ AIMD_OCR_MODEL=Unlimited-OCR \
 | `AIMD_OCR_MODEL` | `--ocr-model` | `Unlimited-OCR` |
 | `AIMD_OCR_API_KEY` | `--ocr-api-key` | `not-needed` |
 
-Explicit options override the environment. HTTP API request fields and MCP
-tool parameters use the same names in snake_case (`asr_base_url`, ...).
-
-## HTTP API
-
-```bash
-aimd-api                      # http://127.0.0.1:8000
-aimd-api --help               # environment variables
-```
-
-`aimd-api` is configured only through environment variables and binds only
-to loopback addresses:
-
-| Variable | Purpose |
-|----------|---------|
-| `AIMD_HTTP_HOST` | Loopback bind address (default `127.0.0.1`). |
-| `AIMD_HTTP_PORT` | Port (default `8000`). |
-| `AIMD_API_TOKEN` | When set, every endpoint requires `Authorization: Bearer <token>`. |
-| `AIMD_ALLOWED_ROOTS` | Allow-list of directories (`:`-separated) for local paths in requests. |
-| `AIMD_BLOB_DIR` | Directory for uploaded blobs (default: a temporary directory). |
-| `AIMD_TEMP_DIR` | Directory for temporary downloads, transcoding, and extraction. |
-
-Endpoints:
-
-| Method and path | Purpose |
-|-----------------|---------|
-| `GET /healthz`, `GET /readyz` | Liveness and readiness. |
-| `POST /v1/process` | Process one input synchronously. |
-| `POST /v1/blobs` | Upload bytes (multipart field `file`) for later `blob_id` use. |
-| `POST /v1/jobs` | Start an asynchronous job. |
-| `GET /v1/jobs/{id}`, `DELETE /v1/jobs/{id}` | Job snapshot; request cancellation. |
-| `GET /v1/jobs/{id}/events` | Server-sent job events (resumable with `Last-Event-ID`). |
-| `GET /openapi.json`, `/docs`, `/redoc` | OpenAPI schema and viewers. |
-
-```bash
-curl http://127.0.0.1:8000/healthz
-
-curl -X POST http://127.0.0.1:8000/v1/process \
-  -H 'Content-Type: application/json' \
-  -d '{"input_source": "https://www.youtube.com/watch?v=...", "language": "en"}'
-
-curl -X POST http://127.0.0.1:8000/v1/process \
-  -H 'Content-Type: application/json' \
-  -d '{"input_source": "scan.pdf", "task_type": "ocr", "start": 0, "end": 2}'
-
-curl -X POST http://127.0.0.1:8000/v1/process \
-  -H 'Content-Type: application/json' \
-  -d '{"input_source": "audio.mp3", "model": "qwen3-asr-1.7b", "precision": "4bit"}'
-```
-
-Request fields match the CLI options: `input_source` or `blob_id`,
-`task_type`, `output_file`, `model`, `precision`, `language`, `context`,
-`metadata_context` (default `true`), `start`, `end`, `save_original`,
-`cookies`, `cookies_from_browser`, `raw_transcript`, and the remote backend
-fields.
-
-The response includes the lossless `markdown` for display and saving, and a
-`chunk_list` for context windows. `asset_base_uri` is the base for relative
-links in the Markdown: the source URL, or a local `file:` directory ending in
-`/`. It is `null` for local transcriptions. Conversions that extract assets
-return an `output_dir` next to the source. aimd never deletes that directory,
-and it ignores `output_file` for such results so that relative links keep
-working. Other results are written to `output_file` exactly as `markdown`.
-
-HTTP status codes follow the error kind: unsupported input 400, input not
-found 404, cancelled 409, backend unavailable 422, processing failure 500.
-For the desktop sidecar contract (authenticated launch, loopback, allowed
-roots, blobs, cancellation, shutdown), see [docs/sidecar.md](docs/sidecar.md).
+Explicit options override the environment. MCP tool parameters use the same
+names in snake_case (`asr_base_url`, ...).
 
 ## MCP server
 
@@ -327,7 +260,7 @@ aimd-mcp
 A stdio MCP server with two tools:
 
 - `healthz`
-- `process_input`: the same flow and fields as `POST /v1/process`
+- `process_input`: the same flow and fields as the CLI
   (`input_source`, `task_type`, `model`, `precision`, `language`, `context`,
   `metadata_context`, `start`, `end`, `output_file`, `save_original`,
   `cookies`, `cookies_from_browser`, `raw_transcript`, and the remote backend
@@ -369,7 +302,7 @@ binaries, you also need the runtime tools.
 brew install mlx ffmpeg mupdf pandoc yt-dlp
 git clone https://github.com/shuuul/aimd.git
 cd aimd
-cargo build --release -p aimd-cli -p aimd-api -p aimd-mcp
+cargo build --release -p aimd-cli -p aimd-mcp
 ./target/release/aimd --help
 ```
 

@@ -9,7 +9,6 @@ members = [
     "crates/aimd-url",
     "crates/aimd-process",
     "crates/aimd-cli",
-    "crates/aimd-api",
     "crates/aimd-mcp",
     "crates/xtask",
 ]

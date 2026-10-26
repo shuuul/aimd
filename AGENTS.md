@@ -14,7 +14,6 @@ runtime.
 Interfaces (one binary each):
 
 - **CLI**: `aimd` (`crates/aimd-cli`)
-- **HTTP API**: `aimd-api` (`crates/aimd-api`, axum)
 - **MCP server**: `aimd-mcp` (`crates/aimd-mcp`, rmcp stdio)
 
 Distribution:
@@ -45,19 +44,18 @@ crates/
 ├── aimd-url/       # yt-dlp metadata/subtitles/audio, cookies, metadata ASR context, dom_smoothie readable HTML
 ├── aimd-process/   # routing + orchestration: Runtime seam, local ASR/OCR, remote backends, model resolution, HF cache
 ├── aimd-cli/       # `aimd` binary: hand-written arg parser, output naming, .env loading
-├── aimd-api/       # `aimd-api` binary: axum routes, jobs + SSE, blobs, sidecar auth/allow-roots
 ├── aimd-mcp/       # `aimd-mcp` binary: rmcp stdio server (healthz, process_input)
 └── xtask/          # repo tooling (`cargo xtask check-specs`)
 ```
 
 Dependency direction: `aimd-core` <- `aimd-doc`, `aimd-url` <- `aimd-process` (also
-`aimd-engine`, `aimd-mlx`) <- `aimd-cli` / `aimd-api` / `aimd-mcp`. `aimd-doc` and
+`aimd-engine`, `aimd-mlx`) <- `aimd-cli` / `aimd-mcp`. `aimd-doc` and
 `aimd-url` depend only on `aimd-core`. The URL audio fallback reaches ASR through the
 `aimd_url::AudioTranscriber` trait, which `aimd-process` implements
 (`UrlAudioTranscriber`). This keeps the crate graph acyclic.
 
 Other trees: `scripts/` holds the standalone PEP 723 reference exporters (used only to
-regenerate goldens, not shipped). `docs/` holds architecture, sidecar, and performance
+regenerate goldens, not shipped). `docs/` holds architecture and performance
 notes. `specs/` holds tracked execution specs.
 
 ## ARCHITECTURE DIAGRAM
@@ -65,7 +63,6 @@ notes. `specs/` holds tracked execution specs.
 ```mermaid
 flowchart TD
     CLI["aimd-cli\naimd binary"]
-    API["aimd-api\naxum HTTP + jobs/SSE"]
     MCP["aimd-mcp\nrmcp stdio"]
 
     Core["aimd-core\nProcessInput / ProcessResult / TaskType\nAimdError, ProcessHooks, text shaping, output"]
@@ -80,10 +77,8 @@ flowchart TD
     Mlx["aimd-mlx\nMLX C++ shim (Metal)"]
 
     CLI --> Core
-    API --> Core
     MCP --> Core
     CLI --> Process
-    API --> Process
     MCP --> Process
     Process --> Doc
     Process --> Url
@@ -96,7 +91,6 @@ flowchart TD
     Ocr --> Engine
     Engine --> Mlx
     CLI --> Output["aimd_core::output\noptional markdown persistence"]
-    API --> Output
     MCP --> Output
 ```
 
@@ -115,13 +109,12 @@ flowchart TD
 | Local OCR | `crates/aimd-process/src/ocr.rs` | Images and `mutool draw` PDF pages; per-page progress and cancellation. |
 | Remote backends | `crates/aimd-core/src/remote.rs`, `crates/aimd-process/src/remote.rs` | `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix; ureq + rustls. |
 | Request/result models | `crates/aimd-core/src/model.rs` | `ProcessInput`, `ProcessResult`, `TextContext`, `TaskType`, `SourceKind`; serde names are the wire format. |
-| Errors | `crates/aimd-core/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with HTTP status + snake_case name. |
+| Errors | `crates/aimd-core/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
 | Cancellation/progress | `crates/aimd-core/src/hooks.rs` | `ProcessHooks` (`is_cancelled`, `progress`, `check_cancelled`), `NoHooks`. |
 | Text shaping | `crates/aimd-core/src/text.rs` | Title extraction and header/paragraph chunking (`MAX_CHUNK_SIZE`). |
 | Output persistence + help texts | `crates/aimd-core/src/output.rs` | `persist_result_output_if_requested`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
 | Extension tables | `crates/aimd-core/src/ext.rs` | Audio/video/image/OCR/asset extensions and the Pandoc reader map. |
 | CLI | `crates/aimd-cli/src/args.rs`, `app.rs` | Hand-written parser over the frozen flag surface; output naming; `.env` loading. |
-| HTTP API | `crates/aimd-api/src/` | `app.rs` routes, `jobs.rs` + `sse.rs`, `blobs.rs`, `paths.rs` (allow-roots), `validate.rs` (pydantic-compatible 422s), `openapi.json` (frozen schema). |
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
 | Document conversion | `crates/aimd-doc/src/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
@@ -133,7 +126,7 @@ flowchart TD
 ## CONVENTIONS
 
 - **Core is interface-independent**: `aimd-core`, `aimd-doc`, `aimd-url`, `aimd-process`,
-  and `aimd-engine` never depend on `aimd-cli`, `aimd-api`, or `aimd-mcp`. Interfaces build
+  and `aimd-engine` never depend on `aimd-cli` or `aimd-mcp`. Interfaces build
   a `ProcessInput` and call `aimd_process::process_input`. Request/response shaping
   stays in the interface crate.
 - **Route model**: classify inputs with `InputRoute { source_kind, task_type }`.
@@ -147,12 +140,12 @@ flowchart TD
   Missing tools, models, or device (`pandoc`, `yt-dlp`, `ffmpeg`, `mutool`, MLX GPU) ->
   `BackendUnavailable`. Missing inputs -> `InputNotFound`. Unsupported inputs or options
   -> `UnsupportedInput`. Conversion failures -> `ProcessingFailed`. Cancellation ->
-  `Cancelled`. `ErrorKind::status_code` is the HTTP mapping (400/422/404/500/409).
-- **Cooperative job cancellation**: thread `&dyn ProcessHooks` through core, doc, URL,
+  `Cancelled`.
+- **Cooperative cancellation**: thread `&dyn ProcessHooks` through core, doc, URL,
   ASR, and OCR. Call `check_cancelled` only at safe boundaries (between segments, pages,
-  chapters), never inside uninterruptible model calls or subprocesses. The API keeps
-  completed artifacts from uninterruptible work as `completed_after_request`.
-- **Output ownership**: `output_file` belongs to the CLI/API/MCP, not to `ProcessInput`
+  chapters), never inside uninterruptible model calls or subprocesses. Work that
+  finishes during a late cancellation stays a completed artifact, never discarded.
+- **Output ownership**: `output_file` belongs to the CLI/MCP, not to `ProcessInput`
   or `ProcessResult`. Persist through `aimd_core::output`. Asset conversions
   (`output_dir` set) ignore `output_file`. Persisted files are `markdown`
   byte-for-byte, never rebuilt from `chunk_list`.
@@ -160,11 +153,8 @@ flowchart TD
   `asset_base_uri` (directory URIs end in `/`), an optional `output_dir`, and an optional
   `platform`, alongside `TextContext { title, chunk_list, split_header_level }`. Viewers
   consume `markdown`; context-window consumers use `chunk_list`.
-- **Wire compatibility**: API/MCP JSON field names, error bodies, OpenAPI schema, and tool
+- **Wire compatibility**: MCP JSON field names, error bodies, and tool
   schemas match the frozen Python contract. Change them only with an explicit decision.
-- **Desktop sidecar boundary**: `aimd-api` launches are authenticated
-  (`AIMD_API_TOKEN`), loopback-only (`AIMD_HTTP_HOST`/`AIMD_HTTP_PORT`), and constrained
-  by canonical `AIMD_ALLOWED_ROOTS`. See `docs/sidecar.md`.
 - **Fail-fast preflight**: resolve the model and check the backend (MLX GPU device,
   required tools) before expensive work such as PDF rendering, downloads, or
   transcoding. Local inference on the MLX CPU device is `BackendUnavailable`.
@@ -186,11 +176,11 @@ flowchart TD
   engine runs `4bit` (default), `6bit`, and `8bit`; `bf16` is rejected as
   `BackendUnavailable` until dense checkpoints are supported. A precision that conflicts
   with an explicit checkpoint id is an error.
-- **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI, HTTP API,
+- **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI,
   MCP, URL audio fallback, local ASR, and OCR.
 - **ASR context biasing**: `ProcessInput.context` (explicit text) and
   `ProcessInput.metadata_context` (default `true`) are forwarded by CLI
-  (`--context`/`--no-context`), HTTP API, and MCP. `aimd-url` builds context from page
+  (`--context`/`--no-context`) and MCP. `aimd-url` builds context from page
   metadata (title/author/description/tags/chapters, capped at 2000 chars) and merges it
   into the audio fallback. Qwen3-ASR consumes it as the system message. Never feed
   first-pass ASR output back as context.
@@ -198,7 +188,7 @@ flowchart TD
   retried once with the matching 8-bit checkpoint. Other precisions and remote ASR do not
   auto-switch.
 - **Remote inference**: `AIMD_ASR_BASE_URL` / `AIMD_OCR_BASE_URL` (or the explicit
-  CLI/API/MCP fields) opt into OpenAI-compatible HTTP backends and bypass local MLX
+  CLI/MCP fields) opt into OpenAI-compatible HTTP backends and bypass local MLX
   preflight. Optional `AIMD_{ASR,OCR}_{MODEL,API_KEY}` have matching fields. Bare server
   URLs gain `/v1`. Explicit values override the environment. Remote precision is
   server-owned, so a local `precision` is ignored with one warning.
@@ -226,9 +216,9 @@ flowchart TD
 Hand-write the simple parts; use third-party crates only for genuinely complex domains.
 
 - **Hand-written**: CLI argument parsing, zip central-directory reading, OPF/spine
-  walking, SSE framing, Netscape cookie parsing, sidecar path checks, UUIDs/timestamps,
-  pydantic-style validation, `.env` parsing, TTML/srv subtitle XML parsing.
-- **Third-party (approved)**: `axum` + `tokio` (async HTTP/SSE), `rmcp` (MCP),
+  walking, Netscape cookie parsing, UUIDs/timestamps, `.env` parsing,
+  TTML/srv subtitle XML parsing.
+- **Third-party (approved)**: `rmcp` (MCP),
   `serde`/`serde_json`, `pdf-inspector` (PDF text layer + OCR probe), `dom_smoothie`
   (readability), `regex`, `miniz_oxide` (deflate), `ureq` with `rustls` (remote backends,
   HF downloads), `image`, `tokenizers`, `safetensors`, `memmap2`, `half`, `thiserror`,
@@ -304,7 +294,7 @@ Supported model families are intentionally narrow:
 - Explicit `mlx-community/*` ids for these families remain compatibility inputs; unknown
   models fail with the "Unsupported MLX ... model" `ProcessingFailed` message.
 
-Checkpoints load once per model per process (API/MCP reuse loaded pipelines).
+Checkpoints load once per model per process (MCP reuses loaded pipelines).
 
 ## TEST RULES
 
@@ -367,7 +357,7 @@ Tests are lean by rule; weights are the expensive resource.
 
 ## ANTI-PATTERNS
 
-- Embedding routing/orchestration in `aimd-cli`, `aimd-api`, or `aimd-mcp` instead of
+- Embedding routing/orchestration in `aimd-cli` or `aimd-mcp` instead of
   `aimd-process`.
 - Depending on an interface crate from `aimd-core`, `aimd-doc`, `aimd-url`,
   `aimd-process`, or `aimd-engine`; adding a direct `aimd-url` -> `aimd-process` edge
@@ -412,12 +402,10 @@ AIMD_E2E=1 cargo test -p aimd-url --test e2e
 cargo xtask check-specs
 
 # Build and run
-cargo build --release -p aimd-cli -p aimd-api -p aimd-mcp
+cargo build --release -p aimd-cli -p aimd-mcp
 ./target/release/aimd audio.mp3 --model qwen3-asr-1.7b --precision 4bit
 ./target/release/aimd "https://youtube.com/..." --cookies-from-browser chrome --raw-transcript
 ./target/release/aimd audio.mp3 --temp-dir ./tmp --log-level DEBUG
-./target/release/aimd-api
-curl http://127.0.0.1:8000/healthz
 ./target/release/aimd-mcp
 
 # Regenerate a golden set (not shipped; needs uv)
@@ -452,10 +440,10 @@ feat(asr): add context biasing to remote ASR
 fix(url): preserve subtitle fallback errors
 perf(engine): ring KV cache for the Qwen3 decoder
 docs(performance): record M2 Pro OCR results
-chore(deps): bump axum
+chore(deps): bump rmcp
 ```
 
-Breaking changes: add `!` after the type/scope (for example `feat(api)!: change process
+Breaking changes: add `!` after the type/scope (for example `feat(mcp)!: change tool
 response`) and include a `BREAKING CHANGE:` footer.
 
 ## RELEASE PROCESS
@@ -467,7 +455,7 @@ Releases are manual and tag-driven; release-please is not used.
 3. Commit `chore(release): vX.Y.Z` on `main`.
 4. Push the tag `vX.Y.Z`.
 5. `.github/workflows/release.yml` (on `v*` tags) verifies that the tag matches the
-   workspace version (`cargo metadata --locked`), builds and smoke-tests the three
+   workspace version (`cargo metadata --locked`), builds and smoke-tests the two
    binaries on macOS arm64, creates the GitHub Release with generated notes, and opens the
    formula bump PR (url + sha256) on `shuuul/homebrew-tap` using the `HOMEBREW_TAP_TOKEN`
    secret.

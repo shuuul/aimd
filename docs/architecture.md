@@ -2,8 +2,8 @@
 
 ## Overview
 
-`aimd` is a Rust workspace at the repo root. It ships three binaries through Homebrew
-(`aimd`, `aimd-api`, `aimd-mcp`). The interface crates are thin. All routing and
+`aimd` is a Rust workspace at the repo root. It ships two binaries through Homebrew
+(`aimd`, `aimd-mcp`). The interface crates are thin. All routing and
 orchestration lives in `aimd-process`, which sits on interface-independent pipeline
 crates:
 
@@ -27,8 +27,8 @@ crates:
 - `aimd-mlx`: C-ABI shim over MLX C++ (Metal on macOS, the mlx CUDA backend on Linux; device selection via `AIMD_MLX_DEVICE`).
 - `aimd-weights`: safetensors mmap and the bit-exact MLX affine unpack used as a test
   oracle.
-- `aimd-cli`, `aimd-api`, `aimd-mcp`: the CLI (hand-written argument parser), the axum
-  HTTP API (jobs, SSE, blobs, sidecar auth), and the rmcp stdio MCP server.
+- `aimd-cli`, `aimd-mcp`: the CLI (hand-written argument parser) and the rmcp
+  stdio MCP server.
 
 ## Dependency Rules
 
@@ -41,13 +41,13 @@ crates:
   loading, PDF probing) goes through the `Runtime` trait. `NativeRuntime` is the real
   system, and tests substitute fakes.
 - Output destinations are interface concerns. `ProcessInput` does not carry
-  `output_file`; CLI/API/MCP persist requested outputs through `aimd_core::output`.
-- API/MCP request validation and response shaping live in the API/MCP crates.
+  `output_file`; CLI/MCP persist requested outputs through `aimd_core::output`.
+- MCP request validation and response shaping live in the MCP crate.
 
 ## Primary Flow
 
-1. CLI/API/MCP receives the request and builds a `ProcessInput`.
-2. The interface calls `aimd_process::process_input(&input, &hooks)` (the API and MCP run
+1. CLI/MCP receives the request and builds a `ProcessInput`.
+2. The interface calls `aimd_process::process_input(&input, &hooks)` (MCP runs
    it on a blocking worker).
 3. `ensure_supported_input` classifies the source into an `InputRoute { source_kind,
    task_type }`. For PDFs, the pdf-inspector probe sends scanned PDFs and PDFs with
@@ -65,10 +65,10 @@ crates:
 
 ```diagram
 ╭──────────────╮     ╭──────────────────────╮     ╭───────────────────────╮
-│ aimd-cli     │     │ aimd-process         │     │ aimd-url  (yt-dlp)    │
-│ aimd-api     │────▶│ process_input()      │────▶│ aimd-doc  (pandoc,    │
-│ aimd-mcp     │     │ route + dispatch     │     │   pdf-inspector)      │
-╰──────┬───────╯     ╰──────────┬───────────╯     │ asr / ocr / remote    │
+│ aimd-cli     │────▶│ aimd-process         │────▶│ aimd-url  (yt-dlp)    │
+│ aimd-mcp     │     │ process_input()      │────▶│ aimd-doc  (pandoc,    │
+╰──────┬───────╯     │ route + dispatch     │     │   pdf-inspector)      │
+       │             ╰──────────┬───────────╯     │ asr / ocr / remote    │
        │                        │                 ╰──────────┬────────────╯
        │                        ▼                            ▼
        │             ╭──────────────────────╮     ╭───────────────────────╮
@@ -117,14 +117,12 @@ Each checkpoint is loaded once per process and reused. Before loading, local inf
 checks that the MLX GPU device is active; on the CPU device it fails with
 `BackendUnavailable`.
 
-Remote settings flow through `ProcessInput`, so CLI, API, MCP, local-file work, and the
+Remote settings flow through `ProcessInput`, so CLI, MCP, local-file work, and the
 URL audio fallback share one selection path. Explicit request values override
 `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`. A configured remote URL bypasses the local MLX
 preflight. Without one, local inference is used.
 
 For performance expectations and benchmarks, see [Performance](performance.md).
-[Local desktop sidecar contract](sidecar.md) describes the authenticated loopback,
-path, job, and output-lifetime boundary that desktop clients use.
 
 ## Cancellation And Progress
 
@@ -132,9 +130,8 @@ Every pipeline receives `&dyn ProcessHooks`. Pipelines report progress stages
 (`extracting`, `downloading`, `transcribing`, `converting`, `recognizing`) with unit
 counts when known. They call `check_cancelled()` only at safe boundaries: between ASR
 segments, OCR pages, and EPUB chapters. Model calls and subprocesses are never
-interrupted. The API maps the hooks onto job records and stages. A cancellation that
-arrives during uninterruptible work ends as `completed_after_request` with the artifact
-kept.
+interrupted; a cancellation that arrives during uninterruptible work keeps the
+completed artifact instead of discarding it.
 
 ## Error Handling
 
@@ -147,14 +144,6 @@ failures at its boundary:
 - Unsupported inputs, options, or rejected cookie options -> `UnsupportedInput`
 - Conversion/transcription failures, unknown models -> `ProcessingFailed`
 - Cooperative cancellation -> `Cancelled`
-
-HTTP API status codes come from `ErrorKind::status_code`:
-
-- `UnsupportedInput` -> 400
-- `InputNotFound` -> 404
-- `Cancelled` -> 409
-- `BackendUnavailable` -> 422
-- `ProcessingFailed` -> 500
 
 The CLI logs the message to stderr and exits non-zero. MCP returns the message as a tool
 error.

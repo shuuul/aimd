@@ -5,8 +5,8 @@
 //! Ports `aimd.core.{models,errors,precision,remote}`, the Markdown
 //! title/chunk shaping of `aimd.core.process`, the extension tables of the
 //! ASR/OCR/doc plugins, and `aimd.interfaces.output`. Pipelines (`aimd-doc`,
-//! `aimd-url`, `aimd-process`) return [`AimdError`]; interfaces map
-//! [`ErrorKind::status_code`] onto HTTP/MCP/exit codes.
+//! `aimd-url`, `aimd-process`) return [`AimdError`]; interfaces map the
+//! [`ErrorKind`] onto user-facing messages and exit codes.
 
 pub mod error;
 pub mod ext;
