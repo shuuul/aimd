@@ -405,6 +405,11 @@ mod ffi {
         ) -> *mut AimdMlxArray;
         pub fn mlx_clip(a: *mut AimdMlxArray, lo: f32, hi: f32) -> *mut AimdMlxArray;
         pub fn mlx_gelu_tanh(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_rope_half_split(
+            x: *mut AimdMlxArray,
+            cos: *mut AimdMlxArray,
+            sin_signed: *mut AimdMlxArray,
+        ) -> *mut AimdMlxArray;
         pub fn mlx_quantize(
             w: *mut AimdMlxArray,
             group_size: i32,
@@ -985,6 +990,17 @@ impl MlxArray {
     pub fn gelu_tanh(&self) -> Result<Self, MlxError> {
         let ptr = unsafe { ffi::mlx_gelu_tanh(self.ptr.as_ptr()) };
         Self::from_handle(ptr, "mlx_gelu_tanh")
+    }
+
+    /// Half-split rotary `astype(self * cos + rotate_half(self) * sin)` in
+    /// one fused kernel (`rotate_half(x) = [-x2, x1]`). `cos` / `sin_signed`
+    /// broadcast against `self`, with equal halves: `[c, c]` and `[-s, s]`.
+    /// Matches the unfused slice / negate / concat graph value for value.
+    pub fn rope_half_split(&self, cos: &Self, sin_signed: &Self) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_rope_half_split(self.ptr.as_ptr(), cos.ptr.as_ptr(), sin_signed.ptr.as_ptr())
+        };
+        Self::from_handle(ptr, "mlx_rope_half_split")
     }
 
     /// Affine `quantize` along the last axis -> `(packed, scales, biases)`,

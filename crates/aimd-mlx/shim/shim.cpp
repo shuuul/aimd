@@ -1880,6 +1880,49 @@ AimdMlxArray* mlx_gelu_tanh(AimdMlxArray* x) {
   });
 }
 
+/// Half-split rotary `astype(x * cos + rotate_half(x) * sin, x.dtype)` with
+/// `rotate_half(x) = [-x2, x1]`, as one fused elementwise kernel. `cos` and
+/// `sin_signed` broadcast against `x` (last axis `D`); their halves must be
+/// equal (`[c, c]`, and `[-s, s]` for `sin_signed`). Then
+/// `rotate_half(x) * sin == x_rev * sin_signed` exactly, where `x_rev` is a
+/// strided view of `x` with the halves swapped, so no slice/negate/concat
+/// copies are needed and every product and sum keeps the unfused dtypes.
+AimdMlxArray* mlx_rope_half_split(
+    AimdMlxArray* x, AimdMlxArray* cos, AimdMlxArray* sin_signed) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({x, cos, sin_signed});
+    static const auto compiled = mlx::core::compile(
+        [](const std::vector<array>& in) -> std::vector<array> {
+          array sum = mlx::core::add(
+              mlx::core::multiply(in[0], in[2]),
+              mlx::core::multiply(in[1], in[3]));
+          return {mlx::core::astype(sum, in[0].dtype())};
+        },
+        true);
+    auto halves = [](const array& a) {
+      Shape s = a.shape();
+      const int d = s.back();
+      if (d % 2 != 0) {
+        throw std::invalid_argument("[aimd_mlx] rope_half_split: odd last axis");
+      }
+      s.back() = 2;
+      s.push_back(d / 2);
+      return mlx::core::reshape(a, s);
+    };
+    const array& xa = as_array(x);
+    array xr = halves(xa);
+    const int n = static_cast<int>(xr.ndim());
+    Shape start(n, 0), stop = xr.shape(), strides(n, 1);
+    start[n - 2] = 1;
+    stop[n - 2] = -3; // normalizes to -1: indices 1, 0
+    strides[n - 2] = -1;
+    array xf = mlx::core::slice(xr, start, stop, strides);
+    array out = compiled(
+        {xr, xf, halves(as_array(cos)), halves(as_array(sin_signed))})[0];
+    return wrap(mlx::core::reshape(out, xa.shape()));
+  });
+}
+
 /// Affine `quantize(w, group_size, bits)` -> packed weight, scales, biases
 /// (the `mlx.core.quantize` / `nn.quantize` layout).
 int32_t mlx_quantize(

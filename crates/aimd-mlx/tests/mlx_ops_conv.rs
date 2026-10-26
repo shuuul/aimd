@@ -164,3 +164,69 @@ fn quantize_round_trips_through_dequantize() {
         assert!(max_abs(&back, &w) <= step, "bits {bits}");
     }
 }
+
+fn lcg(n: usize, seed: u64) -> Vec<f32> {
+    let mut s = seed;
+    (0..n)
+        .map(|_| {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((s >> 40) as f32 / (1u64 << 24) as f32) * 8.0 - 4.0
+        })
+        .collect()
+}
+
+/// Unfused PaddleOCR-VL rotary: `astype(x * cos + [-x2, x1] * sin, bf16)`.
+fn rope_unfused(x: &MlxArray, cos: &MlxArray, sin: &MlxArray) -> MlxArray {
+    let s = x.shape().unwrap();
+    let (n, h) = (s.len(), s[s.len() - 1] / 2);
+    let mut lo = vec![0; n];
+    let mut mid = s.clone();
+    mid[n - 1] = h;
+    lo[n - 1] = h;
+    let ones = vec![1; n];
+    let x1 = x.slice(&vec![0; n], &mid, &ones).unwrap();
+    let x2 = x.slice(&lo, &s, &ones).unwrap();
+    let rot = MlxArray::concatenate(&[&x2.unary(UnaryOp::Negative).unwrap(), &x1], n - 1).unwrap();
+    x.multiply(cos)
+        .unwrap()
+        .add(&rot.multiply(sin).unwrap())
+        .unwrap()
+        .astype(aimd_mlx::MlxDtype::Bf16)
+        .unwrap()
+}
+
+#[test]
+fn rope_half_split_is_bit_identical_to_unfused_graph() {
+    // (x shape, table shape): decoder [1, H, L, 128] x [1, 1, L, 128];
+    // vision [1, N, H, 72] x [1, N, 1, 72].
+    for (xs, ts) in [
+        (vec![1, 16, 7, 128], vec![1, 1, 7, 128]),
+        (vec![1, 16, 1, 128], vec![1, 1, 1, 128]),
+        (vec![1, 37, 16, 72], vec![1, 37, 1, 72]),
+    ] {
+        let nx: usize = xs.iter().product();
+        let nt: usize = ts.iter().product();
+        let d = *ts.last().unwrap();
+        let x = f32_arr(&xs, &lcg(nx, 1))
+            .astype(aimd_mlx::MlxDtype::Bf16)
+            .unwrap();
+        let half = |v: Vec<f32>, sign: f32| -> Vec<f32> {
+            v.chunks(d)
+                .flat_map(|r| {
+                    let h = &r[..d / 2];
+                    h.iter().map(move |&a| sign * a).chain(h.iter().copied())
+                })
+                .collect()
+        };
+        let c = half(lcg(nt, 2), 1.0);
+        let s = half(lcg(nt, 3), 1.0);
+        let s_signed = half(lcg(nt, 3), -1.0);
+        let (cos, sin) = (f32_arr(&ts, &c), f32_arr(&ts, &s));
+        let want = rope_unfused(&x, &cos, &sin).to_bf16_bytes().unwrap();
+        let got = x.rope_half_split(&cos, &f32_arr(&ts, &s_signed)).unwrap();
+        assert_eq!(got.shape().unwrap(), xs);
+        assert!(got.to_bf16_bytes().unwrap() == want, "{xs:?} differs");
+    }
+}

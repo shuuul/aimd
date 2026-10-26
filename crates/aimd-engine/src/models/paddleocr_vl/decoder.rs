@@ -12,6 +12,11 @@
 //! bf16. (mlx-vlm's non-Metal fallback computes it in bf16 instead; this
 //! port always follows the Metal kernel.)
 //!
+//! The rotation runs as one fused kernel ([`MlxArray::rope_half_split`],
+//! value-identical to the unfused graph), and single-token steps slice
+//! their tables from one [`PaddleDecoder::rope_sequential`] table built per
+//! generation (positions are equal on all three axes there).
+//!
 //! Prefill chunks use mlx-vlm's boolean causal mask array
 //! (`create_causal_mask(N, offset)`: key `j` visible to query `i` iff
 //! `j <= offset + i`); single-token steps use no mask.
@@ -46,10 +51,23 @@ struct DecoderLayer {
     down: Lin,
 }
 
-/// Per-forward rotary tables: f32 `[1, 1, L, head_dim]`.
+/// Per-forward rotary tables: f32 `[1, 1, L, head_dim]`, `cos = [c, c]`
+/// and `sin_signed = [-s, s]` (the `rotate_half` sign folded in).
 pub struct Rope {
     cos: MlxArray,
-    sin: MlxArray,
+    sin_signed: MlxArray,
+}
+
+impl Rope {
+    /// Rows `i..i + 1` (one decode step) as views of a sequential table.
+    pub fn row(&self, i: usize) -> Result<Self, MlxError> {
+        let s = self.cos.shape()?;
+        let row = |t: &MlxArray| t.slice(&[0, 0, i, 0], &[1, 1, i + 1, s[3]], &[1, 1, 1, 1]);
+        Ok(Self {
+            cos: row(&self.cos)?,
+            sin_signed: row(&self.sin_signed)?,
+        })
+    }
 }
 
 /// ERNIE decoder + `lm_head`.
@@ -61,6 +79,9 @@ pub struct PaddleDecoder {
     layers: Vec<DecoderLayer>,
     norm: MlxArray,
     lm_head: Lin,
+    /// Single-token steps use [`MlxArray::sdpa_decode`] (custom Metal
+    /// kernel, bit-identical to mlx sdpa): GPU device only.
+    sdpa_decode: bool,
 }
 
 impl PaddleDecoder {
@@ -116,6 +137,7 @@ impl PaddleDecoder {
             layers,
             norm: ld.tensor("model.norm.weight", Some(&[d]))?,
             lm_head: ld.linear("lm_head", false, &[t.vocab_size, d])?,
+            sdpa_decode: aimd_mlx::metal_kernels_available().unwrap_or(false),
         })
     }
 
@@ -176,7 +198,7 @@ impl PaddleDecoder {
             .flat_map(|p| p.iter().map(|&v| v as f32))
             .collect();
         let freqs = MlxArray::from_f32(&[3, l, 1], &flat)?.multiply(&self.inv_freq)?;
-        let section = |a: MlxArray| -> Result<MlxArray, MlxError> {
+        let section = |a: MlxArray, negate_first: bool| -> Result<MlxArray, MlxError> {
             // `cos(emb) * 1.0` cast to bf16, then the chunked axis selector.
             let a = a.astype(MlxDtype::Bf16)?;
             let [s0, s1, _] = self.mrope_section;
@@ -186,13 +208,18 @@ impl PaddleDecoder {
                 .map(|&(axis, lo, hi)| a.slice(&[axis, 0, lo], &[axis + 1, l, hi], &[1, 1, 1]))
                 .collect::<Result<Vec<_>, _>>()?;
             let sel = MlxArray::concatenate(&parts.iter().collect::<Vec<_>>(), 2)?;
-            MlxArray::concatenate(&[&sel, &sel], 2)?
+            let first = if negate_first {
+                sel.unary(UnaryOp::Negative)?
+            } else {
+                sel.try_clone()?
+            };
+            MlxArray::concatenate(&[&first, &sel], 2)?
                 .astype(MlxDtype::F32)?
                 .reshape(&[1, 1, l, 2 * half])
         };
         Ok(Rope {
-            cos: section(freqs.unary(UnaryOp::Cos)?)?,
-            sin: section(freqs.unary(UnaryOp::Sin)?)?,
+            cos: section(freqs.unary(UnaryOp::Cos)?, false)?,
+            sin_signed: section(freqs.unary(UnaryOp::Sin)?, true)?,
         })
     }
 
@@ -202,15 +229,9 @@ impl PaddleDecoder {
         self.rope([&p, &p, &p])
     }
 
+    /// `x * cos + rotate_half(x) * sin` in f32, cast to bf16 (`x` is bf16).
     fn apply_rope(&self, x: &MlxArray, rope: &Rope) -> Result<MlxArray, MlxError> {
-        let s = x.shape()?;
-        let h = s[3] / 2;
-        let x1 = x.slice(&[0, 0, 0, 0], &[s[0], s[1], s[2], h], &[1, 1, 1, 1])?;
-        let x2 = x.slice(&[0, 0, 0, h], &[s[0], s[1], s[2], s[3]], &[1, 1, 1, 1])?;
-        let rot = MlxArray::concatenate(&[&x2.unary(UnaryOp::Negative)?, &x1], 3)?;
-        x.multiply(&rope.cos)?
-            .add(&rot.multiply(&rope.sin)?)?
-            .astype(MlxDtype::Bf16)
+        x.rope_half_split(&rope.cos, &rope.sin_signed)
     }
 
     /// Boolean causal mask `[L, offset + L]` (`create_causal_mask`).
@@ -272,6 +293,7 @@ impl PaddleDecoder {
             let k = self.apply_rope(&k, rope)?;
             let (k, v) = cache.update_and_fetch(&k, &v)?;
             let o = match &mask {
+                None if self.sdpa_decode => q.sdpa_decode(&k, &v, scale)?,
                 Some(m) => {
                     let kv_len = k.dim(2)?;
                     let m = m.slice(&[0, 0], &[l, kv_len], &[1, 1])?;

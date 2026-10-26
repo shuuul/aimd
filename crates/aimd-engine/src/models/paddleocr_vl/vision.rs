@@ -271,8 +271,9 @@ impl PaddleVision {
         Ok(out.reshape(&[gh * gw, d])?)
     }
 
-    /// Rotary `(cos, sin)` as f32 `[1, N, 1, head_dim]` (`rot_pos_emb` +
-    /// `apply_rotary_pos_emb_vision`'s tiling).
+    /// Rotary `(cos, sin_signed)` as f32 `[1, N, 1, head_dim]` (`rot_pos_emb`
+    /// plus `apply_rotary_pos_emb_vision`'s tiling); `sin_signed = [-s, s]`
+    /// folds in `rotate_half`'s sign for [`MlxArray::rope_half_split`].
     fn rotary(&self, gh: usize, gw: usize) -> Result<(MlxArray, MlxArray), MlxError> {
         let head_dim = self.cfg.hidden_size / self.cfg.num_attention_heads;
         let dim = head_dim / 2;
@@ -293,10 +294,11 @@ impl PaddleVision {
         let fh = freqs.take(&MlxArray::from_u32(&[n], &hid)?, 0)?;
         let fw = freqs.take(&MlxArray::from_u32(&[n], &wid)?, 0)?;
         let f = MlxArray::concatenate(&[&fh, &fw], 1)?;
-        let tile = |a: MlxArray| -> Result<MlxArray, MlxError> {
-            MlxArray::concatenate(&[&a, &a], 1)?.reshape(&[1, n, 1, 4 * half])
+        let tile = |first: &MlxArray, a: &MlxArray| -> Result<MlxArray, MlxError> {
+            MlxArray::concatenate(&[first, a], 1)?.reshape(&[1, n, 1, 4 * half])
         };
-        Ok((tile(f.unary(UnaryOp::Cos)?)?, tile(f.unary(UnaryOp::Sin)?)?))
+        let (c, s) = (f.unary(UnaryOp::Cos)?, f.unary(UnaryOp::Sin)?);
+        Ok((tile(&c, &c)?, tile(&s.unary(UnaryOp::Negative)?, &s)?))
     }
 
     fn attention(
@@ -304,7 +306,7 @@ impl PaddleVision {
         l: &VisionLayer,
         x: &MlxArray,
         cos: &MlxArray,
-        sin: &MlxArray,
+        sin_signed: &MlxArray,
     ) -> Result<MlxArray, MlxError> {
         let n = x.dim(0)?;
         let heads = self.cfg.num_attention_heads;
@@ -318,15 +320,8 @@ impl PaddleVision {
             )?
             .reshape(&[1, n, heads, hd])
         };
-        let rope = |t: MlxArray| -> Result<MlxArray, MlxError> {
-            let h = hd / 2;
-            let x1 = t.slice(&[0, 0, 0, 0], &[1, n, heads, h], &[1, 1, 1, 1])?;
-            let x2 = t.slice(&[0, 0, 0, h], &[1, n, heads, hd], &[1, 1, 1, 1])?;
-            let rot = MlxArray::concatenate(&[&x2.unary(UnaryOp::Negative)?, &x1], 3)?;
-            t.multiply(cos)?
-                .add(&rot.multiply(sin)?)?
-                .astype(MlxDtype::Bf16)
-        };
+        // `x * cos + rotate_half(x) * sin` in f32, cast to bf16, fused.
+        let rope = |t: MlxArray| t.rope_half_split(cos, sin_signed);
         let q = rope(part(0)?)?.transpose(&[0, 2, 1, 3])?;
         let k = rope(part(1)?)?.transpose(&[0, 2, 1, 3])?;
         let v = part(2)?.transpose(&[0, 2, 1, 3])?;
@@ -343,14 +338,14 @@ impl PaddleVision {
         l: &VisionLayer,
         x: &MlxArray,
         cos: &MlxArray,
-        sin: &MlxArray,
+        sin_signed: &MlxArray,
     ) -> Result<MlxArray, MlxError> {
         let eps = self.cfg.layer_norm_eps;
         let h = x.add(&self.attention(
             l,
             &x.layer_norm(Some(&l.ln1_w), Some(&l.ln1_b), eps)?,
             cos,
-            sin,
+            sin_signed,
         )?)?;
         let m = l.fc2.forward(
             &l.fc1
@@ -407,9 +402,9 @@ impl PaddleVision {
         tap("patch_embed", &patch)?;
         let mut x = patch.add(&self.position_embedding(gh, gw)?)?;
         tap("embeddings", &x)?;
-        let (cos, sin) = self.rotary(gh, gw)?;
+        let (cos, sin_signed) = self.rotary(gh, gw)?;
         for (i, l) in self.layers.iter().enumerate() {
-            x = self.layer(l, &x, &cos, &sin)?;
+            x = self.layer(l, &x, &cos, &sin_signed)?;
             tap(&format!("layer_{i}"), &x)?;
         }
         let x = x.layer_norm(

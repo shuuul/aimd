@@ -113,11 +113,13 @@ pub fn greedy_stream(
         aimd_mlx::clear_cache()?;
     }
 
+    // Step `k` (0 = the last prompt token) sits at `p - 1 + k + delta` on
+    // all three axes: one table for the whole generation, sliced per step.
+    let table = decoder.rope_sequential((p - 1) as i64 + rope.delta, max_tokens.max(1))?;
     let step = |emb: &MlxArray,
                 caches: &mut [crate::models::kv_cache::KvCache]|
      -> Result<MlxArray, GenerateError> {
-        let pos = caches[0].offset() as i64 + rope.delta;
-        let r = decoder.rope_sequential(pos, 1)?;
+        let r = table.row(caches[0].offset() + 1 - p)?;
         let h = decoder.forward(emb, &r, caches)?;
         Ok(decoder.logits(&h)?.reshape(&[1, vocab])?)
     };
