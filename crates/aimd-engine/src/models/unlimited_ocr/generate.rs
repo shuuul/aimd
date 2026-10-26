@@ -412,12 +412,16 @@ pub fn greedy_ocr_token_stream(
     let mut prefill = None;
     if settings.max_new_tokens > 0 {
         loop {
-            // Enqueue the next forward before reading `y` back (mlx-vlm
-            // builds `_step(y[None])` first); dropped unevaluated on stop.
+            // Submit the next forward before reading `y` back (mlx-vlm
+            // `generate_step`), so the GPU runs it while the host reads the
+            // token; dropped on stop. Sampling waits for the token: the
+            // n-gram guard needs it on the host.
             let next_logits = if tokens.len() + 1 < settings.max_new_tokens {
                 let emb = decoder.embed_ids(&y.reshape(&[1, 1])?)?;
                 let h = decoder.forward(&emb, &mut caches)?;
-                Some(decoder.logits(&h)?.reshape(&[1, vocab])?)
+                let logits = decoder.logits(&h)?.reshape(&[1, vocab])?;
+                MlxArray::async_eval(&[&logits])?;
+                Some(logits)
             } else {
                 None
             };

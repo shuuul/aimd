@@ -134,9 +134,16 @@ pub fn greedy_stream(
     let mut prefill = None;
     if max_tokens > 0 {
         loop {
-            let next_logits = if tokens.len() + 1 < max_tokens {
+            // mlx-lm `generate_step`: submit step k+1 (it depends on `y`
+            // lazily) before reading token k, so the GPU never waits on the
+            // host's graph encode.
+            let next = if tokens.len() + 1 < max_tokens {
                 let emb = decoder.embed_ids(&y.reshape(&[1, 1])?)?;
-                Some(step(&emb, &mut caches)?)
+                let logits = step(&emb, &mut caches)?;
+                let mut logprobs = capture.is_some().then(Vec::new);
+                let next_y = sample(&logits, logprobs.as_mut())?;
+                MlxArray::async_eval(&[&next_y])?;
+                Some((next_y, logprobs))
             } else {
                 None
             };
@@ -149,11 +156,13 @@ pub fn greedy_stream(
                 break;
             }
             tokens.push(tok);
-            let Some(logits) = next_logits else {
+            let Some((next_y, logprobs)) = next else {
                 break;
             };
-            y = sample(&logits, capture.as_deref_mut())?;
-            MlxArray::async_eval(&[&y])?;
+            if let (Some(c), Some(l)) = (capture.as_deref_mut(), logprobs) {
+                c.extend(l);
+            }
+            y = next_y;
             if tokens.len().is_multiple_of(256) {
                 aimd_mlx::clear_cache()?;
             }

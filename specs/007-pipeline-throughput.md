@@ -93,13 +93,14 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | Decode loops submit step k+1 before reading token k (Qwen3-ASR, PaddleOCR-VL, Unlimited-OCR with its n-gram guard) | coordinator | Claimed | None | bench tok/s; goldens; corpus gate identical |
+| WS-01 | Decode loops submit step k+1 before reading token k (Qwen3-ASR, PaddleOCR-VL, Unlimited-OCR with its n-gram guard) | coordinator | Done | None | bench tok/s; goldens; corpus gate identical |
 | WS-02 | PDF pages rendered in the background and fed to OCR as they finish; PNM instead of PNG | coordinator | Pending | None | multi-page PDF wall time; corpus gate identical; cancellation tests |
 | WS-03 | PP-OCRv6: async rec batches, threaded crop/warp/resize/normalize | coordinator | Pending | None | `ppocrv6` example; checkpoint test; corpus gate identical |
 | WS-04 | Pillow bicubic resize threaded; Unlimited-OCR's two resizes concurrent; PaddleOCR-VL spotting decodes the image once | coordinator | Pending | None | preprocess goldens; OCR page latency |
 | WS-05 | ASR: device-side feature merge, single WAV load per segment, streamed ffmpeg segmentation with next-segment prep overlapping decode | coordinator | Pending | WS-01 | long-audio wall time; corpus gate ASR identical; aligner parity |
 | WS-06 | Aligner `lm_head` at slots only (if argmax identical); PaddleOCR-VL batched quantize at load | coordinator | Pending | None | aligner parity; load time |
-| WS-07 | New findings discovered during WS-01..06 (one row each when found) | coordinator | Pending | None | per finding |
+| WS-07 | New findings discovered during WS-01..06 (one row each when found) | coordinator | In progress | None | per finding |
+| WS-07a | Metal command buffers capped at 30 MB (shim default) so early-submitted MoE steps keep KV-cache donation | coordinator | Done | WS-01 | Unlimited-OCR tok/s; all-model A/B; goldens |
 | WS-08 | Batched decoding across pages/segments: prototype, measure, decide | coordinator | Pending | WS-01..05 | corpus gate thresholds; speedup |
 | WS-09 | `docs/performance.md`, AGENTS.md, final gates, closeout | coordinator | Pending | WS-01..08 | `cargo xtask check-specs`; commit gates |
 
@@ -138,6 +139,42 @@ Append entries rather than rewriting another worker's record.
 - Remaining: WS-01..09.
 - Blockers: none.
 - Next action: WS-01 baselines and the decode-loop change.
+
+### 2026-10-26 — coordinator — WS-01
+
+- Changed: Qwen3-ASR, PaddleOCR-VL and Unlimited-OCR decode loops
+  `async_eval` step k+1 before reading token k. Unlimited-OCR submits only
+  the forward early, because its n-gram guard needs token k on the host
+  before sampling. The shim sets `MLX_MAX_MB_PER_BUFFER=30` on Apple unless
+  the user set it.
+- Finding (WS-07 row): early submit alone made Unlimited-OCR slower
+  (241 -> 223 tok/s). In that mode `async_eval` blocked about 3.1 ms per
+  step in mlx's in-flight throttle (`wait_for_one`), and `slice_update` took
+  the full `copy_gpu` path (host samples: 17 vs 1).
+  - mlx commits a Metal command buffer once its inputs pass the MB cap. On
+    M2 Pro that cap is 50 MB, and the MoE `gather_qmm` expert weights exceed
+    it, so each step is a few large buffers.
+  - A buffer keeps its inputs alive until it completes, so the previous
+    step's KV arrays cannot be donated and every layer copies its cache.
+  - Early-submit tok/s by MB cap: 30: 272-276, 40: 254, 50: 223,
+    unlimited: 214. Old loop: about 241 at every cap. The op-count cap
+    (`MLX_MAX_OPS_PER_BUFFER`) had no effect.
+  - The dense models fill buffers by op count, so they never hit this. They
+    gain at every cap and are neutral to 30 MB.
+- Evidence (M2 Pro, `article-p1.png`, interleaved A/B vs b2cf0b1, 3 rounds):
+  - Unlimited-OCR decode: 227-239 -> 263-276 tok/s. Vision and prefill
+    unchanged.
+  - PaddleOCR-VL 4-bit: 264-310 -> 324-334 tok/s.
+  - PaddleOCR-VL bf16: 143-154 -> 157-160 tok/s.
+  - Qwen3-ASR `en_60s.wav`: 2.35-2.49 -> 2.29-2.37 s.
+  - PP-OCRv6 (cap only): latency neutral, text byte-identical.
+  - Bit-identity: `cargo test --release -p aimd-engine --lib` (119) and
+    `aimd-mlx` pass on Metal. `corpus_gate` identical to baseline for ASR
+    (72/72), Unlimited-OCR, PaddleOCR-VL bf16 and 4-bit, and PP-OCRv6 (5/5
+    each). `aligner_parity` PASS, gated MAE 0.17 ms.
+- Remaining: WS-02..09.
+- Blockers: none.
+- Next action: WS-02 PDF render pipelining.
 
 ## Completion summary
 

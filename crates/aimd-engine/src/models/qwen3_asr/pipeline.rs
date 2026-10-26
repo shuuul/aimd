@@ -989,9 +989,10 @@ impl Qwen3AsrPipeline {
         MlxArray::async_eval(&[&y])?;
 
         // Decode steps, pipelined like mlx-lm `generate_step`: the next step
-        // is queued from the device-resident pick `y` before `y` is read
-        // back, so the GPU never idles on the host EOS check. Positions
-        // continue sequentially; a step queued behind EOS is discarded.
+        // is built from the device-resident pick `y` and submitted
+        // (`async_eval`) before `y` is read back, so the GPU never idles on
+        // the host's graph encode or EOS check. Positions continue
+        // sequentially; a step queued behind EOS is discarded.
         let mut tokens = Vec::with_capacity(settings.max_new_tokens.min(1024));
         let mut finish_reason = FinishReason::MaxNewTokens;
         loop {
@@ -999,7 +1000,9 @@ impl Qwen3AsrPipeline {
                 let emb = self.decoder.embed_indices(&y)?;
                 let position = (prompt_len + tokens.len()) as u32;
                 let step_hidden = self.decoder.step(&emb, position, &mut cache)?;
-                Some(self.decoder.argmax(&step_hidden.reshape(&[1, hidden])?)?)
+                let next = self.decoder.argmax(&step_hidden.reshape(&[1, hidden])?)?;
+                MlxArray::async_eval(&[&next])?;
+                Some(next)
             } else {
                 None
             };
@@ -1013,7 +1016,6 @@ impl Qwen3AsrPipeline {
             let Some(next) = next else { break };
             tokens.push(tok);
             y = next;
-            MlxArray::async_eval(&[&y])?;
             if tokens.len().is_multiple_of(256) {
                 aimd_mlx::clear_cache()?;
             }

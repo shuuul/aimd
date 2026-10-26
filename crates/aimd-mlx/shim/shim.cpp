@@ -135,6 +135,19 @@ void clear_last_error() {
 const mlx::core::Device& selected_device() {
   static std::once_flag once;
   std::call_once(once, [] {
+#if defined(__APPLE__)
+    // mlx commits a Metal command buffer once its ops' inputs pass
+    // MLX_MAX_MB_PER_BUFFER (default 40-50 MB). A buffer holds its inputs
+    // until it completes, and a held KV cache cannot be donated, so
+    // `slice_update` copies the whole cache. Unlimited-OCR's MoE expert
+    // weights fill a buffer per op: with the next decode step submitted
+    // early, the previous step's buffers are still running and every layer
+    // copies its cache (223 vs 241 tok/s). At 30 MB, mlx's in-flight cap
+    // keeps the host far enough behind that the cache is free again
+    // (272 tok/s). The value only changes buffer boundaries, not the
+    // results. A user-set value wins. Must precede the Metal device.
+    setenv("MLX_MAX_MB_PER_BUFFER", "30", 0);
+#endif
 #if defined(__linux__)
     auto has_include = [](const char* root) {
       return std::filesystem::exists(std::filesystem::path(root) / "include" / "cuda.h");
