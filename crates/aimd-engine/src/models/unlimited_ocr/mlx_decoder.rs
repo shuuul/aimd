@@ -19,21 +19,21 @@
 //!   top-6 via `argpartition` + `take_along_axis` (routed scaling 1.0),
 //!   `SwitchGLU` over 4-bit experts through `gather_qmm` (sorted path when
 //!   `indices.size >= 64`), weighted sum over the selected experts, plus
-//!   the 2-expert shared MLP (intermediate 1792).
+//!   the 2-expert shared MLP (intermediate 1792). Single-token steps on the
+//!   GPU run the router (`MlxArray::moe_router`) and the routed experts
+//!   (`MlxArray::moe_swiglu_4bit`) as custom kernels, bit-identical to that
+//!   graph.
 //! - Final RMSNorm and the untied 4-bit `lm_head`.
 //! - Embeddings are `nn.QuantizedEmbedding` (row gather + dequantize).
 //!
-//! The caches are line-by-line ports: [`KvCache::update_and_fetch`] grows
-//! by `ceil(seq / 256) * 256` zero rows (trimming to `offset` first when
-//! `offset % 256 != 0`) and slice-assigns `[prev, offset)`; the ring mode
-//! fixes `prefill_length` at the first single-token update, appends until
-//! `prefill_length + window` rows, then overwrites ring slots while the
-//! absolute RoPE offset keeps increasing.
+//! The caches live in [`crate::models::kv_cache`].
 
 use std::path::Path;
 
 use aimd_mlx::{MlxArray, MlxError, SdpaMask};
 use aimd_weights::{WeightStore, WeightsError, load_checkpoint};
+
+use crate::models::kv_cache::KvCache;
 
 use super::config::{LanguageConfig, UnlimitedOcrConfig, parse_config};
 use super::mlx_weights::{LoadError, QWeights, dense};
@@ -55,164 +55,6 @@ pub enum DecoderError {
     Layout(String),
 }
 
-/// `KVCache.step`.
-const KV_STEP: usize = 256;
-
-/// One layer's KV cache: `KVCache`, or `RingSlidingKVCache(window)` when
-/// `window` is set.
-pub(crate) struct KvCache {
-    keys: Option<MlxArray>,
-    values: Option<MlxArray>,
-    offset: usize,
-    window: Option<usize>,
-    prefill_length: Option<usize>,
-    ring_pos: usize,
-}
-
-impl KvCache {
-    pub(crate) fn new(window: Option<usize>) -> Self {
-        Self {
-            keys: None,
-            values: None,
-            offset: 0,
-            window,
-            prefill_length: None,
-            ring_pos: 0,
-        }
-    }
-
-    pub(crate) fn offset(&self) -> usize {
-        self.offset
-    }
-
-    #[cfg(test)]
-    pub(crate) fn prefill_length(&self) -> Option<usize> {
-        self.prefill_length
-    }
-
-    /// Backing key buffer (all allocated rows), for golden checks.
-    #[cfg(test)]
-    pub(crate) fn keys_buffer(&self) -> Option<&MlxArray> {
-        self.keys.as_ref()
-    }
-
-    /// `KVCache.update_and_fetch`.
-    fn base_update(
-        &mut self,
-        k: &MlxArray,
-        v: &MlxArray,
-    ) -> Result<(MlxArray, MlxArray), MlxError> {
-        let ks = k.shape()?;
-        let vs = v.shape()?;
-        let (b, h, seq, kd) = (ks[0], ks[1], ks[2], ks[3]);
-        let vd = vs[3];
-        let prev = self.offset;
-        let capacity = match &self.keys {
-            Some(keys) => keys.shape()?[2],
-            None => 0,
-        };
-        if self.keys.is_none() || prev + seq > capacity {
-            let n_steps = (KV_STEP + seq - 1) / KV_STEP;
-            let dtype = k.dtype()?;
-            let new_k = MlxArray::zeros(&[b, h, n_steps * KV_STEP, kd], dtype)?;
-            let new_v = MlxArray::zeros(&[b, h, n_steps * KV_STEP, vd], v.dtype()?)?;
-            match (self.keys.take(), self.values.take()) {
-                (Some(mut keys), Some(mut values)) => {
-                    if !prev.is_multiple_of(KV_STEP) {
-                        keys = keys.slice(&[0, 0, 0, 0], &[b, h, prev, kd], &[1, 1, 1, 1])?;
-                        values = values.slice(&[0, 0, 0, 0], &[b, h, prev, vd], &[1, 1, 1, 1])?;
-                    }
-                    self.keys = Some(MlxArray::concatenate(&[&keys, &new_k], 2)?);
-                    self.values = Some(MlxArray::concatenate(&[&values, &new_v], 2)?);
-                }
-                _ => {
-                    self.keys = Some(new_k);
-                    self.values = Some(new_v);
-                }
-            }
-        }
-        self.offset += seq;
-        let end = self.offset;
-        let keys = self.keys.take().expect("allocated");
-        let values = self.values.take().expect("allocated");
-        let keys = keys.slice_update(k, &[0, 0, prev, 0], &[b, h, end, kd], &[1, 1, 1, 1])?;
-        let values = values.slice_update(v, &[0, 0, prev, 0], &[b, h, end, vd], &[1, 1, 1, 1])?;
-        let out_k = keys.slice(&[0, 0, 0, 0], &[b, h, end, kd], &[1, 1, 1, 1])?;
-        let out_v = values.slice(&[0, 0, 0, 0], &[b, h, end, vd], &[1, 1, 1, 1])?;
-        self.keys = Some(keys);
-        self.values = Some(values);
-        Ok((out_k, out_v))
-    }
-
-    /// `update_and_fetch` (dispatching on the ring mode).
-    pub(crate) fn update_and_fetch(
-        &mut self,
-        k: &MlxArray,
-        v: &MlxArray,
-    ) -> Result<(MlxArray, MlxArray), MlxError> {
-        let Some(window) = self.window else {
-            return self.base_update(k, v);
-        };
-        let ks = k.shape()?;
-        let (b, h, seq, kd) = (ks[0], ks[1], ks[2], ks[3]);
-        let vd = v.shape()?[3];
-        let prefill = match self.prefill_length {
-            Some(p) => p,
-            None => {
-                if seq > 1 {
-                    return self.base_update(k, v);
-                }
-                self.prefill_length = Some(self.offset);
-                self.offset
-            }
-        };
-        if self.keys.is_none() || self.offset < prefill + window {
-            let out = self.base_update(k, v)?;
-            if self.offset >= prefill + window {
-                self.ring_pos = 0;
-            }
-            return Ok(out);
-        }
-        let mut keys = self.keys.take().expect("allocated");
-        let mut values = self.values.take().expect("allocated");
-        for idx in 0..seq {
-            let slot = prefill + self.ring_pos;
-            let kr = k.slice(&[0, 0, idx, 0], &[b, h, idx + 1, kd], &[1, 1, 1, 1])?;
-            let vr = v.slice(&[0, 0, idx, 0], &[b, h, idx + 1, vd], &[1, 1, 1, 1])?;
-            keys =
-                keys.slice_update(&kr, &[0, 0, slot, 0], &[b, h, slot + 1, kd], &[1, 1, 1, 1])?;
-            values =
-                values.slice_update(&vr, &[0, 0, slot, 0], &[b, h, slot + 1, vd], &[1, 1, 1, 1])?;
-            self.ring_pos = (self.ring_pos + 1) % window;
-        }
-        self.offset += seq;
-        let end = prefill + window;
-        let out_k = keys.slice(&[0, 0, 0, 0], &[b, h, end, kd], &[1, 1, 1, 1])?;
-        let out_v = values.slice(&[0, 0, 0, 0], &[b, h, end, vd], &[1, 1, 1, 1])?;
-        self.keys = Some(keys);
-        self.values = Some(values);
-        Ok((out_k, out_v))
-    }
-
-    /// `cache.state` arrays (what mlx_vlm evaluates after each prefill
-    /// chunk).
-    pub(crate) fn state(&self) -> Result<Vec<MlxArray>, MlxError> {
-        let (Some(k), Some(v)) = (&self.keys, &self.values) else {
-            return Ok(Vec::new());
-        };
-        let ks = k.shape()?;
-        let vd = v.shape()?[3];
-        let end = match (self.window, self.prefill_length) {
-            (Some(w), Some(p)) => self.offset.min(p + w),
-            _ => self.offset,
-        };
-        Ok(vec![
-            k.slice(&[0, 0, 0, 0], &[ks[0], ks[1], end, ks[3]], &[1, 1, 1, 1])?,
-            v.slice(&[0, 0, 0, 0], &[ks[0], ks[1], end, vd], &[1, 1, 1, 1])?,
-        ])
-    }
-}
-
 struct Attention {
     q: QWeights,
     k: QWeights,
@@ -222,6 +64,8 @@ struct Attention {
     kv_heads: usize,
     head_dim: usize,
     rope_base: f64,
+    /// Single-token steps use [`MlxArray::sdpa_decode`] (GPU device only).
+    sdpa_decode: bool,
 }
 
 impl Attention {
@@ -254,8 +98,12 @@ impl Attention {
             SdpaMask::None
         };
         let scale = (hd as f32).powf(-0.5);
-        let o = q
-            .scaled_dot_product_attention(&keys, &values, scale, mask)?
+        let o = if self.sdpa_decode && l == 1 {
+            q.sdpa_decode(&keys, &values, scale)?
+        } else {
+            q.scaled_dot_product_attention(&keys, &values, scale, mask)?
+        };
+        let o = o
             .transpose(&[0, 2, 1, 3])?
             .reshape(&[b, l, self.heads * hd])?;
         self.o.linear(&o)
@@ -267,26 +115,96 @@ struct DenseMlp {
     gate: QWeights,
     up: QWeights,
     down: QWeights,
+    /// Single-token GPU steps run the MLP as one expert of
+    /// [`MlxArray::moe_swiglu_4bit`]: `[1, out, in/..]` views of the
+    /// gate/up/down weights, `inds = [0]` and `scores = [1]`.
+    one: Option<OneExpert>,
+}
+
+struct OneExpert {
+    w: [MlxArray; 9],
+    inds: MlxArray,
+    scores: MlxArray,
 }
 
 impl DenseMlp {
-    fn load(store: &WeightStore, p: &str, gs: u32, bits: u32) -> Result<Self, LoadError> {
+    fn load(
+        store: &WeightStore,
+        p: &str,
+        gs: u32,
+        bits: u32,
+        fused: bool,
+    ) -> Result<Self, LoadError> {
+        let gate = QWeights::load(store, &format!("{p}.gate_proj"), gs, bits)?;
+        let up = QWeights::load(store, &format!("{p}.up_proj"), gs, bits)?;
+        let down = QWeights::load(store, &format!("{p}.down_proj"), gs, bits)?;
+        let one = if fused {
+            let view = |a: &MlxArray| -> Result<MlxArray, MlxError> {
+                let s = a.shape()?;
+                a.reshape(&[1, s[0], s[1]])
+            };
+            let [g, u, d] = [&gate, &up, &down].map(QWeights::packed);
+            Some(OneExpert {
+                w: [
+                    view(g[0])?,
+                    view(g[1])?,
+                    view(g[2])?,
+                    view(u[0])?,
+                    view(u[1])?,
+                    view(u[2])?,
+                    view(d[0])?,
+                    view(d[1])?,
+                    view(d[2])?,
+                ],
+                inds: MlxArray::from_u32(&[1], &[0])?,
+                scores: MlxArray::scalar_f32(1.0)?
+                    .reshape(&[1])?
+                    .astype(gate.scales.dtype()?)?,
+            })
+        } else {
+            None
+        };
         Ok(Self {
-            gate: QWeights::load(store, &format!("{p}.gate_proj"), gs, bits)?,
-            up: QWeights::load(store, &format!("{p}.up_proj"), gs, bits)?,
-            down: QWeights::load(store, &format!("{p}.down_proj"), gs, bits)?,
+            gate,
+            up,
+            down,
+            one,
         })
     }
 
-    fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+    /// `down(swiglu(gate(x), up(x)))`, then each of `add` in order.
+    fn forward(&self, x: &MlxArray, add: &[&MlxArray]) -> Result<MlxArray, MlxError> {
+        if let Some(one) = &self.one {
+            let s = x.shape()?;
+            if s[0] * s[1] == 1 {
+                let w = &one.w;
+                return x
+                    .reshape(&[s[2]])?
+                    .moe_swiglu_4bit(
+                        &one.inds,
+                        &one.scores,
+                        [&w[0], &w[1], &w[2]],
+                        [&w[3], &w[4], &w[5]],
+                        [&w[6], &w[7], &w[8]],
+                        self.gate.group_size,
+                        add,
+                    )?
+                    .reshape(&s);
+            }
+        }
         let g = self.gate.linear(x)?;
         let u = self.up.linear(x)?;
-        self.down.linear(&g.silu()?.multiply(&u)?)
+        let mut y = self.down.linear(&g.swiglu(&u)?)?;
+        for a in add {
+            y = y.add(a)?;
+        }
+        Ok(y)
     }
 }
 
 struct Moe {
-    /// `gate.weight.T` (bf16 `[hidden, n_experts]` view).
+    /// `gate.weight` (bf16 `[n_experts, hidden]`) and its `.T` view.
+    gate_w: MlxArray,
     gate_wt: MlxArray,
     n_experts: usize,
     top_k: usize,
@@ -294,6 +212,11 @@ struct Moe {
     sw_up: QWeights,
     sw_down: QWeights,
     shared: DenseMlp,
+    /// Single-token steps use the fused router and expert kernels
+    /// ([`MlxArray::moe_router`], [`MlxArray::moe_swiglu_4bit`]),
+    /// bit-identical to `route` + `switch_glu`: 4-bit experts on the GPU
+    /// device only.
+    fused: bool,
 }
 
 impl Moe {
@@ -323,8 +246,7 @@ impl Moe {
         let act = |xin: &MlxArray, idx: &MlxArray, sorted: bool| -> Result<MlxArray, MlxError> {
             let up = self.sw_up.gather(xin, idx, sorted)?;
             let gate = self.sw_gate.gather(xin, idx, sorted)?;
-            self.sw_down
-                .gather(&gate.silu()?.multiply(&up)?, idx, sorted)
+            self.sw_down.gather(&gate.swiglu(&up)?, idx, sorted)
         };
         let y = if n >= 64 {
             // _gather_sort / _scatter_unsort.
@@ -343,20 +265,37 @@ impl Moe {
         y.reshape(&[b, l, k, d])
     }
 
-    fn forward(&self, x: &MlxArray) -> Result<MlxArray, MlxError> {
+    /// MoE output plus the shared experts, then `residual`.
+    fn forward(&self, x: &MlxArray, residual: &MlxArray) -> Result<MlxArray, MlxError> {
         let s = x.shape()?;
-        let (b, l) = (s[0], s[1]);
+        let (b, l, d) = (s[0], s[1], s[2]);
+        let shared = self.shared.forward(x, &[])?;
+        if self.fused && b * l == 1 {
+            let x1 = x.reshape(&[d])?;
+            let (inds, scores) = x1.moe_router(&self.gate_w, self.top_k as i32)?;
+            return x1
+                .moe_swiglu_4bit(
+                    &inds,
+                    &scores,
+                    self.sw_gate.packed(),
+                    self.sw_up.packed(),
+                    self.sw_down.packed(),
+                    self.sw_gate.group_size,
+                    &[&shared, residual],
+                )?
+                .reshape(&[b, l, d]);
+        }
         let (inds, scores) = self.route(x)?;
         let y = self.switch_glu(x, &inds)?;
         let y = y
             .multiply(&scores.reshape(&[b, l, self.top_k, 1])?)?
             .sum_axis(-2, false)?;
-        y.add(&self.shared.forward(x)?)
+        y.add(&shared)?.add(residual)
     }
 }
 
 enum Mlp {
-    Dense(DenseMlp),
+    Dense(Box<DenseMlp>),
     Moe(Box<Moe>),
 }
 
@@ -418,6 +357,9 @@ impl OcrDecoder {
             ));
         }
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
+        // Custom Metal kernels need the GPU; the CPU device keeps mlx ops.
+        let gpu = !aimd_mlx::device_is_cpu().unwrap_or(true);
+        let fused_moe = bits == 4 && gpu;
         let p = "language_model.model";
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for i in 0..cfg.num_hidden_layers {
@@ -431,6 +373,7 @@ impl OcrDecoder {
                 kv_heads: cfg.num_key_value_heads,
                 head_dim,
                 rope_base: cfg.rope_theta,
+                sdpa_decode: gpu,
             };
             let mlp = if i >= cfg.first_k_dense_replace && cfg.n_routed_experts > 0 {
                 let gate_w = dense(
@@ -440,6 +383,7 @@ impl OcrDecoder {
                 )?;
                 Mlp::Moe(Box::new(Moe {
                     gate_wt: gate_w.transpose(&[1, 0])?,
+                    gate_w,
                     n_experts: cfg.n_routed_experts,
                     top_k: cfg.num_experts_per_tok,
                     sw_gate: QWeights::load(
@@ -455,10 +399,23 @@ impl OcrDecoder {
                         gs,
                         bits,
                     )?,
-                    shared: DenseMlp::load(store, &format!("{l}.mlp.shared_experts"), gs, bits)?,
+                    shared: DenseMlp::load(
+                        store,
+                        &format!("{l}.mlp.shared_experts"),
+                        gs,
+                        bits,
+                        fused_moe,
+                    )?,
+                    fused: fused_moe,
                 }))
             } else {
-                Mlp::Dense(DenseMlp::load(store, &format!("{l}.mlp"), gs, bits)?)
+                Mlp::Dense(Box::new(DenseMlp::load(
+                    store,
+                    &format!("{l}.mlp"),
+                    gs,
+                    bits,
+                    fused_moe,
+                )?))
             };
             layers.push(Layer {
                 input_ln: dense(
@@ -536,11 +493,10 @@ impl OcrDecoder {
                 .forward(&h.rms_norm(Some(&layer.input_ln), self.eps)?, cache)?;
             let hh = h.add(&r)?;
             let xn = hh.rms_norm(Some(&layer.post_ln), self.eps)?;
-            let r = match &layer.mlp {
-                Mlp::Dense(m) => m.forward(&xn)?,
-                Mlp::Moe(m) => m.forward(&xn)?,
+            h = match &layer.mlp {
+                Mlp::Dense(m) => m.forward(&xn, &[&hh])?,
+                Mlp::Moe(m) => m.forward(&xn, &hh)?,
             };
-            h = hh.add(&r)?;
         }
         h.rms_norm(Some(&self.norm), self.eps)
     }
@@ -589,56 +545,6 @@ mod tests {
             }
         }
         best as u32
-    }
-
-    /// Ring/plain cache bookkeeping on tiny arrays vs the Python
-    /// `RingSlidingKVCache` trace (no checkpoint).
-    #[test]
-    fn decoder_ring_cache_semantics() {
-        let row = |v: f32, n: usize| {
-            MlxArray::from_f32(&[1, 1, n, 2], &vec![v; n * 2])
-                .unwrap()
-                .astype(aimd_mlx::MlxDtype::Bf16)
-                .unwrap()
-        };
-        let col0 = |a: &MlxArray| -> Vec<f32> {
-            let v = a
-                .astype(aimd_mlx::MlxDtype::F32)
-                .unwrap()
-                .to_f32_vec()
-                .unwrap();
-            v.chunks(2).map(|c| c[0]).collect()
-        };
-        let mut c = KvCache::new(Some(2));
-        // Multi-row prefill: plain append, prefill_length unset.
-        let (k, _) = c.update_and_fetch(&row(1.0, 3), &row(1.0, 3)).unwrap();
-        assert_eq!((c.offset(), c.prefill_length()), (3, None));
-        assert_eq!(col0(&k), vec![1.0; 3]);
-        // First single-token step fixes prefill_length = 3; appends until
-        // offset == prefill + window.
-        let (k, _) = c.update_and_fetch(&row(2.0, 1), &row(2.0, 1)).unwrap();
-        assert_eq!((c.offset(), c.prefill_length()), (4, Some(3)));
-        assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 2.0]);
-        let (k, _) = c.update_and_fetch(&row(3.0, 1), &row(3.0, 1)).unwrap();
-        assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 2.0, 3.0]);
-        // Ring phase: overwrite slots 3, 4, 3, ... ; returned length fixed.
-        let (k, _) = c.update_and_fetch(&row(4.0, 1), &row(4.0, 1)).unwrap();
-        assert_eq!(c.offset(), 6);
-        assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 4.0, 3.0]);
-        let (k, _) = c.update_and_fetch(&row(5.0, 1), &row(5.0, 1)).unwrap();
-        assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 4.0, 5.0]);
-        let (k, _) = c.update_and_fetch(&row(6.0, 1), &row(6.0, 1)).unwrap();
-        assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 6.0, 5.0]);
-        assert_eq!(c.offset(), 8);
-        // Step-256 growth: the backing buffer holds one 256-row block.
-        assert_eq!(c.keys_buffer().unwrap().shape().unwrap()[2], 256);
-        // Plain cache: growth past 256 trims to offset first.
-        let mut p = KvCache::new(None);
-        p.update_and_fetch(&row(1.0, 255), &row(1.0, 255)).unwrap();
-        let (k, _) = p.update_and_fetch(&row(2.0, 3), &row(2.0, 3)).unwrap();
-        assert_eq!(p.offset(), 258);
-        assert_eq!(k.shape().unwrap()[2], 258);
-        assert_eq!(p.keys_buffer().unwrap().shape().unwrap()[2], 255 + 256);
     }
 
     struct Golden {

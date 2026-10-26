@@ -595,6 +595,32 @@ fn mlx_silu_matches_f32_reference() {
         let want = v * sigmoid;
         assert!((g - want).abs() <= 1e-6, "silu({v}): {g} vs {want}");
     }
+    // Compiled swiglu == unfused silu(gate) * up, bit-for-bit in bf16
+    // (the decoders' dtype), across shapes (shapeless compile) and on a
+    // transposed (strided) gate.
+    for (rows, cols) in [(1usize, 6usize), (3, 4)] {
+        let n = rows * cols;
+        let g: Vec<f32> = (0..n).map(|i| i as f32 * 0.37 - 1.1).collect();
+        let u: Vec<f32> = (0..n).map(|i| 0.5 - i as f32 * 0.21).collect();
+        let bf = |v: &[f32], shape: &[usize]| {
+            MlxArray::from_f32(shape, v)
+                .unwrap()
+                .astype(MlxDtype::Bf16)
+                .unwrap()
+        };
+        let (gate, up) = (bf(&g, &[rows, cols]), bf(&u, &[rows, cols]));
+        let unfused = gate.silu().unwrap().multiply(&up).unwrap();
+        assert_eq!(
+            gate.swiglu(&up).unwrap().to_bf16_vec().unwrap(),
+            unfused.to_bf16_vec().unwrap()
+        );
+        let gate_t = bf(&g, &[cols, rows]).transpose(&[1, 0]).unwrap();
+        let unfused_t = gate_t.silu().unwrap().multiply(&up).unwrap();
+        assert_eq!(
+            gate_t.swiglu(&up).unwrap().to_bf16_vec().unwrap(),
+            unfused_t.to_bf16_vec().unwrap()
+        );
+    }
 }
 
 #[test]
@@ -750,5 +776,284 @@ fn mlx_device_follows_env_override() {
         Ok("cpu") => assert!(cpu, "AIMD_MLX_DEVICE=cpu must select the CPU device"),
         Ok("gpu") => assert!(!cpu, "AIMD_MLX_DEVICE=gpu must select the GPU"),
         _ => {}
+    }
+}
+
+#[test]
+fn mlx_moe_swiglu_4bit_matches_gather_qmm_graph() {
+    // Custom Metal kernels need the GPU; the CPU device (hermetic CI) keeps
+    // the gather_qmm path.
+    if aimd_mlx::device_is_cpu().expect("device query") {
+        return;
+    }
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let bf = |v: f32| bf16::from_f32(v).to_bits();
+    // (hidden, intermediate, experts, top-k): a small case, the
+    // Unlimited-OCR decode shape (1280 / 896, top-6) with fewer experts, and
+    // its shared-expert and dense MLPs as one expert with score 1 (checked
+    // against the plain `quantized_matmul` MLP).
+    for (d, inter, experts, k) in [
+        (256usize, 128usize, 8usize, 3usize),
+        (1280, 896, 10, 6),
+        (1280, 1792, 1, 1),
+        (1280, 6848, 1, 1),
+    ] {
+        let gs = 64usize;
+        let mut quant = |rows: usize, cols: usize| {
+            let r = experts * rows;
+            let (words, groups) = (cols / 8, cols / gs);
+            let payload: Vec<u8> = (0..r * words * 4).map(|_| next() as u8).collect();
+            let scales: Vec<u16> = (0..r * groups)
+                .map(|_| bf(0.001 + (next() % 1000) as f32 * 4e-6))
+                .collect();
+            let biases: Vec<u16> = (0..r * groups)
+                .map(|_| bf(-0.03 + (next() % 1000) as f32 * 3e-5))
+                .collect();
+            MlxArray::quantized_weight(
+                &payload,
+                &[experts, rows, words],
+                &scales,
+                &biases,
+                &[experts, rows, groups],
+                MlxDtype::Bf16,
+            )
+            .unwrap()
+        };
+        let gate = quant(inter, d);
+        let up = quant(inter, d);
+        let down = quant(d, inter);
+        let xv: Vec<bf16> = (0..d)
+            .map(|_| bf16::from_f32((next() % 2000) as f32 / 1000.0 - 1.0))
+            .collect();
+        let picks: Vec<u32> = (0..k as u32)
+            .map(|i| (i * 7 + 2) % experts as u32)
+            .collect();
+        let sv: Vec<bf16> = (0..k)
+            .map(|i| {
+                bf16::from_f32(if experts == 1 {
+                    1.0
+                } else {
+                    0.3 - i as f32 * 0.04
+                })
+            })
+            .collect();
+        let x = MlxArray::from_bf16(&[d], &xv).unwrap();
+        let inds = MlxArray::from_u32(&[k], &picks).unwrap();
+        let scores = MlxArray::from_bf16(&[k], &sv).unwrap();
+
+        let got = x
+            .moe_swiglu_4bit(
+                &inds,
+                &scores,
+                [&gate.0, &gate.1, &gate.2],
+                [&up.0, &up.1, &up.2],
+                [&down.0, &down.1, &down.2],
+                gs as i32,
+                &[],
+            )
+            .unwrap();
+        assert_eq!(got.shape().unwrap(), vec![d]);
+        // The shared-expert output and residual folded into the down kernel.
+        let addv: Vec<bf16> = (0..2 * d)
+            .map(|_| bf16::from_f32((next() % 2000) as f32 / 100.0 - 10.0))
+            .collect();
+        let a0 = MlxArray::from_bf16(&[d], &addv[..d]).unwrap();
+        let a1 = MlxArray::from_bf16(&[1, 1, d], &addv[d..]).unwrap();
+        let got_add = x
+            .moe_swiglu_4bit(
+                &inds,
+                &scores,
+                [&gate.0, &gate.1, &gate.2],
+                [&up.0, &up.1, &up.2],
+                [&down.0, &down.1, &down.2],
+                gs as i32,
+                &[&a0, &a1],
+            )
+            .unwrap();
+
+        // Reference: the decoder's unfused SwitchGLU graph.
+        let idx = inds.reshape(&[1, 1, k]).unwrap();
+        let gq = |x: &MlxArray, q: &(MlxArray, MlxArray, MlxArray)| {
+            x.gather_qmm(
+                &q.0,
+                &q.1,
+                Some(&q.2),
+                None,
+                Some(&idx),
+                true,
+                Some(gs as i32),
+                Some(4),
+                false,
+            )
+            .unwrap()
+        };
+        let x5 = x.reshape(&[1, 1, 1, 1, d]).unwrap();
+        let h = gq(&x5, &gate).swiglu(&gq(&x5, &up)).unwrap();
+        let want = if experts == 1 {
+            let qm = |x: &MlxArray, q: &(MlxArray, MlxArray, MlxArray)| {
+                let flat = |a: &MlxArray| {
+                    let s = a.shape().unwrap();
+                    a.reshape(&[s[1], s[2]]).unwrap()
+                };
+                x.quantized_matmul(
+                    &flat(&q.0),
+                    &flat(&q.1),
+                    Some(&flat(&q.2)),
+                    true,
+                    Some(gs as i32),
+                    Some(4),
+                    None,
+                )
+                .unwrap()
+            };
+            let x3 = x.reshape(&[1, 1, d]).unwrap();
+            let h = qm(&x3, &gate).swiglu(&qm(&x3, &up)).unwrap();
+            qm(&h, &down).reshape(&[d]).unwrap()
+        } else {
+            gq(&h, &down)
+                .reshape(&[1, 1, k, d])
+                .unwrap()
+                .multiply(&scores.reshape(&[1, 1, k, 1]).unwrap())
+                .unwrap()
+                .sum_axis(-2, false)
+                .unwrap()
+                .reshape(&[d])
+                .unwrap()
+        };
+        // Same accumulation order and rounding as mlx: bit-identical.
+        assert_eq!(
+            got.to_bf16_vec().unwrap(),
+            want.to_bf16_vec().unwrap(),
+            "d={d} inter={inter}"
+        );
+        let want_add = want
+            .add(&a0)
+            .unwrap()
+            .add(&a1.reshape(&[d]).unwrap())
+            .unwrap();
+        assert_eq!(
+            got_add.to_bf16_vec().unwrap(),
+            want_add.to_bf16_vec().unwrap(),
+            "d={d} inter={inter} with addends"
+        );
+    }
+}
+
+#[test]
+fn mlx_moe_router_matches_mlx_ops() {
+    if aimd_mlx::device_is_cpu().expect("device query") {
+        return;
+    }
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    // The Unlimited-OCR gate (64 experts over 1280, top-6) and a smaller
+    // one; `dup` repeats weight rows so equal logits exercise tie order.
+    for (d, e, k, dup) in [
+        (1280usize, 64usize, 6usize, false),
+        (1280, 64, 6, true),
+        (512, 16, 3, true),
+    ] {
+        for trial in 0..8 {
+            let rows: Vec<Vec<bf16>> = (0..e)
+                .map(|_| {
+                    (0..d)
+                        .map(|_| bf16::from_f32(((next() % 2001) as f32 - 1000.0) * 4e-5))
+                        .collect()
+                })
+                .collect();
+            let wv: Vec<bf16> = (0..e)
+                .flat_map(|r| rows[if dup { r / 2 * 2 } else { r }].clone())
+                .collect();
+            let xv: Vec<bf16> = (0..d)
+                .map(|_| bf16::from_f32((next() % 2000) as f32 / 1000.0 - 1.0))
+                .collect();
+            let w = MlxArray::from_bf16(&[e, d], &wv).unwrap();
+            let x = MlxArray::from_bf16(&[d], &xv).unwrap();
+            let (inds, scores) = x.moe_router(&w, k as i32).unwrap();
+
+            let x3 = x.reshape(&[1, 1, d]).unwrap();
+            let probs = x3
+                .matmul(&w.transpose(&[1, 0]).unwrap(), None)
+                .unwrap()
+                .softmax_precise(-1, true)
+                .unwrap();
+            let want_inds = probs
+                .argpartition((e - k) as i32, -1)
+                .unwrap()
+                .slice(&[0, 0, e - k], &[1, 1, e], &[1, 1, 1])
+                .unwrap();
+            let want_scores = probs.take_along_axis(&want_inds, -1).unwrap();
+            assert_eq!(
+                inds.to_u32_vec().unwrap(),
+                want_inds.to_u32_vec().unwrap(),
+                "d={d} e={e} dup={dup} trial {trial}"
+            );
+            assert_eq!(
+                scores.to_bf16_vec().unwrap(),
+                want_scores.to_bf16_vec().unwrap(),
+                "d={d} e={e} dup={dup} trial {trial}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mlx_sdpa_decode_matches_fast_sdpa() {
+    if aimd_mlx::device_is_cpu().expect("device query") {
+        return;
+    }
+    let mut state = 0x853c_49e6_748f_ea9bu64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut rand = |shape: &[usize]| {
+        let n: usize = shape.iter().product();
+        let v: Vec<bf16> = (0..n)
+            .map(|_| bf16::from_f32((next() % 4000) as f32 / 1000.0 - 2.0))
+            .collect();
+        MlxArray::from_bf16(shape, &v).unwrap()
+    };
+    // (q heads, kv heads, kv len, backing rows): the Unlimited-OCR decode
+    // shape read through a step-256 KV-cache view, a GQA long-KV shape, and a
+    // short KV that falls back to mlx's single-pass kernel.
+    for (h, hkv, n, cap) in [
+        (10usize, 10usize, 2455usize, 2560usize),
+        (16, 8, 1500, 1536),
+        (10, 10, 900, 1024),
+    ] {
+        let d = 128;
+        let q = rand(&[1, h, 1, d]);
+        let kb = rand(&[1, hkv, cap, d]);
+        let vb = rand(&[1, hkv, cap, d]);
+        let k = kb
+            .slice(&[0, 0, 0, 0], &[1, hkv, n, d], &[1, 1, 1, 1])
+            .unwrap();
+        let v = vb
+            .slice(&[0, 0, 0, 0], &[1, hkv, n, d], &[1, 1, 1, 1])
+            .unwrap();
+        let want = q
+            .scaled_dot_product_attention(&k, &v, 0.088, aimd_mlx::SdpaMask::None)
+            .unwrap();
+        let got = q.sdpa_decode(&k, &v, 0.088).unwrap();
+        assert_eq!(got.shape().unwrap(), vec![1, h, 1, d]);
+        assert_eq!(
+            got.to_bf16_vec().unwrap(),
+            want.to_bf16_vec().unwrap(),
+            "h={h} hkv={hkv} n={n}"
+        );
     }
 }

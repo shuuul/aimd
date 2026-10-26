@@ -39,8 +39,10 @@
 #pragma clang diagnostic ignored "-Wc++20-extensions"
 
 #include "mlx/array.h"
+#include "mlx/compile.h"
 #include "mlx/ops.h"
 #include "mlx/fast.h"
+#include "mlx/backend/gpu/device_info.h"
 #include "mlx/memory.h"
 #include "mlx/transforms.h"
 
@@ -260,6 +262,25 @@ int32_t copy_out(void* handle, uint8_t* out, int64_t cap, Dtype required) {
     }
     return 0;
   });
+}
+
+// mlx-lm `swiglu` (`nn.silu(gate) * x` under `@mx.compile(shapeless=True)`):
+// a free function so mlx's compile cache keys on its address.
+std::vector<array> swiglu_impl(const std::vector<array>& inputs) {
+  const array& gate = inputs[0];
+  return {mlx::core::multiply(
+      mlx::core::multiply(gate, mlx::core::sigmoid(gate)), inputs[1])};
+}
+
+// `mlx.nn.gelu` (`x * (1 + erf(x / sqrt(2))) / 2` under
+// `@mx.compile(shapeless=True)`), scalars in the input dtype.
+std::vector<array> gelu_impl(const std::vector<array>& inputs) {
+  const array& a = inputs[0];
+  array sqrt2 = array(std::sqrt(2.0), a.dtype());
+  array one = array(1, a.dtype());
+  array two = array(2, a.dtype());
+  array t = mlx::core::erf(mlx::core::divide(a, sqrt2));
+  return {mlx::core::divide(mlx::core::multiply(a, mlx::core::add(one, t)), two)};
 }
 
 } // namespace
@@ -626,6 +647,19 @@ AimdMlxArray* mlx_silu(AimdMlxArray* array_handle) {
   });
 }
 
+/// Compiled SwiGLU `silu(gate) * up`: one fused elementwise kernel instead
+/// of three (mlx `compile(fun, shapeless=true)`, compile.h).
+AimdMlxArray* mlx_swiglu(AimdMlxArray* gate, AimdMlxArray* up) {
+  return guarded([&]() -> AimdMlxArray* {
+    if (gate == nullptr || up == nullptr) {
+      throw std::invalid_argument("[aimd_mlx] null array handle");
+    }
+    static const auto compiled = mlx::core::compile(swiglu_impl, true);
+    return reinterpret_cast<AimdMlxArray*>(
+        new array(compiled({as_array(gate), as_array(up)})[0]));
+  });
+}
+
 /// Fused RMS norm over the last axis.
 ///
 /// mlx: `MLX_API array rms_norm(const array& x, const std::optional<array>&
@@ -750,23 +784,20 @@ AimdMlxArray* mlx_layer_norm(
   });
 }
 
-/// Exact-erf GELU, composed in the exact `mlx.nn.gelu` evaluation order:
-/// `x * (1 + erf(x / sqrt(2))) / 2` (mlx/nn/layers/activations.py:169).
-/// Scalars are created with the input's dtype so promotion matches the
-/// Python weak-scalar behavior (no accidental f32 upcast for bf16/f16
-/// inputs).
+/// Exact-erf GELU in `mlx.nn.gelu`'s evaluation order, compiled like
+/// `mlx.nn.gelu` (`@mx.compile(shapeless=True)`, mlx/nn/layers/activations.py)
+/// into one fused elementwise kernel; each intermediate keeps its dtype, so
+/// values match the unfused ops. Scalars are created with the input's dtype
+/// so promotion matches the Python weak-scalar behavior (no accidental f32
+/// upcast for bf16/f16 inputs).
 AimdMlxArray* mlx_gelu(AimdMlxArray* x) {
   return guarded([&]() -> AimdMlxArray* {
     if (x == nullptr) {
       throw std::invalid_argument("[aimd_mlx] null array handle");
     }
-    array& a = as_array(x);
-    array sqrt2 = array(std::sqrt(2.0), a.dtype());
-    array one = array(1, a.dtype());
-    array two = array(2, a.dtype());
-    array t = mlx::core::erf(mlx::core::divide(a, sqrt2));
-    array out = mlx::core::divide(mlx::core::multiply(a, mlx::core::add(one, t)), two);
-    return reinterpret_cast<AimdMlxArray*>(new array(std::move(out)));
+    static const auto compiled = mlx::core::compile(gelu_impl, true);
+    return reinterpret_cast<AimdMlxArray*>(
+        new array(compiled({as_array(x)})[0]));
   });
 }
 
@@ -1132,6 +1163,305 @@ AimdMlxArray* mlx_gather_qmm(
   });
 }
 
+/// Fused decode-step MoE experts for one token: `sum_k score[k] *
+/// down_e(silu(gate_e(x)) * up_e(x))` with `e = inds[k]`, over affine 4-bit
+/// expert stacks (`[E, out, in/8]` u32 weights, `[E, out, in/gs]` scales and
+/// biases). Two `fast::metal_kernel` dispatches (gate|up + SwiGLU, then down
+/// + weighted sum) replace the six of the `gather_qmm` path, and gate and up
+/// share one pass over the activations. Dot products, the SwiGLU, the score
+/// multiply and the expert sum follow mlx's own accumulation order and
+/// rounding (`qmv_impl`, `Sigmoid`, the T-typed sum), so the result is
+/// bit-identical to the unfused graph. `x` is `[D]`,
+/// `inds` `[K]` u32 (in range; not bounds-checked on device), `scores`
+/// `[K]`; returns `[D]`. Up to two `[D]` `addends` (may be NULL when
+/// `n_add` is 0) are then added in order, each rounding to T like mlx `add`
+/// (the shared-expert output, then the residual).
+AimdMlxArray* mlx_moe_swiglu_4bit(
+    AimdMlxArray* x,
+    AimdMlxArray* inds,
+    AimdMlxArray* scores,
+    AimdMlxArray* gate_w,
+    AimdMlxArray* gate_s,
+    AimdMlxArray* gate_b,
+    AimdMlxArray* up_w,
+    AimdMlxArray* up_s,
+    AimdMlxArray* up_b,
+    AimdMlxArray* down_w,
+    AimdMlxArray* down_s,
+    AimdMlxArray* down_b,
+    int32_t group_size,
+    AimdMlxArray** addends,
+    int32_t n_add) {
+  return guarded([&]() -> AimdMlxArray* {
+    require(
+        {x, inds, scores, gate_w, gate_s, gate_b, up_w, up_s, up_b, down_w,
+         down_s, down_b});
+    namespace fast = mlx::core::fast;
+    // mlx `qmv_impl` layout: a row of N inputs is read in 256-value blocks;
+    // in block i lane l takes u32 word l + 32 i (8 values), loads the
+    // matching 8 activations (f32, pre-scaled by 16^-j so nibbles are masked
+    // in place, mlx `load_vector`/`qdot`), and applies them to all M x R
+    // rows it covers, so M * R independent loads are in flight per block.
+    static const std::string kDot = R"(
+template <int N, int GS, int R, int M, typename T, typename S>
+inline void qdot_rows(const device T* x, const device uint32_t* const (&w)[M],
+                      const device S* const (&s)[M],
+                      const device S* const (&b)[M], thread float (&out)[M * R],
+                      uint lane) {
+  constexpr int W = N / 8;
+  constexpr int G = N / GS;
+  for (int r = 0; r < M * R; ++r) out[r] = 0.0f;
+  for (int c = int(lane); c < W; c += 32) {
+    // Same grouping (fours) and order as mlx load_vector / qdot, so sums
+    // round as in gather_qmm.
+    float xr[8];
+    float xsum = 0.0f;
+    for (int j = 0; j < 8; j += 4) {
+      float x0 = float(x[c * 8 + j]), x1 = float(x[c * 8 + j + 1]);
+      float x2 = float(x[c * 8 + j + 2]), x3 = float(x[c * 8 + j + 3]);
+      xsum += x0 + x1 + x2 + x3;
+      xr[j] = x0;
+      xr[j + 1] = x1 / 16.0f;
+      xr[j + 2] = x2 / 256.0f;
+      xr[j + 3] = x3 / 4096.0f;
+    }
+    int g = (c * 8) / GS;
+    uint32_t q[M * R];
+    for (int m = 0; m < M; ++m) {
+      for (int r = 0; r < R; ++r) {
+        q[m * R + r] = w[m][r * W + c];
+      }
+    }
+    for (int m = 0; m < M; ++m) {
+      for (int r = 0; r < R; ++r) {
+        uint32_t qq = q[m * R + r];
+        float qx = 0.0f;
+        for (int j = 0; j < 8; j += 4) {
+          uint32_t w16 = (qq >> (4 * j)) & 0xFFFFu;
+          qx += xr[j] * float(w16 & 0x000Fu) + xr[j + 1] * float(w16 & 0x00F0u) +
+                xr[j + 2] * float(w16 & 0x0F00u) + xr[j + 3] * float(w16 & 0xF000u);
+        }
+        out[m * R + r] +=
+            float(s[m][r * G + g]) * qx + float(b[m][r * G + g]) * xsum;
+      }
+    }
+  }
+  for (int r = 0; r < M * R; ++r) out[r] = simd_sum(out[r]);
+}
+)";
+    // Threadgroup: 2 simdgroups x 4 rows of one expert, gate and up.
+    static const auto gate_up = fast::metal_kernel(
+        "aimd_moe_gate_up_4bit",
+        {"x", "inds", "gw", "gs", "gb", "uw", "us", "ub"},
+        {"h"},
+        R"(
+  constexpr int RS = 4;
+  uint lane = thread_index_in_simdgroup;
+  uint k = threadgroup_position_in_grid.z;
+  uint row0 = (threadgroup_position_in_grid.y * 2 +
+               simdgroup_index_in_threadgroup) * RS;
+  constexpr int W = D / 8;
+  constexpr int G = D / GS;
+  size_t base = size_t(inds[k]) * I + row0;
+  float acc[2 * RS];
+  const device uint32_t* const wp[2] = {gw + base * W, uw + base * W};
+  const device S* const sp[2] = {gs + base * G, us + base * G};
+  const device S* const bp[2] = {gb + base * G, ub + base * G};
+  qdot_rows<D, GS, RS, 2>(x, wp, sp, bp, acc, lane);
+  if (lane < RS) {
+    float g = acc[0], u = acc[RS];
+    for (int j = 1; j < RS; ++j) {
+      if (int(lane) == j) { g = acc[j]; u = acc[RS + j]; }
+    }
+    // mlx Sigmoid in T arithmetic (each op rounds to T), then the compiled
+    // swiglu's two multiplies.
+    T gt = T(g);
+    T e = T(metal::precise::exp(metal::abs(float(gt))));
+    T y = T(1.0f / float(T(1.0f + float(e))));
+    T sig = float(gt) < 0.0f ? y : T(1.0f - float(y));
+    T act = T(float(gt) * float(sig));
+    h[k * I + row0 + lane] = T(float(act) * float(T(u)));
+  }
+)",
+        kDot);
+    // Threadgroup: K simdgroups (one per selected expert) x 4 output rows;
+    // per-expert results meet in threadgroup memory for the score sum.
+    static const auto down = fast::metal_kernel(
+        "aimd_moe_down_4bit",
+        {"h", "inds", "scores", "dw", "ds", "db", "a0", "a1"},
+        {"y"},
+        R"(
+  constexpr int RS = 4;
+  threadgroup float part[K][RS];
+  uint k = simdgroup_index_in_threadgroup;
+  uint lane = thread_index_in_simdgroup;
+  uint row0 = threadgroup_position_in_grid.y * RS;
+  constexpr int W = I / 8;
+  constexpr int G = I / GS;
+  size_t base = size_t(inds[k]) * D + row0;
+  float acc[RS];
+  const device uint32_t* const wp[1] = {dw + base * W};
+  const device S* const sp[1] = {ds + base * G};
+  const device S* const bp[1] = {db + base * G};
+  qdot_rows<I, GS, RS, 1>(h + k * I, wp, sp, bp, acc, lane);
+  if (lane < RS) {
+    float d = acc[0];
+    for (int j = 1; j < RS; ++j) {
+      if (int(lane) == j) d = acc[j];
+    }
+    part[k][lane] = float(T(float(T(d)) * float(scores[k])));
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (k == 0 && lane < RS) {
+    T acc2 = T(0.0f);
+    for (int j = 0; j < K; ++j) {
+      acc2 = T(float(acc2) + part[j][lane]);
+    }
+    if (NADD > 0) acc2 = T(float(acc2) + float(a0[row0 + lane]));
+    if (NADD > 1) acc2 = T(float(acc2) + float(a1[row0 + lane]));
+    y[row0 + lane] = acc2;
+  }
+)",
+        kDot);
+    const array& xa = as_array(x);
+    const array& ia = as_array(inds);
+    const array& gw = as_array(gate_w);
+    const array& dw = as_array(down_w);
+    const array& sa = as_array(scores);
+    if (xa.ndim() != 1 || gw.ndim() != 3 || dw.ndim() != 3 || ia.ndim() != 1 ||
+        sa.ndim() != 1 || ia.dtype() != mlx::core::uint32) {
+      throw std::invalid_argument("[aimd_mlx] moe: bad input rank or dtype");
+    }
+    const int d = xa.shape(0);
+    const int inter = gw.shape(1);
+    const int k = ia.shape(0);
+    // Grids tile 8 gate|up rows and 4 down rows per threadgroup; the K
+    // simdgroups of a down threadgroup cap K at 32.
+    if (gw.shape(2) * 8 != d || dw.shape(1) != d || dw.shape(2) * 8 != inter ||
+        sa.shape(0) != k || group_size <= 0 || group_size % 8 != 0 ||
+        d % group_size != 0 || inter % group_size != 0 || inter % 8 != 0 ||
+        d % 4 != 0 || k < 1 || k > 32) {
+      throw std::invalid_argument("[aimd_mlx] moe: bad 4-bit expert shapes");
+    }
+    if (n_add < 0 || n_add > 2 || (n_add > 0 && addends == nullptr)) {
+      throw std::invalid_argument("[aimd_mlx] moe: at most two addends");
+    }
+    std::vector<array> adds;
+    for (int i = 0; i < n_add; ++i) {
+      require({addends[i]});
+      const array& a = as_array(addends[i]);
+      if (a.size() != static_cast<size_t>(d) || a.dtype() != xa.dtype()) {
+        throw std::invalid_argument("[aimd_mlx] moe: addend must be [D] of x dtype");
+      }
+      adds.push_back(mlx::core::reshape(a, {d}));
+    }
+    // Unused addend slots get any [D] array of x dtype.
+    while (adds.size() < 2) {
+      adds.push_back(xa);
+    }
+    const Dtype t = xa.dtype();
+    const Dtype s = as_array(gate_s).dtype();
+    std::vector<std::pair<std::string, fast::TemplateArg>> tmpl = {
+        {"D", d}, {"I", inter}, {"K", k}, {"GS", static_cast<int>(group_size)},
+        {"NADD", static_cast<int>(n_add)}, {"T", t}, {"S", s}};
+    const array h = gate_up(
+        {xa, ia, gw, as_array(gate_s), as_array(gate_b), as_array(up_w),
+         as_array(up_s), as_array(up_b)},
+        {{k, inter}}, {t}, {64, inter / 8, k}, {64, 1, 1}, tmpl, std::nullopt,
+        false, {})[0];
+    return wrap(down(
+        {h, ia, sa, dw, as_array(down_s), as_array(down_b), adds[0], adds[1]},
+        {{d}}, {t}, {32 * k, d / 4, 1}, {32 * k, 1, 1}, tmpl, std::nullopt,
+        false, {})[0]);
+  });
+}
+
+/// Decode-step MoE router for one token, `MoEGate` (softmax, greedy): gate
+/// logits from mlx's own matmul (`x @ W_g.T`, one gemv), then a single
+/// simdgroup kernel for `softmax(precise=True)` and top-k that replaces the
+/// softmax, `argpartition` (a stable ascending sort on Metal) and
+/// `take_along_axis` dispatches. It mirrors `softmax_single_row` (4 logits
+/// per lane, f32, `fast::exp`) and takes the last k positions of the stable
+/// order, so results are bit-identical. `x` is `[D]`, `gate_w` the
+/// row-major `[E, D]` gate weight. Writes `inds` `[k]` u32 and `scores`
+/// `[k]` (x dtype). 0 on success.
+int32_t mlx_moe_router(
+    AimdMlxArray* x,
+    AimdMlxArray* gate_w,
+    int32_t k,
+    AimdMlxArray** out_inds,
+    AimdMlxArray** out_scores) {
+  return guarded([&]() -> int32_t {
+    require({x, gate_w, out_inds, out_scores});
+    namespace fast = mlx::core::fast;
+    static const auto topk = fast::metal_kernel(
+        "aimd_moe_softmax_topk",
+        {"logits"},
+        {"inds", "scores"},
+        R"(
+  threadgroup float probs[E];
+  uint lane = thread_index_in_simdgroup;
+  float ld[4];
+  for (int i = 0; i < 4; ++i) {
+    int c = int(lane) * 4 + i;
+    ld[i] = c < E ? float(logits[c]) : -INFINITY;
+  }
+  float maxval = -FLT_MAX;
+  for (int i = 0; i < 4; ++i) maxval = (maxval < ld[i]) ? ld[i] : maxval;
+  maxval = simd_max(maxval);
+  float normalizer = 0.0f;
+  for (int i = 0; i < 4; ++i) {
+    float e = metal::fast::exp(ld[i] - maxval);
+    ld[i] = e;
+    normalizer += e;
+  }
+  normalizer = simd_sum(normalizer);
+  normalizer = 1 / normalizer;
+  for (int i = 0; i < 4; ++i) {
+    int c = int(lane) * 4 + i;
+    if (c < E) probs[c] = float(T(ld[i] * normalizer));
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // argpartition == stable ascending sort: keep positions E-K .. E-1.
+  for (int t = int(lane); t < E; t += 32) {
+    float p = probs[t];
+    int pos = 0;
+    for (int j = 0; j < E; ++j) {
+      float q = probs[j];
+      pos += (q < p || (q == p && j < t)) ? 1 : 0;
+    }
+    if (pos >= E - K) {
+      inds[pos - (E - K)] = uint32_t(t);
+      scores[pos - (E - K)] = T(p);
+    }
+  }
+)");
+    const array& xa = as_array(x);
+    const array& wa = as_array(gate_w);
+    if (xa.ndim() != 1 || wa.ndim() != 2 || wa.shape(1) != xa.shape(0)) {
+      throw std::invalid_argument("[aimd_mlx] moe router: bad shapes");
+    }
+    const int d = xa.shape(0);
+    const int e = wa.shape(0);
+    // One simdgroup of softmax_single_row covers E <= 128.
+    if (e > 128 || k < 1 || k > e) {
+      throw std::invalid_argument("[aimd_mlx] moe router: unsupported shape");
+    }
+    const Dtype t = xa.dtype();
+    const array logits = mlx::core::reshape(
+        mlx::core::matmul(
+            mlx::core::reshape(xa, {1, d}), mlx::core::transpose(wa, {1, 0})),
+        {e});
+    auto outs = topk(
+        {logits}, {{k}, {k}}, {mlx::core::uint32, t}, {32, 1, 1}, {32, 1, 1},
+        {{"E", e}, {"K", static_cast<int>(k)}, {"T", t}}, std::nullopt, false,
+        {});
+    *out_inds = wrap(outs[0]);
+    *out_scores = wrap(outs[1]);
+    return 0;
+  });
+}
+
 /// Schedules evaluation of `n` arrays without blocking (`mx.async_eval`,
 /// transforms.h:12). 0 on success, -1 on error.
 int32_t mlx_async_eval(AimdMlxArray** arrays, int32_t n) {
@@ -1188,6 +1518,170 @@ int32_t mlx_clear_cache(void) {
   return guarded([&]() -> int32_t {
     mlx::core::clear_cache();
     return 0;
+  });
+}
+
+/// Single-token decode attention for long KV: mlx's `sdpa_vector_2pass_1`
+/// / `_2` (kernels/sdpa_vector.h) without pass 1's 4-key register prefetch.
+/// Same grid, block count, token order and float ops, so the output is
+/// bit-identical; one key per step keeps more simdgroups resident, which
+/// reads the KV ~10% faster on M2 Pro. Falls back to
+/// `fast::scaled_dot_product_attention` wherever mlx would not take the plain
+/// 2-pass kernel. `q` is `[1, H, 1, D]`, `k`/`v` `[1, Hkv, N, D]` with a
+/// contiguous last dim (strided KV-cache views are read in place).
+AimdMlxArray* mlx_sdpa_decode(
+    AimdMlxArray* q,
+    AimdMlxArray* k,
+    AimdMlxArray* v,
+    float scale) {
+  return guarded([&]() -> AimdMlxArray* {
+    require({q, k, v});
+    namespace fast = mlx::core::fast;
+    static const auto pass1 = fast::metal_kernel(
+        "aimd_sdpa_decode_1",
+        {"q", "k", "v", "scale", "n"},
+        {"partials", "sums", "maxs"},
+        R"(
+  constexpr int QPT = D / 32;
+  uint lane = thread_index_in_simdgroup;
+  int kvh = int(threadgroup_position_in_grid.y);
+  int blk = int(threadgroup_position_in_grid.z);
+  int qh = kvh * G + int(simdgroup_index_in_threadgroup);
+  const device T* qp = q + qh * q_strides[1] + lane * QPT;
+  const device T* kp = k + kvh * k_strides[1] + blk * k_strides[2] + lane * QPT;
+  const device T* vp = v + kvh * v_strides[1] + blk * v_strides[2] + lane * QPT;
+  float qr[QPT];
+  float o[QPT] = {0};
+  for (int j = 0; j < QPT; j++) qr[j] = scale * float(qp[j]);
+  float max_score = -metal::numeric_limits<float>::max();
+  float sum_exp_score = 0;
+  const int sk = BLOCKS * int(k_strides[2]);
+  const int sv = BLOCKS * int(v_strides[2]);
+  for (int i = blk; i < n; i += BLOCKS) {
+    float score = 0;
+    for (int j = 0; j < QPT; j++) score += qr[j] * float(kp[j]);
+    score = simd_sum(score);
+    float new_max = max(max_score, score);
+    float factor = metal::fast::exp(max_score - new_max);
+    float exp_score = metal::fast::exp(score - new_max);
+    max_score = new_max;
+    sum_exp_score = sum_exp_score * factor + exp_score;
+    for (int j = 0; j < QPT; j++) o[j] = o[j] * factor + exp_score * float(vp[j]);
+    kp += sk;
+    vp += sv;
+  }
+  int row = qh * BLOCKS + blk;
+  if (lane == 0) {
+    sums[row] = sum_exp_score;
+    maxs[row] = max_score;
+  }
+  for (int j = 0; j < QPT; j++) partials[row * D + lane * QPT + j] = T(o[j]);
+)",
+        "", false);
+    static const auto pass2 = fast::metal_kernel(
+        "aimd_sdpa_decode_2",
+        {"partials", "sums", "maxs"},
+        {"out"},
+        R"(
+  constexpr int BN = 32;
+  constexpr int EPT = D / 32;
+  threadgroup float outputs[BN * 32];
+  uint lane = thread_index_in_simdgroup;
+  uint sg = simdgroup_index_in_threadgroup;
+  int h = int(threadgroup_position_in_grid.x);
+  const device T* pp = partials + h * BLOCKS * D + sg * D + lane * EPT;
+  const device float* sm = sums + h * BLOCKS;
+  const device float* mx = maxs + h * BLOCKS;
+  float o[EPT] = {0};
+  float sum_exp_score = 0.0;
+  float max_score = -metal::numeric_limits<float>::max();
+  for (int b = 0; b < BLOCKS / BN; ++b) max_score = max(max_score, mx[lane + BN * b]);
+  max_score = simd_max(max_score);
+  for (int b = 0; b < BLOCKS / BN; ++b) {
+    float factor = metal::fast::exp(mx[lane + BN * b] - max_score);
+    sum_exp_score += factor * sm[lane + BN * b];
+  }
+  sum_exp_score = simd_sum(sum_exp_score);
+  for (int b = 0; b < BLOCKS / BN; ++b) {
+    float factor = metal::fast::exp(mx[sg] - max_score);
+    for (int i = 0; i < EPT; i++) o[i] += factor * float(pp[i]);
+    mx += BN;
+    pp += BN * D;
+  }
+  for (int i = 0; i < EPT; i++) {
+    outputs[lane * 32 + sg] = o[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    o[i] = simd_sum(outputs[sg * 32 + lane]);
+    o[i] = sum_exp_score == 0 ? o[i] : (o[i] / sum_exp_score);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (lane == 0) {
+    for (int i = 0; i < EPT; i++) out[h * D + sg * EPT + i] = T(o[i]);
+  }
+)");
+    const array& qa = as_array(q);
+    const array& ka = as_array(k);
+    const array& va = as_array(v);
+    if (qa.ndim() != 4 || ka.ndim() != 4 || va.ndim() != 4) {
+      throw std::invalid_argument("[aimd_mlx] sdpa decode: expected 4-D q/k/v");
+    }
+    const int h = qa.shape(1);
+    const int hkv = ka.shape(1);
+    const int n = ka.shape(2);
+    const int d = qa.shape(3);
+    const int g = hkv > 0 ? h / hkv : 0;
+    // mlx sdpa_vector_2pass block count (scaled_dot_product_attention.cpp).
+    const auto& info = mlx::core::gpu::device_info();
+    const auto arch = std::get<std::string>(info.at("architecture"));
+    const char devc = arch.empty() ? ' ' : arch.back();
+    int blocks;
+    if (devc == 's') {
+      blocks = 64;
+      if (n > 1024 && g > 4) {
+        blocks = n <= 8192 ? 128 : n <= 32768 ? 256 : n <= 65536 ? 512 : 1024;
+      }
+    } else if (devc == 'd') {
+      blocks = 128;
+      if (g <= 2 && n > 8192) {
+        blocks = 256;
+      } else if (g >= 6) {
+        if (n >= 16384 && n < 65536) {
+          blocks = 512;
+        } else if (n >= 65536) {
+          blocks = 1024;
+        }
+      }
+    } else {
+      blocks = g >= 4 ? 64 : 32;
+    }
+    const bool two_pass =
+        ((devc == 'd' || devc == 's') && n >= 1024) || (hkv < h && n >= 4096);
+    const bool gqa_dims = (g == 8 && (d == 64 || d == 128)) ||
+        ((g == 12 || g == 16) && d == 128);
+    const bool plain = qa.shape(0) == 1 && ka.shape(0) == 1 &&
+        va.shape(0) == 1 && qa.shape(2) == 1 && g >= 1 && h == g * hkv &&
+        va.shape(1) == hkv && va.shape(2) == n && ka.shape(3) == d &&
+        va.shape(3) == d && d % 32 == 0 && d <= 256 && qa.dtype() == ka.dtype() &&
+        qa.dtype() == va.dtype() && qa.strides(3) == 1 && ka.strides(3) == 1 &&
+        va.strides(3) == 1 && !(gqa_dims && n >= 8192) &&
+        std::getenv("MLX_SDPA_BLOCKS") == nullptr;
+    if (!two_pass || !plain || g * 32 > 1024) {
+      return wrap(fast::scaled_dot_product_attention(qa, ka, va, scale));
+    }
+    const Dtype t = qa.dtype();
+    const array sc = array(scale, mlx::core::float32);
+    const array na = array(n, mlx::core::int32);
+    auto p1 = pass1(
+        {qa, ka, va, sc, na}, {{h, blocks, d}, {h, blocks}, {h, blocks}},
+        {t, mlx::core::float32, mlx::core::float32},
+        {32 * g, hkv, blocks}, {32 * g, 1, 1},
+        {{"D", d}, {"G", g}, {"BLOCKS", blocks}, {"T", t}},
+        std::nullopt, false, {});
+    auto p2 = pass2(
+        {p1[0], p1[1], p1[2]}, {{1, h, 1, d}}, {t}, {1024 * h, 1, 1},
+        {1024, 1, 1}, {{"D", d}, {"BLOCKS", blocks}, {"T", t}}, std::nullopt,
+        false, {});
+    return wrap(p2[0]);
   });
 }
 

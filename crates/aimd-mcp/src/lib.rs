@@ -415,7 +415,7 @@ pub fn tools() -> Vec<Tool> {
 impl ServerHandler for AimdMcp {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
-        info.server_info = Implementation::new("aimd", "");
+        info.server_info = Implementation::new("aimd", env!("CARGO_PKG_VERSION"));
         info
     }
 

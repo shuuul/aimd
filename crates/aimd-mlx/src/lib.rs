@@ -210,6 +210,7 @@ mod ffi {
         pub fn mlx_power(a: *mut AimdMlxArray, b: *mut AimdMlxArray) -> *mut AimdMlxArray;
         pub fn mlx_softmax(array_handle: *mut AimdMlxArray, axis: i32) -> *mut AimdMlxArray;
         pub fn mlx_silu(array_handle: *mut AimdMlxArray) -> *mut AimdMlxArray;
+        pub fn mlx_swiglu(gate: *mut AimdMlxArray, up: *mut AimdMlxArray) -> *mut AimdMlxArray;
         pub fn mlx_rms_norm(
             x: *mut AimdMlxArray,
             weight: *mut AimdMlxArray,
@@ -330,6 +331,36 @@ mod ffi {
             group_size: i32,
             bits: i32,
             sorted_indices: u8,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_moe_swiglu_4bit(
+            x: *mut AimdMlxArray,
+            inds: *mut AimdMlxArray,
+            scores: *mut AimdMlxArray,
+            gate_w: *mut AimdMlxArray,
+            gate_s: *mut AimdMlxArray,
+            gate_b: *mut AimdMlxArray,
+            up_w: *mut AimdMlxArray,
+            up_s: *mut AimdMlxArray,
+            up_b: *mut AimdMlxArray,
+            down_w: *mut AimdMlxArray,
+            down_s: *mut AimdMlxArray,
+            down_b: *mut AimdMlxArray,
+            group_size: i32,
+            addends: *mut *mut AimdMlxArray,
+            n_add: i32,
+        ) -> *mut AimdMlxArray;
+        pub fn mlx_moe_router(
+            x: *mut AimdMlxArray,
+            gate_w: *mut AimdMlxArray,
+            k: i32,
+            out_inds: *mut *mut AimdMlxArray,
+            out_scores: *mut *mut AimdMlxArray,
+        ) -> i32;
+        pub fn mlx_sdpa_decode(
+            q: *mut AimdMlxArray,
+            k: *mut AimdMlxArray,
+            v: *mut AimdMlxArray,
+            scale: f32,
         ) -> *mut AimdMlxArray;
         pub fn mlx_async_eval(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
         pub fn mlx_eval_many(arrays: *mut *mut AimdMlxArray, n: i32) -> i32;
@@ -743,6 +774,13 @@ impl MlxArray {
         Self::from_handle(ptr, "mlx_silu")
     }
 
+    /// `silu(self) * up` as one compiled (fused, shapeless) kernel: mlx-lm
+    /// `swiglu`.
+    pub fn swiglu(&self, up: &Self) -> Result<Self, MlxError> {
+        let ptr = unsafe { ffi::mlx_swiglu(self.ptr.as_ptr(), up.ptr.as_ptr()) };
+        Self::from_handle(ptr, "mlx_swiglu")
+    }
+
     /// Fused RMS norm over the last axis; `weight: None` skips the affine
     /// weight.
     pub fn rms_norm(&self, weight: Option<&Self>, eps: f32) -> Result<Self, MlxError> {
@@ -822,7 +860,8 @@ impl MlxArray {
     }
 
     /// Exact-erf GELU, composed in `mlx.nn.gelu`'s evaluation order
-    /// (`x * (1 + erf(x / sqrt(2))) / 2` with input-dtype scalars).
+    /// (`x * (1 + erf(x / sqrt(2))) / 2` with input-dtype scalars) and
+    /// compiled into one kernel like `mlx.nn.gelu`.
     pub fn gelu(&self) -> Result<Self, MlxError> {
         let ptr = unsafe { ffi::mlx_gelu(self.ptr.as_ptr()) };
         Self::from_handle(ptr, "mlx_gelu")
@@ -1107,6 +1146,89 @@ impl MlxArray {
             )
         };
         Self::from_handle(ptr, "mlx_gather_qmm")
+    }
+
+    /// Fused single-token MoE experts over affine 4-bit expert stacks:
+    /// `sum_k scores[k] * down[e](silu(gate[e](x)) * up[e](x))`, `e =
+    /// inds[k]`, in two custom Metal kernels. `self` is `[D]`, `inds` `[K]`
+    /// u32, `scores` `[K]`; each projection is `(weight, scales, biases)`
+    /// with `[E, out, in/8]` u32 weights. Returns `[D]`. Tracks the
+    /// `gather_qmm` + SwiGLU + weighted-sum graph to bf16 rounding; up to two
+    /// `[D]` `addends` are then added in order (each rounds like `add`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn moe_swiglu_4bit(
+        &self,
+        inds: &Self,
+        scores: &Self,
+        gate: [&Self; 3],
+        up: [&Self; 3],
+        down: [&Self; 3],
+        group_size: i32,
+        addends: &[&Self],
+    ) -> Result<Self, MlxError> {
+        let mut adds: Vec<*mut ffi::AimdMlxArray> =
+            addends.iter().map(|a| a.ptr.as_ptr()).collect();
+        let ptr = unsafe {
+            ffi::mlx_moe_swiglu_4bit(
+                self.ptr.as_ptr(),
+                inds.ptr.as_ptr(),
+                scores.ptr.as_ptr(),
+                gate[0].ptr.as_ptr(),
+                gate[1].ptr.as_ptr(),
+                gate[2].ptr.as_ptr(),
+                up[0].ptr.as_ptr(),
+                up[1].ptr.as_ptr(),
+                up[2].ptr.as_ptr(),
+                down[0].ptr.as_ptr(),
+                down[1].ptr.as_ptr(),
+                down[2].ptr.as_ptr(),
+                group_size,
+                adds.as_mut_ptr(),
+                adds.len() as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_moe_swiglu_4bit")
+    }
+
+    /// Single-token decode attention (`self` is `[1, H, 1, D]`, keys/values
+    /// `[1, Hkv, N, D]`, no mask): mlx's 2-pass long-KV kernel without the
+    /// 4-key prefetch, bit-identical to [`Self::scaled_dot_product_attention`]
+    /// (which it falls back to wherever mlx would not take that kernel).
+    pub fn sdpa_decode(&self, keys: &Self, values: &Self, scale: f32) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_sdpa_decode(
+                self.ptr.as_ptr(),
+                keys.ptr.as_ptr(),
+                values.ptr.as_ptr(),
+                scale,
+            )
+        };
+        Self::from_handle(ptr, "mlx_sdpa_decode")
+    }
+
+    /// Fused single-token MoE router (`MoEGate`, softmax + greedy top-k):
+    /// `self` is `[D]`, `gate_w` the row-major `[E, D]` gate weight. Returns
+    /// `(inds [k] u32, scores [k])`, bit-identical to `x @ gate_w.T`,
+    /// `softmax(precise)`, `argpartition` and `take_along_axis`.
+    pub fn moe_router(&self, gate_w: &Self, k: i32) -> Result<(Self, Self), MlxError> {
+        let mut inds = std::ptr::null_mut();
+        let mut scores = std::ptr::null_mut();
+        let status = unsafe {
+            ffi::mlx_moe_router(
+                self.ptr.as_ptr(),
+                gate_w.ptr.as_ptr(),
+                k,
+                &mut inds,
+                &mut scores,
+            )
+        };
+        if status != 0 {
+            return Err(op_failed("mlx_moe_router"));
+        }
+        Ok((
+            Self::from_handle(inds, "mlx_moe_router")?,
+            Self::from_handle(scores, "mlx_moe_router")?,
+        ))
     }
 
     /// Schedules `arrays` for evaluation without blocking (`mx.async_eval`).

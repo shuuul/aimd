@@ -67,6 +67,9 @@ mlx_vlm) on the same machine, measured before the Python package was removed.
 |------|---------|-------|------|--------------|----------|-------|
 | 2026-10-25 | mlx-audio (Metal) | zh 8.56 s / en 3.75 s TTS clips | 10.01 s | zh 0.43 s; en 0.25 s | 19.9x / 15x | Reference. |
 | 2026-10-25 | native MLX | same | 0.42-0.45 s warm / 3.81 s cold | zh 0.40-0.44 s; en 0.23-0.27 s | ~20x / ~15x | Token-identical text (incl. the same 上下文忠诚 mishearing); 4-bit triples go straight into `quantized_matmul` (no eager dequant), hence ~24x faster load. Unchanged after the CPU-path deletion (transcripts byte-identical). |
+| 2026-10-26 | mlx-audio 0.5.3 (Metal) | 59.96 s en TTS clip (797-token prompt, 191 tokens) | — | 2.88-2.95 s | ~20.5x | Reference for the long clip. |
+| 2026-10-26 | native MLX, `main` (concatenate KV, sync per step) | zh 4.83 s / en 4.09 s / 59.96 s en | — | zh 0.32 s; en 0.31 s; long 3.47-6.05 s (median 4.18 s) | ~15x / ~13x / ~14x | WS-13 A/B baseline, interleaved with the next row on a loaded machine. |
+| 2026-10-26 | native MLX, WS-13 | same | — | zh 0.30-0.31 s; en 0.29-0.30 s; long 3.07-3.20 s (median 3.13 s) | ~16x / ~14x / ~19x | Step-256 preallocated KV (`slice_update`), `async_eval`-pipelined decode, compiled SwiGLU. Long clip -25% and far steadier; transcripts byte-identical. On a quiet machine: long 2.73-2.75 s; encoder 0.44 s, prefill 0.67 s (~1.2k tok/s), decode 1.65 s (~117 tok/s). |
 
 ### Unlimited-OCR-4bit
 
@@ -76,12 +79,134 @@ mlx_vlm) on the same machine, measured before the Python package was removed.
 | 2026-10-25 | native MLX | same | 0.58 s | 0.36-0.37 s | 0.12 s (2300 tok/s) | 200-205 tok/s | 0.82-0.84 s | Markdown identical (similarity 1.0), finish=stop, 69/69 tokens. |
 | 2026-10-25 | mlx_vlm 0.7.0 | `golden/ocr_e2e/page_text.png` (4x5 crops, 2327-token prompt) | — | 2.50-2.55 s | ~0.77 s | 170-177 tok/s | 4.51-4.65 s | Reference. |
 | 2026-10-25 | native MLX | same | — | 2.61-2.63 s | 0.79-0.82 s | 165-175 tok/s | 4.67-4.75 s | Markdown identical, finish=stop, 197/197 tokens. Vision + prefill are bit-exact vs mlx_vlm goldens; single-token decode drifts ~1 bf16 ulp (brew mlx 0.32.4 vs Python mlx 0.32.2 small-M qmv), shifting some bbox coordinates by 2/1000. |
+| 2026-10-26 | native MLX, `main` vs WS-13 | same, interleaved on a loaded machine | — | 2.59-2.80 s both | 0.77-0.92 s both | 166-177 tok/s both | 4.64-4.87 s both | Compiled SwiGLU (dense MLP, shared experts, `SwitchGLU`) is neutral within noise; OCR already had the step-256/ring KV and `async_eval` pipelining. |
 
 Retired: the hand-written CPU prototype reached 0.1-0.3x realtime on ASR
 and ~734 s per OCR page (vs 4.8 s on MLX); it was deleted under the
-MLX-only decision. Remaining MLX headroom is tracked as WS-13 (ring KV +
-`mlx::core::compile`), WS-14 (speculative decoding) and WS-08 (custom
-Metal kernels inside the MLX graph).
+MLX-only decision.
+
+WS-13 findings: in the pipelined ASR loop the host builds a step's graph in
+~0.4 ms, and the remaining ~8 ms per token is GPU work plus Metal encode for
+~25 kernels per layer x 28 layers. Elementwise fusion (`mlx::core::compile`)
+buys little there. A whole-step `compile` does not fit because the KV cache
+grows every step, so a shape-keyed compile would retrace each token and a
+shapeless one cannot express the slice bounds (mlx-lm doesn't compile the
+step either).
+
+WS-14 findings (prompt-lookup speculative decoding, not shipped): an
+m-token Unlimited-OCR verify forward costs 4.3 / 6.5 / 11.0 / 19.4 / 24.6 ms
+for m = 1 / 2 / 4 / 8 / 16, nearly linear because every routed token reads
+its own 6 of 64 experts. On six real OCR pages, n-gram drafts were accepted
+for only 1.01-1.15 tokens per verify, so simulated decode came out
+0.63-1.01x. Remaining decode headroom is WS-08 (custom Metal kernels inside
+the MLX graph).
+
+### WS-08 decode-step kernel profile
+
+`cargo run --release -p aimd-mlx --example bench_ops` times every
+decode-step op at the real shapes as a dependent chain (GPU time plus Metal
+encode per kernel). Weights rotate through ~96 MB of distinct random 4-bit
+copies, so the system-level cache cannot hide reads. The practical read
+roofline is ~166 GB/s (the lm_head qmv; spec is 200 GB/s). Summing the ops
+reproduces the measured steps: OCR ~4.75 ms estimated vs ~5.1 ms measured,
+ASR ~8.9 ms vs ~8.5 ms. Dispatch floor is 2.3 µs per kernel.
+
+| Op (per layer unless noted) | µs | Bytes | % of roofline |
+|---|---|---|---|
+| ASR qmv 2048->2048 (q, o) | 20.1 | 2.36 MB | 71% |
+| ASR qmv 2048->1024 (k, v) | 11.9 | 1.18 MB | 60% |
+| ASR qmv up\|gate + down (2048<->6144) | 101.9 per pair | 14.2 MB | 84% |
+| ASR sdpa 16q/8kv, kv 256 / 1024 | 15.6 / 43.1 | 1.0 / 4.2 MB | 40% / 59% |
+| ASR lm_head 2048->151936 (per token) | 1063 | 175 MB | ~100% |
+| ASR rms_norm, rope, kv row write, swiglu | 2.2-2.8 each | — | dispatch-bound |
+| OCR qmv 1280->1280 (q, k, v, o) | 11.4 | 0.92 MB | 49% |
+| OCR shared expert up\|gate + down (1280<->1792) | 31.0 per pair | 2.58 MB | 50% |
+| OCR gather_qmm up + down, 6 of 64 experts, + sum | 82.4 | 7.74 MB | 57% |
+| OCR routed experts unfused (gate\|up + swiglu + down + score sum) | 105 | 11.6 MB | 70% |
+| OCR routed experts, fused kernel pair (shipped) | 75 | 11.6 MB | ~95% |
+| OCR router unfused (gemv + softmax + top-6 + take) | 30 | 0.16 MB | dispatch-bound |
+| OCR router, gemv + fused softmax/top-6 (shipped) | 15 | 0.16 MB | dispatch-bound |
+| OCR router: gate matmul (W_g.T view) + softmax + top-6 | ~8.5 + 2.6 + ~12 | — | dispatch-bound |
+| OCR sdpa 10 heads, kv 2455 (prefill + ring) | 102.2 | 12.6 MB | 74% |
+| OCR `sdpa_decode`, kv 2455 (shipped) | 80 | 12.6 MB | ~95% |
+| OCR lm_head 1280->129280 (per token) | 561 | 93 MB | ~100% |
+
+Where an OCR token's ~5.1 ms goes: attention over the kept 2327-token prefill
+KV ~1.2 ms, routed experts ~1.0 ms, q/k/v/o ~0.55 ms, shared experts ~0.5 ms,
+lm_head 0.56 ms, router ~0.25 ms, the rest small ops. ASR is dominated by
+qmv (~6 ms of ~8.5 ms) already at 60-84% of roofline, plus lm_head at
+roofline.
+
+Candidates ranked by expected saving per token:
+
+1. ~~Fused q|k|v projection~~ (tried 2026-10-26, not kept): outputs were
+   byte-identical (3 ASR clips, 7 OCR images) but decode moved <1% (OCR
+   196-204 tok/s both ways). In the real graph the three projections share
+   an input, so MLX dispatches them concurrently: 41.8 µs per ASR layer vs
+   35.6 µs fused, not the 44 µs the serial chain suggests.
+2. Fused MoE expert kernel (shipped 2026-10-26): `mlx_moe_swiglu_4bit`,
+   two custom Metal kernels (gate|up + SwiGLU, down + weighted sum) for
+   single-token steps. Experts per layer 105 -> 75 µs in the chain (~95%
+   of roofline); OCR decode 229-232 -> 238-247 tok/s (+7%), markdown
+   byte-identical on 7 images. The kernels mirror mlx `qmv_impl`
+   accumulation order and bf16 rounding, so the output is bit-identical
+   to the `gather_qmm` graph. Layouts that kept more activations per lane
+   (registers or threadgroup memory) lost occupancy and ran 100-173 µs.
+   The shared-expert and layer-0 dense MLPs run through the same kernel as
+   one expert with score 1 (bit-identical to the `quantized_matmul` MLP:
+   M=1 takes `qmv_impl` for K=1280/1792/6848): OCR decode ~259 -> ~262
+   tok/s (+1.5%), markdown byte-identical on 7 images. The down kernel
+   also takes up to two `[D]` addends (shared-expert output, then the
+   residual), each rounded like mlx `add`, removing two dispatches per
+   layer: OCR decode ~267 -> ~274 tok/s (+2.7%), byte-identical.
+3. Decode attention (shipped 2026-10-26): mlx already splits long KV
+   (`sdpa_vector_2pass` for kv >= 1024 on M2 Pro, 64 blocks for 1 query
+   head per KV head); `MLX_SDPA_BLOCKS` 32-512 did not help.
+   `mlx_sdpa_decode` is the same two kernels without pass 1's 4-key
+   register prefetch: one key per step keeps more simdgroups resident.
+   Same blocks, token order and float ops, so bit-identical; it falls back
+   to mlx sdpa wherever mlx would not take the plain 2-pass kernel.
+   89 -> 80 µs (OCR kv 2455), 39 -> 35 µs and 89 -> 78 µs (ASR GQA kv
+   1024 / 3000). OCR decode ~263 -> ~271 tok/s (+3%), markdown
+   byte-identical on 7 images; a 5-minute ASR clip 22.85 -> 22.17 s, text
+   identical (short clips stay under 1024 KV and are unchanged). Packing
+   2-16 blocks per threadgroup and 2/8-key prefetch were no better.
+4. Fused router (shipped 2026-10-26): `mlx_moe_router` keeps mlx's gate
+   gemv and replaces softmax + `argpartition` + `take_along_axis` with one
+   simdgroup kernel (mirrors `softmax_single_row`; `argpartition` is a stable
+   sort on Metal, so top-6 come out in ascending (score, index) order).
+   Router chain 30 -> 15 µs per layer; OCR decode ~245 -> ~259 tok/s
+   (+5.5%), markdown byte-identical on 7 images. A mirrored one-row-per-
+   threadgroup gemv saved only 0.8 µs more (dispatch-floor bound), not kept.
+   A single-threadgroup gemv + softmax + top-k ran 70 µs (one core).
+5. Small-op fusion (measured 2026-10-26, not kept): a bit-identical
+   residual add + RMSNorm kernel (mirrors `rms_single_row`) saves only
+   ~0.5 µs per fusion in a chain (6.4 -> 5.9 µs at d 2048). Wired into
+   both decoders (OCR -1, ASR -2 dispatches per layer) it was within noise
+   end to end: OCR decode ~276 tok/s either way, the 5-minute ASR clip
+   21.94 -> 21.82 s but the 1-minute clip 2.58 -> 2.60 s. Fusing rope for
+   q and k saves one such dispatch; a custom kernel cannot write the KV
+   row in place (`metal_kernel` outputs are fresh buffers), so the
+   remaining small ops are below the measurable floor.
+
+Caveat: the chain serializes every op, so it overstates ops that run
+concurrently in the decoder (q/k/v, gate/up, shared vs routed experts).
+Treat the per-op times as upper bounds and the serially dependent paths
+(router -> experts, attention) as the reliable targets. Ceiling if all land:
+OCR decode ~1.2x, ASR ~1.1x. Prefill and the OCR
+vision tower (2.6 s of a 4.8 s page) are separate targets.
+
+OCR vision tower (2026-10-26, sym-6, 12 crops + global view, ~1.5 s):
+SAM over the crops is ~1.0 s (window blocks ~75 ms, global blocks ~95 ms
+at B = 12), the global view's SAM ~0.27 s, CLIP ~0.23 s. The bf16 GEMMs
+(qkv, lin1, lin2) run at 4-5 TFLOPS. `gelu` was five unfused elementwise
+kernels (7.5 ms per crop block); it is now compiled like `mlx.nn.gelu`
+(`@mx.compile(shapeless=True)`, intermediates keep their dtype) into one
+kernel (3.1 ms): vision 1.505 -> 1.432 s per page, OCR markdown and ASR
+text identical (the first run on a machine pays a one-time Metal compile).
+The rel-pos bias broadcast add already writes ~104 GB/s in isolation; a
+custom kernel was no faster (the 25 ms seen under per-op evals is
+first-touch allocation).
 
 ## Smoke-test record (Python era)
 
