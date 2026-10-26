@@ -601,7 +601,7 @@ impl MlxDecoder {
             embed,
             layers,
             final_norm: mlx_raw_vector(store, "model.norm.weight", hidden)?,
-            sdpa_decode: !aimd_mlx::device_is_cpu().unwrap_or(true),
+            sdpa_decode: aimd_mlx::metal_kernels_available().unwrap_or(false),
         })
     }
 

@@ -38,10 +38,12 @@ behavior and accuracy unchanged vs macOS.
       for Linux x86_64.
 - [ ] `aimd-mlx` builds and links on Linux against that formula; the
       hermetic workspace tests pass there.
-- [ ] ASR and OCR pass the golden-corpus gate on metacube against the
+- [x] ASR and OCR pass the golden-corpus gate on metacube against the
       mlx-audio / mlx-vlm baseline (built on macOS, copied over).
-- [ ] ASR >= 10x realtime and healthy OCR pages <= 15 s on metacube;
-      numbers recorded in `docs/performance.md`.
+      Evidence: 2026-10-26 entry below; all five checkpoints identical.
+- [x] ASR >= 10x realtime and healthy OCR pages <= 15 s on metacube;
+      numbers recorded in `docs/performance.md`. Evidence: 112x realtime
+      on a 60 s clip, 0.72 s per dense page.
 - [ ] Linux `aimd` bottle in the tap; a Linux CI job (self-hosted runner)
       runs the Rust gates.
 
@@ -65,6 +67,7 @@ Not in scope:
 | Date | Decision | Rationale | Affected workstreams |
 | --- | --- | --- | --- |
 | 2026-10-26 | Spec opened as Draft from spec 002 WS-09; the mlx-cuda formula strategy and the CI runner host are open decisions | Spec 002 closed on macOS; Linux work needs its own contract | WS-01 |
+| 2026-10-26 | The WS-08 custom kernels gate on `aimd_mlx::metal_kernels_available()` (GPU device and `metal::is_available()`), not `!device_is_cpu()`; CUDA runs plain mlx ops | `device_is_cpu` is false on CUDA, so the old gate dispatched Metal kernels there | WS-01 |
 
 ## Workstreams
 
@@ -72,7 +75,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR corpus gate against the Python reference, Linux bottle build + self-hosted CI runner (from spec 002 WS-09) | Unassigned | Pending | None | Corpus gate PASS on metacube; `brew install` of the tap formulas + Linux bottle works; perf rows in docs/performance.md |
+| WS-01 | Linux on metacube/dspark via the `mlx` CUDA backend: tap formula for a C++-only mlx built with CUDA, `aimd-mlx` build.rs made OS-conditional (Linux `.so`, `MLX_PREFIX`), ASR + OCR corpus gate against the Python reference, Linux bottle build + self-hosted CI runner (from spec 002 WS-09) | shuuul | In progress | None | Corpus gate PASS on metacube; `brew install` of the tap formulas + Linux bottle works; perf rows in docs/performance.md |
 
 ## Verification
 
@@ -107,6 +110,36 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: decide the mlx-cuda formula strategy, then make
   `aimd-mlx` build on metacube.
+
+### 2026-10-26 — shuuul/metacube bring-up — WS-01
+
+- Changed: `aimd-mlx` build.rs links `libmlx.so` + libstdc++ on Linux;
+  new shim `mlx_metal_kernels_available` gates the fused MoE, decode SDPA
+  and router kernels (macOS outputs unchanged: corpus 72/72, 5/5).
+- Evidence (metacube, RTX 5090, CUDA 13.4, pacman `cudnn` 9.27 / `nccl`
+  2.32, `mlx-cuda-13` 0.32.4 wheel as `MLX_PREFIX`):
+  - Hermetic `AIMD_MLX_DEVICE=cpu cargo test --workspace`: 0 failures.
+  - Checkpoint tier on CUDA (`-p aimd-mlx -p aimd-engine`): 74/76 pass.
+  - Corpus gate: ASR 1.7B-4bit / 1.7B-8bit / 0.6B-6bit 72/72 identical
+    (en WER 0.87/0.44/1.31%, zh CER 3.83/3.55/3.40%); OCR 4bit / 8bit
+    similarity 1.0, stop 5/5, 5/5 pages identical.
+  - Perf: ASR 112x realtime (60 s clip, 0.54 s), OCR 0.72 s per dense
+    page; rows in `docs/performance.md`.
+- Open findings:
+  - `vision_tower_stages_golden` and `vision_final_features_golden` fail
+    on CUDA: drift grows through the SAM/CLIP blocks (block0 0.3%, final
+    4.6-5.3% rel rms vs the 3% bound). Gradual, consistent with cuBLAS
+    bf16 accumulation order; end-to-end markdown is identical. Needs a
+    decision: per-backend bounds vs CUDA goldens.
+  - Dependents of `aimd-mlx` get no rpath (cargo applies `rustc-link-arg`
+    only to the crate's own targets); macOS works through the dylib's
+    absolute install name. Dev runs need `LD_LIBRARY_PATH`; the tap
+    formula should place `libmlx.so` in the brew lib dir.
+  - mlx's CUDA JIT needs `CUDA_HOME` at runtime (formula env / wrapper).
+- Remaining: vision-bound decision, tap mlx-cuda formula, Linux bottle,
+  self-hosted CI runner, dspark (aarch64).
+- Blockers: none.
+- Next action: decide the vision parity bounds, then the formula.
 
 ## Completion summary
 

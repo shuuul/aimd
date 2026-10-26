@@ -357,8 +357,8 @@ impl OcrDecoder {
             ));
         }
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
-        // Custom Metal kernels need the GPU; the CPU device keeps mlx ops.
-        let gpu = !aimd_mlx::device_is_cpu().unwrap_or(true);
+        // Custom Metal kernels need Metal; CPU and CUDA keep mlx ops.
+        let gpu = aimd_mlx::metal_kernels_available().unwrap_or(false);
         let fused_moe = bits == 4 && gpu;
         let p = "language_model.model";
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
