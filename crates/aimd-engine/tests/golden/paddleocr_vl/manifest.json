@@ -666,9 +666,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 157,
-     "prompt_tps": 768.3578491269126,
-     "generation_tps": 160.7924391685901,
-     "elapsed_s": 0.3418131250073202,
+     "prompt_tps": 867.9889676328846,
+     "generation_tps": 206.4917581657735,
+     "elapsed_s": 0.2899407079676166,
      "markdown": "Hello PaddleOCR-VL 2026\nnative MLX in Rust."
     },
     "spotting": {
@@ -713,9 +713,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 319,
-     "prompt_tps": 693.4354231410399,
-     "generation_tps": 114.95548177416529,
-     "elapsed_s": 0.8007036659982987,
+     "prompt_tps": 826.2192082870396,
+     "generation_tps": 198.93935925661222,
+     "elapsed_s": 0.5822362089529634,
      "markdown": "Hello PaddleOCR-VL 2026<|LOC_25|><|LOC_194|><|LOC_732|><|LOC_194|><|LOC_732|><|LOC_395|><|LOC_25|><|LOC_395|>\nnative MLX in Rust.<|LOC_25|><|LOC_563|><|LOC_533|><|LOC_563|><|LOC_533|><|LOC_765|><|LOC_25|><|LOC_765|>",
      "plain": "Hello PaddleOCR-VL 2026\nnative MLX in Rust.",
      "spots": [
@@ -971,9 +971,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 1261,
-     "prompt_tps": 541.7708086054339,
-     "generation_tps": 113.02134036456484,
-     "elapsed_s": 3.383012583013624,
+     "prompt_tps": 636.8649206700547,
+     "generation_tps": 166.7936172058319,
+     "elapsed_s": 2.684432415990159,
      "markdown": "Quarterly Engineering Report\n\nThe native OCR engine converts scanned pages into Markdown for language model workflows. It runs a vision transformer and a compact decoder on MLX.\n\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n\n文档解析将扫描页面转换为结构化文本。\n\nContact: platform team, building 7, room 210."
     },
     "spotting": {
@@ -1168,9 +1168,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 2013,
-     "prompt_tps": 443.9874479728866,
-     "generation_tps": 137.12828489548426,
-     "elapsed_s": 5.987376833974849,
+     "prompt_tps": 515.7586681604548,
+     "generation_tps": 164.2686292081033,
+     "elapsed_s": 5.162280749995261,
      "markdown": "Quarterly Engineering Report<|LOC_69|><|LOC_51|><|LOC_546|><|LOC_51|><|LOC_546|><|LOC_81|><|LOC_69|><|LOC_81|>\nThe native OCR engine converts scanned pages into<|LOC_68|><|LOC_116|><|LOC_669|><|LOC_116|><|LOC_669|><|LOC_138|><|LOC_68|><|LOC_138|>\nMarkdown for language model workflows. It runs a<|LOC_68|><|LOC_152|><|LOC_643|><|LOC_152|><|LOC_643|><|LOC_173|><|LOC_68|><|LOC_173|>\nvision transformer and a compact decoder on MLX.<|LOC_68|><|LOC_188|><|LOC_649|><|LOC_188|><|LOC_649|><|LOC_208|><|LOC_68|><|LOC_208|>\nKey results<|LOC_69|><|LOC_245|><|LOC_223|><|LOC_245|><|LOC_223|><|LOC_269|><|LOC_69|><|LOC_269|>\n1. Latency is measured per page at 144 dpi.<|LOC_70|><|LOC_282|><|LOC_564|><|LOC_282|><|LOC_564|><|LOC_306|><|LOC_70|><|LOC_306|>\n2. Output text matches the reference decoder.<|LOC_68|><|LOC_317|><|LOC_588|><|LOC_317|><|LOC_588|><|LOC_339|><|LOC_68|><|LOC_339|>\n3. Weights load once per process.<|LOC_69|><|LOC_353|><|LOC_455|><|LOC_353|><|LOC_455|><|LOC_376|><|LOC_69|><|LOC_376|>\n文档解析将扫描页面转换为结构化文本。<|LOC_69|><|LOC_406|><|LOC_557|><|LOC_406|><|LOC_557|><|LOC_432|><|LOC_69|><|LOC_432|>\nContact: platform team, building 7, room 210.<|LOC_69|><|LOC_468|><|LOC_580|><|LOC_468|><|LOC_580|><|LOC_492|><|LOC_69|><|LOC_492|>",
      "plain": "Quarterly Engineering Report\nThe native OCR engine converts scanned pages into\nMarkdown for language model workflows. It runs a\nvision transformer and a compact decoder on MLX.\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n文档解析将扫描页面转换为结构化文本。\nContact: platform team, building 7, room 210.",
      "spots": [
@@ -2289,9 +2289,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 157,
-     "prompt_tps": 665.665813293457,
-     "generation_tps": 316.5297801407203,
-     "elapsed_s": 0.33069545798934996,
+     "prompt_tps": 771.4599143143097,
+     "generation_tps": 503.6092040793858,
+     "elapsed_s": 0.2755260419799015,
      "markdown": "Hello PaddleOCR-VL 2026\nnative MLX in Rust."
     },
     "spotting": {
@@ -2336,9 +2336,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 319,
-     "prompt_tps": 624.0105666372223,
-     "generation_tps": 370.16567476866294,
-     "elapsed_s": 0.6217233749921434,
+     "prompt_tps": 725.3863225895182,
+     "generation_tps": 455.67240967691123,
+     "elapsed_s": 0.5322010000236332,
      "markdown": "Hello PaddleOCR-VL 2026<|LOC_25|><|LOC_197|><|LOC_728|><|LOC_197|><|LOC_728|><|LOC_393|><|LOC_25|><|LOC_393|>\nnative MLX in Rust.<|LOC_25|><|LOC_563|><|LOC_532|><|LOC_563|><|LOC_532|><|LOC_763|><|LOC_25|><|LOC_763|>",
      "plain": "Hello PaddleOCR-VL 2026\nnative MLX in Rust.",
      "spots": [
@@ -2594,9 +2594,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 1261,
-     "prompt_tps": 478.15449057432403,
-     "generation_tps": 281.365953562522,
-     "elapsed_s": 3.1055942910024896,
+     "prompt_tps": 559.7332513576042,
+     "generation_tps": 347.6503494601106,
+     "elapsed_s": 2.6330486250226386,
      "markdown": "Quarterly Engineering Report\n\nThe native OCR engine converts scanned pages into Markdown for language model workflows. It runs a vision transformer and a compact decoder on MLX.\n\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n\n文档解析将扫描页面转换为结构化文本。\n\nContact: platform team, building 7, room 210."
     },
     "spotting": {
@@ -2791,9 +2791,9 @@
      ],
      "finish_reason": "stop",
      "prompt_tokens": 2013,
-     "prompt_tps": 394.6724899646075,
-     "generation_tps": 226.29932771332108,
-     "elapsed_s": 6.011959499970544,
+     "prompt_tps": 462.5787201040786,
+     "generation_tps": 320.67161739239486,
+     "elapsed_s": 5.018963083042763,
      "markdown": "Quarterly Engineering Report<|LOC_73|><|LOC_51|><|LOC_543|><|LOC_51|><|LOC_543|><|LOC_79|><|LOC_73|><|LOC_79|>\nThe native OCR engine converts scanned pages into<|LOC_72|><|LOC_117|><|LOC_664|><|LOC_117|><|LOC_664|><|LOC_139|><|LOC_72|><|LOC_139|>\nMarkdown for language model workflows. It runs a<|LOC_72|><|LOC_154|><|LOC_639|><|LOC_154|><|LOC_639|><|LOC_174|><|LOC_72|><|LOC_174|>\nvision transformer and a compact decoder on MLX.<|LOC_72|><|LOC_189|><|LOC_646|><|LOC_189|><|LOC_646|><|LOC_209|><|LOC_72|><|LOC_209|>\nKey results<|LOC_72|><|LOC_243|><|LOC_224|><|LOC_243|><|LOC_224|><|LOC_266|><|LOC_72|><|LOC_266|>\n1. Latency is measured per page at 144 dpi.<|LOC_74|><|LOC_278|><|LOC_563|><|LOC_278|><|LOC_563|><|LOC_301|><|LOC_74|><|LOC_301|>\n2. Output text matches the reference decoder.<|LOC_72|><|LOC_314|><|LOC_586|><|LOC_314|><|LOC_586|><|LOC_334|><|LOC_72|><|LOC_334|>\n3. Weights load once per process.<|LOC_72|><|LOC_350|><|LOC_454|><|LOC_350|><|LOC_454|><|LOC_372|><|LOC_72|><|LOC_372|>\n文档解析将扫描页面转换为结构化文本。<|LOC_72|><|LOC_404|><|LOC_555|><|LOC_404|><|LOC_555|><|LOC_428|><|LOC_72|><|LOC_428|>\nContact: platform team, building 7， room 210.<|LOC_72|><|LOC_467|><|LOC_578|><|LOC_467|><|LOC_578|><|LOC_489|><|LOC_72|><|LOC_489|>",
      "plain": "Quarterly Engineering Report\nThe native OCR engine converts scanned pages into\nMarkdown for language model workflows. It runs a\nvision transformer and a compact decoder on MLX.\nKey results\n1. Latency is measured per page at 144 dpi.\n2. Output text matches the reference decoder.\n3. Weights load once per process.\n文档解析将扫描页面转换为结构化文本。\nContact: platform team, building 7， room 210.",
      "spots": [

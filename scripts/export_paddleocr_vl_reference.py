@@ -17,10 +17,11 @@ Loads the official dense bf16 `PaddlePaddle/PaddleOCR-VL-1.6` and the
 (`mlx_vlm.models.paddleocr_vl`) and writes, into
 `crates/aimd-engine/tests/golden/paddleocr_vl/`:
 
-- `images/{small_text,page_text}.png`: rendered fixtures (only when absent;
-  the committed PNGs are the inputs from then on). `small_text` exercises the
-  smart_resize `min_pixels` upscale path, `page_text` the `max_pixels`
-  downscale path.
+- `images/{small_text,page_text,tall_page}.png`: rendered fixtures (only
+  when absent; the committed PNGs are the inputs from then on). `small_text`
+  exercises the smart_resize `min_pixels` upscale path, `page_text` the
+  `max_pixels` downscale path, and `tall_page` (preprocess only) Pillow 13's
+  vertical-first pass order (height shrinks by more than twice the width).
 - `preprocess.json`: smart_resize cases, the u8 -> bf16 pixel LUT
   (`(v / 255.0 - 0.5) / 0.5` through the exact numpy -> mlx -> bf16 chain),
   and per fixture the resized size, `image_grid_thw`, FNV-1a 64 hashes of the
@@ -77,6 +78,8 @@ from mlx_vlm.utils import prepare_inputs  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "crates" / "aimd-engine" / "tests" / "golden" / "paddleocr_vl"
 IMAGES = OUT / "images"
+# Preprocess-only fixtures: no generation, vision, or spotting goldens.
+PREPROCESS_ONLY = ["tall_page"]
 
 DENSE = "PaddlePaddle/PaddleOCR-VL-1.6"
 Q4 = "mlx-community/PaddleOCR-VL-1.6-4bit"
@@ -146,6 +149,25 @@ def render_fixtures() -> None:
             d.text((70, y), text, fill=(0, 0, 0), font=font)
             y += int(px * 1.7)
         img.save(page)
+    tall = IMAGES / "tall_page.png"
+    if not tall.exists():
+        img = Image.new("RGB", (800, 2600), (255, 255, 255))
+        d = ImageDraw.Draw(img)
+        y = 60
+        while y < 2540:
+            for kind, px, text in PAGE_LINES:
+                if not text:
+                    y += 26
+                    continue
+                path = {"bold": ARIAL_BOLD, "regular": ARIAL, "cjk": CJK}[kind]
+                d.text(
+                    (50, y),
+                    text[:40],
+                    fill=(0, 0, 0),
+                    font=ImageFont.truetype(path, px),
+                )
+                y += int(px * 1.7)
+        img.save(tall)
 
 
 def bf16_bytes(a: mx.array) -> bytes:
@@ -291,6 +313,39 @@ def parse_spots(text: str) -> list[dict]:
         if body.strip():
             spots.append({"text": body.strip(), "quad": quad})
     return spots
+
+
+def preprocess_entry(model, inputs, png: Path, lut_bits: list[int]) -> dict:
+    """The `preprocess.json` fixture row, cross-checked against mlx-vlm."""
+    ids = [int(x) for x in np.array(inputs["input_ids"]).reshape(-1)]
+    grid = inputs["image_grid_thw"]
+    grid_l = [int(x) for x in np.array(grid).reshape(-1)]
+    pv = mx.array(inputs["pixel_values"], dtype=mx.bfloat16)
+    pil = ImageOps.exif_transpose(Image.open(png)).convert("RGB")
+    rh, rw = grid_l[1] * 14, grid_l[2] * 14
+    u8 = np.asarray(pil.resize((rw, rh), Image.Resampling.BICUBIC), dtype=np.uint8)
+    chw = np.array(lut_bits, dtype=np.uint16)[u8].transpose(2, 0, 1)  # [3, H, W]
+    gh, gw = grid_l[1], grid_l[2]
+    patches = (
+        chw.reshape(3, gh, 14, gw, 14).transpose(1, 3, 0, 2, 4).reshape(-1, 3, 14, 14)
+    )
+    pv_bits = np.array(pv.view(mx.uint16)).reshape(-1, 3, 14, 14)
+    assert (patches == pv_bits).all(), f"{png.name}: LUT/patchify mismatch"
+    pos, delta = model.language_model.get_rope_index(
+        inputs["input_ids"], grid, None, None
+    )
+    return {
+        "image": f"images/{png.name}",
+        "size_wh": list(pil.size),
+        "resized_hw": [rh, rw],
+        "grid_thw": grid_l,
+        "resized_rgb8_fnv1a64": fnv1a64(u8.tobytes()),
+        "pixel_bf16_fnv1a64": fnv1a64(pv_bits.astype("<u2").tobytes()),
+        "n_patches": int(pv_bits.shape[0]),
+        "prompt_ids": ids,
+        "position_ids": np.array(pos).reshape(3, -1).astype(int).tolist(),
+        "rope_delta": int(np.array(delta).reshape(-1)[0]),
+    }
 
 
 def processor_inputs(processor, prompt: str, png: Path):
@@ -513,39 +568,12 @@ def main() -> None:
             inputs = processor_inputs(processor, prompt, png)
             ids = [int(x) for x in np.array(inputs["input_ids"]).reshape(-1)]
             grid = inputs["image_grid_thw"]
-            grid_l = [int(x) for x in np.array(grid).reshape(-1)]
             pv = mx.array(inputs["pixel_values"], dtype=mx.bfloat16)
             mx.eval(pv)
             if prec == "bf16":
-                pil = Image.open(png)
-                pil = ImageOps.exif_transpose(pil).convert("RGB")
-                rh, rw = grid_l[1] * 14, grid_l[2] * 14
-                resized = pil.resize((rw, rh), Image.Resampling.BICUBIC)
-                u8 = np.asarray(resized, dtype=np.uint8)
-                lut = np.array(preprocess["pixel_lut_bf16"], dtype=np.uint16)
-                chw = lut[u8].transpose(2, 0, 1)  # [3, H, W]
-                gh, gw = grid_l[1], grid_l[2]
-                patches = (
-                    chw.reshape(3, gh, 14, gw, 14)
-                    .transpose(1, 3, 0, 2, 4)
-                    .reshape(-1, 3, 14, 14)
+                preprocess["fixtures"][name] = preprocess_entry(
+                    model, inputs, png, preprocess["pixel_lut_bf16"]
                 )
-                pv_bits = np.array(pv.view(mx.uint16)).reshape(-1, 3, 14, 14)
-                assert (patches == pv_bits).all(), f"{name}: LUT/patchify mismatch"
-                lm = model.language_model
-                pos, delta = lm.get_rope_index(inputs["input_ids"], grid, None, None)
-                preprocess["fixtures"][name] = {
-                    "image": f"images/{name}.png",
-                    "size_wh": list(pil.size),
-                    "resized_hw": [rh, rw],
-                    "grid_thw": grid_l,
-                    "resized_rgb8_fnv1a64": fnv1a64(u8.tobytes()),
-                    "pixel_bf16_fnv1a64": fnv1a64(pv_bits.astype("<u2").tobytes()),
-                    "n_patches": int(pv_bits.shape[0]),
-                    "prompt_ids": ids,
-                    "position_ids": np.array(pos).reshape(3, -1).astype(int).tolist(),
-                    "rope_delta": int(np.array(delta).reshape(-1)[0]),
-                }
             else:
                 assert preprocess["fixtures"][name]["prompt_ids"] == ids
             fx: dict = {}
@@ -586,6 +614,16 @@ def main() -> None:
                 file=sys.stderr,
             )
             prec_entry["fixtures"][name] = fx
+        if prec == "bf16":
+            for name in PREPROCESS_ONLY:
+                png = IMAGES / f"{name}.png"
+                inputs = processor_inputs(processor, prompt, png)
+                entry = preprocess_entry(
+                    model, inputs, png, preprocess["pixel_lut_bf16"]
+                )
+                (w, h), (rh, rw) = entry["size_wh"], entry["resized_hw"]
+                assert h - rh > 2 * (w - rw) > 0, f"{name}: not vertical-first"
+                preprocess["fixtures"][name] = entry
         spotting(model, processor, prec, prec_entry, manifest, preprocess)
         if prec == "bf16":
             dense_model = model

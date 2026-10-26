@@ -8,8 +8,9 @@
 //! 1. `smart_resize(h, w, factor = patch * merge = 28, min_pixels,
 //!    max_pixels)` in f64 with Python's round-half-even;
 //! 2. PIL `Image.resize((w', h'), BICUBIC)` — the PIL-exact fixed-point
-//!    resampler shared with Unlimited-OCR
-//!    ([`crate::models::unlimited_ocr::preprocess::resize_bicubic_pil`]);
+//!    resampler shared with Unlimited-OCR, in Pillow 13's pass order
+//!    (vertical first when the height shrinks by more than twice the width;
+//!    the `tall_page` fixture covers it);
 //! 3. `(u8 / 255.0 - 0.5) / 0.5` in f64, then the model's
 //!    `mx.array(pixel_values, dtype=bfloat16)` — a fixed 256-entry u8 ->
 //!    bf16 table ([`pixel_lut`]);
@@ -19,7 +20,7 @@
 use half::bf16;
 
 use super::config::PreprocessorConfig;
-use crate::models::unlimited_ocr::preprocess::{PreprocessError, resize_bicubic_pil};
+use crate::models::unlimited_ocr::preprocess::{PassOrder, PilFilter, PreprocessError, resize_pil};
 
 /// Prompt text before the image run (`chat_template.jinja` for one user
 /// turn with one image, as rendered by mlx-vlm `apply_chat_template`).
@@ -149,7 +150,15 @@ pub fn resize_rgb8(
     }
     let factor = cfg.patch_size * cfg.merge_size;
     let (rh, rw) = smart_resize(height, width, factor, cfg.min_pixels, cfg.max_pixels)?;
-    let resized = resize_bicubic_pil(rgb, width, height, rw, rh)?;
+    let resized = resize_pil(
+        rgb,
+        width,
+        height,
+        rw,
+        rh,
+        PilFilter::Bicubic,
+        PassOrder::Pillow13,
+    )?;
     Ok((resized, rh, rw))
 }
 
