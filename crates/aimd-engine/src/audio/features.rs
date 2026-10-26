@@ -58,9 +58,83 @@ impl MelSpectrogram {
     }
 }
 
+/// Smallest frame batch worth a thread (short clips stay on one thread).
+const MIN_FRAMES_PER_THREAD: usize = 256;
+
+/// Shared read-only state for computing mel columns.
+struct FrameCtx<'a> {
+    samples: &'a [f32],
+    window: &'a [f64],
+    plan: &'a FftPlan,
+    fb: &'a [f64],
+    spans: &'a [(usize, usize)],
+    config: &'a MelConfig,
+}
+
+impl FrameCtx<'_> {
+    /// Mel columns (pre-log, `n_mels` each) of frames `first..` into `out`.
+    fn columns(&self, first: usize, out: &mut [f64]) {
+        let config = self.config;
+        let (samples, n) = (self.samples, self.samples.len());
+        let pad = config.n_fft / 2;
+        let n_mels = config.n_mels;
+        let mut scratch = FftScratch::default();
+        let mut re = vec![0.0f64; config.n_fft];
+        let mut im = vec![0.0f64; config.n_fft];
+        let mut power = vec![0.0f64; config.freq_bins()];
+        for (k, column) in out.chunks_mut(n_mels).enumerate() {
+            let t = first + k;
+            // Gather frame t through the virtual reflect padding.
+            for (j, &w) in self.window.iter().enumerate() {
+                let pos = t * config.hop_length + j;
+                let frame_sample = if pos < pad {
+                    samples[pad - pos]
+                } else if pos >= pad + n {
+                    // y[p + n + q] = x[n - 2 - q]
+                    samples[n - 2 - (pos - pad - n)]
+                } else {
+                    samples[pos - pad]
+                };
+                // Frame product cast through f32 (the reference multiplies f32).
+                re[j] = f64::from((f64::from(frame_sample) * w) as f32);
+                im[j] = 0.0;
+            }
+
+            self.plan.fft_in_place(&mut re, &mut im, &mut scratch);
+
+            for (bin, p) in power.iter_mut().enumerate() {
+                let magnitude_sq = re[bin] * re[bin] + im[bin] * im[bin];
+                // Power cast through f32 (the reference holds f32 magnitudes).
+                *p = f64::from(magnitude_sq as f32);
+            }
+
+            // Mel column: filterbank matmul with f64 accumulation.
+            for (bin, &p) in power.iter().enumerate() {
+                if p == 0.0 {
+                    continue; // exact: contributes nothing
+                }
+                let (lo, hi) = self.spans[bin];
+                let weights = &self.fb[bin * n_mels + lo..bin * n_mels + hi];
+                for (c, &w) in column[lo..hi].iter_mut().zip(weights) {
+                    *c += w * p;
+                }
+            }
+        }
+    }
+}
+
 /// Compute the log-mel spectrogram of `samples` (16 kHz mono f32, `[-1, 1]`)
 /// under `config`.
 pub fn mel_spectrogram(samples: &[f32], config: &MelConfig) -> Result<MelSpectrogram, AudioError> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    mel_spectrogram_threads(samples, config, threads)
+}
+
+fn mel_spectrogram_threads(
+    samples: &[f32],
+    config: &MelConfig,
+    threads: usize,
+) -> Result<MelSpectrogram, AudioError> {
     config.validate()?;
 
     let n = samples.len();
@@ -94,57 +168,45 @@ pub fn mel_spectrogram(samples: &[f32], config: &MelConfig) -> Result<MelSpectro
         .collect();
 
     let plan = FftPlan::new(config.n_fft);
-    let mut scratch = FftScratch::default();
     // Filterbank cast through f32 like the extractor's torch tensor.
     let fb: Vec<f64> = mel_filterbank(config)
         .into_iter()
         .map(|w| f64::from(w as f32))
         .collect();
-
     let n_mels = config.n_mels;
-    let n_bins = config.freq_bins();
+    // Nonzero filterbank span per bin: skipped weights add exactly +0.
+    let spans: Vec<(usize, usize)> = fb
+        .chunks(n_mels)
+        .map(|w| match w.iter().position(|&v| v != 0.0) {
+            Some(lo) => (
+                lo,
+                n_mels - w.iter().rev().position(|&v| v != 0.0).unwrap_or(0),
+            ),
+            None => (0, 0),
+        })
+        .collect();
+    let frame_ctx = FrameCtx {
+        samples,
+        window: &window,
+        plan: &plan,
+        fb: &fb,
+        spans: &spans,
+        config,
+    };
+
+    // Frames are independent: split them over threads into frame-major
+    // columns, then transpose. Each value is computed exactly as on one
+    // thread.
+    let mut columns = vec![0.0f64; n_mels * frames];
+    let per = frames.div_ceil(threads.max(1)).max(MIN_FRAMES_PER_THREAD);
+    std::thread::scope(|scope| {
+        for (i, chunk) in columns.chunks_mut(per * n_mels).enumerate() {
+            let ctx = &frame_ctx;
+            scope.spawn(move || ctx.columns(i * per, chunk));
+        }
+    });
     let mut mel = vec![0.0f64; n_mels * frames];
-    let mut re = vec![0.0f64; config.n_fft];
-    let mut im = vec![0.0f64; config.n_fft];
-    let mut power = vec![0.0f64; n_bins];
-    let mut column = vec![0.0f64; n_mels];
-
-    for t in 0..frames {
-        // Gather frame t through the virtual reflect padding.
-        for (j, &w) in window.iter().enumerate() {
-            let pos = t * config.hop_length + j;
-            let frame_sample = if pos < pad {
-                samples[pad - pos]
-            } else if pos >= pad + n {
-                // y[p + n + q] = x[n - 2 - q]
-                samples[n - 2 - (pos - pad - n)]
-            } else {
-                samples[pos - pad]
-            };
-            // Frame product cast through f32 (the reference multiplies f32).
-            re[j] = f64::from((f64::from(frame_sample) * w) as f32);
-            im[j] = 0.0;
-        }
-
-        plan.fft_in_place(&mut re, &mut im, &mut scratch);
-
-        for (bin, p) in power.iter_mut().enumerate() {
-            let magnitude_sq = re[bin] * re[bin] + im[bin] * im[bin];
-            // Power cast through f32 (the reference holds f32 magnitudes).
-            *p = f64::from(magnitude_sq as f32);
-        }
-
-        // Mel column: filterbank matmul with f64 accumulation.
-        column.fill(0.0);
-        for (bin, &p) in power.iter().enumerate() {
-            if p == 0.0 {
-                continue; // exact: contributes nothing
-            }
-            let weights = &fb[bin * n_mels..(bin + 1) * n_mels];
-            for (m, &w) in weights.iter().enumerate() {
-                column[m] += w * p;
-            }
-        }
+    for (t, column) in columns.chunks(n_mels).enumerate() {
         for (m, &v) in column.iter().enumerate() {
             mel[m * frames + t] = v;
         }
@@ -177,7 +239,7 @@ mod golden_tests {
 
     use serde_json::Value;
 
-    use super::mel_spectrogram;
+    use super::{mel_spectrogram, mel_spectrogram_threads};
     use crate::audio::config::MelConfig;
     use crate::audio::error::AudioError;
     use crate::audio::filterbank::mel_filterbank;
@@ -214,6 +276,32 @@ mod golden_tests {
     /// STFT round-off at quiet bins).
     const ABS_TOL: f64 = 1e-2;
     const REL_TOL: f64 = 1e-3;
+
+    #[test]
+    fn mel_threads_match_single_thread() {
+        // 20 s of a chirp plus noise-like LCG: 2000 frames, several chunks.
+        let mut state = 7u64;
+        let samples: Vec<f32> = (0..320_000)
+            .map(|i| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let noise = (state >> 40) as f32 / (1u64 << 24) as f32 - 0.5;
+                let t = i as f32 / 16_000.0;
+                0.5 * (t * t * 900.0).sin() + 0.1 * noise
+            })
+            .collect();
+        let config = MelConfig::default();
+        let one = mel_spectrogram_threads(&samples, &config, 1).unwrap();
+        let many = mel_spectrogram_threads(&samples, &config, 7).unwrap();
+        assert_eq!(one.frames, 2000);
+        let same = one
+            .data
+            .iter()
+            .zip(&many.data)
+            .all(|(a, b)| a.to_bits() == b.to_bits());
+        assert!(same, "threaded mel differs from single-thread");
+    }
 
     #[test]
     fn audio_mel_golden_parity() {
