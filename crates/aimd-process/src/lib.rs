@@ -123,6 +123,23 @@ pub trait OcrModel: Send + Sync {
             ..LocatedOcr::default()
         })
     }
+
+    /// Most PDF pages one [`Self::recognize_pages`] request takes; 1 (the
+    /// default) keeps PDFs on the page-by-page [`Self::recognize_located`]
+    /// path.
+    fn pages_per_request(&self) -> usize {
+        1
+    }
+
+    /// Recognizes consecutive encoded page images as one request (at most
+    /// [`Self::pages_per_request`]); one entry per page, in order. A blank
+    /// page has empty `markdown`.
+    fn recognize_pages(&self, pages: &[&[u8]]) -> std::result::Result<Vec<LocatedOcr>, OcrFailure> {
+        let _ = pages;
+        Err(OcrFailure::Other(
+            "multi-page OCR requests are not supported".into(),
+        ))
+    }
 }
 
 /// OCR Markdown with positions; `bbox`/`quad` are normalized to the page

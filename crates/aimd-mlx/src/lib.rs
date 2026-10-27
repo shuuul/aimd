@@ -59,6 +59,10 @@
 
 use std::ffi::CStr;
 
+mod dash;
+
+pub use dash::{DashDecodeCtx, DashLayerConsts, DashMode, DashParams, DashPromptState, DashRoute};
+
 /// Errors surfaced by the MLX backend.
 #[derive(Debug, thiserror::Error)]
 pub enum MlxError {
@@ -71,7 +75,7 @@ pub enum MlxError {
 /// Element dtypes exposed by the shim.
 ///
 /// Codes match the C ABI in `shim/shim.cpp` (0 = f16, 1 = bf16, 2 = f32,
-/// 3 = u32, 4 = u8).
+/// 3 = u32, 4 = u8, 5 = i32, 6 = bool).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MlxDtype {
     /// IEEE half precision (compute dtype).
@@ -84,6 +88,10 @@ pub enum MlxDtype {
     U32,
     /// Unsigned 8-bit.
     U8,
+    /// Signed 32-bit (positions, page coordinates).
+    I32,
+    /// Boolean (one byte per element).
+    Bool,
 }
 
 impl MlxDtype {
@@ -91,8 +99,8 @@ impl MlxDtype {
     pub fn size_bytes(self) -> usize {
         match self {
             MlxDtype::F16 | MlxDtype::Bf16 => 2,
-            MlxDtype::F32 | MlxDtype::U32 => 4,
-            MlxDtype::U8 => 1,
+            MlxDtype::F32 | MlxDtype::U32 | MlxDtype::I32 => 4,
+            MlxDtype::U8 | MlxDtype::Bool => 1,
         }
     }
 
@@ -103,6 +111,8 @@ impl MlxDtype {
             MlxDtype::F32 => 2,
             MlxDtype::U32 => 3,
             MlxDtype::U8 => 4,
+            MlxDtype::I32 => 5,
+            MlxDtype::Bool => 6,
         }
     }
 
@@ -113,6 +123,8 @@ impl MlxDtype {
             2 => Ok(MlxDtype::F32),
             3 => Ok(MlxDtype::U32),
             4 => Ok(MlxDtype::U8),
+            5 => Ok(MlxDtype::I32),
+            6 => Ok(MlxDtype::Bool),
             other => Err(MlxError::Op(format!(
                 "mlx returned unknown dtype code {other}"
             ))),
@@ -573,6 +585,18 @@ impl MlxArray {
     /// Copies `u8` elements into an mlx array.
     pub fn from_u8(shape: &[usize], data: &[u8]) -> Result<Self, MlxError> {
         Self::from_bytes(data, MlxDtype::U8, shape)
+    }
+
+    /// Packs `i32` elements into an mlx array.
+    pub fn from_i32(shape: &[usize], data: &[i32]) -> Result<Self, MlxError> {
+        let bytes = pack(data, i32::to_le_bytes);
+        Self::from_bytes(&bytes, MlxDtype::I32, shape)
+    }
+
+    /// Packs `bool` elements into an mlx array.
+    pub fn from_bool(shape: &[usize], data: &[bool]) -> Result<Self, MlxError> {
+        let bytes: Vec<u8> = data.iter().map(|&b| u8::from(b)).collect();
+        Self::from_bytes(&bytes, MlxDtype::Bool, shape)
     }
 
     /// Builds a quantized weight triple the way checkpoints store it: the

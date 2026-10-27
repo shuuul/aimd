@@ -114,7 +114,7 @@ pub fn download_snapshot(
             ))
         })?
         .to_string();
-    let files: Vec<String> = info
+    let mut files: Vec<String> = info
         .get("siblings")
         .and_then(Value::as_array)
         .into_iter()
@@ -123,6 +123,9 @@ pub fn download_snapshot(
         .filter(|n| wanted(n))
         .map(str::to_string)
         .collect();
+    // `config.json` marks a complete snapshot (`cached_snapshot`), so it lands
+    // last: an interrupted download must not look cached.
+    files.sort_by_key(|n| n == "config.json");
     let root = cache.join(repo_folder(repo_id));
     let snapshot = root.join("snapshots").join(&sha);
     let io = |e: std::io::Error| {

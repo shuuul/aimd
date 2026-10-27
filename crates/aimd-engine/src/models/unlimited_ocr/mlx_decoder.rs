@@ -26,16 +26,24 @@
 //! - Final RMSNorm and the untied 4-bit `lm_head`.
 //! - Embeddings are `nn.QuantizedEmbedding` (row gather + dequantize).
 //!
+//! Unlimited-OCR-2 checkpoints (`sparse_attention_config.training_stage ==
+//! "dash"`) keep these weights and swap the attention for DASH (mlx-vlm
+//! `models/unlimited_ocr/dash.py`): page2d RoPE (`rotate_half`) on q/k, a
+//! per-layer dense `dash_router`, a full KV cache, and block-sparse
+//! attention (12 routed 32-token blocks + a 128-token local window) through
+//! `MlxArray::dash_prefill` / `MlxArray::dash_decode`. Never dense.
+//!
 //! The caches live in [`crate::models::kv_cache`].
 
 use std::path::Path;
 
-use aimd_mlx::{MlxArray, MlxError, SdpaMask};
+use aimd_mlx::{DashLayerConsts, DashMode, MlxArray, MlxError, SdpaMask};
 use aimd_weights::{WeightStore, WeightsError, load_checkpoint};
 
 use crate::models::kv_cache::KvCache;
 
 use super::config::{LanguageConfig, UnlimitedOcrConfig, parse_config};
+use super::dash::{DashIndexCache, DashRouter, DashRun, DashSpec, DashStep};
 use super::mlx_weights::{LoadError, QWeights, dense};
 
 /// Errors surfaced by the decoder.
@@ -53,6 +61,8 @@ pub enum DecoderError {
     Config(String),
     #[error("layout: {0}")]
     Layout(String),
+    #[error("dash: {0}")]
+    Dash(String),
 }
 
 struct Attention {
@@ -66,10 +76,28 @@ struct Attention {
     rope_base: f64,
     /// Single-token steps use [`MlxArray::sdpa_decode`] (GPU device only).
     sdpa_decode: bool,
+    /// Unlimited-OCR-2 DASH router and per-layer constants.
+    dash: Option<(DashRouter, DashLayerConsts)>,
+}
+
+/// One layer's view of a DASH forward.
+struct DashIo<'a> {
+    spec: &'a DashSpec,
+    step: &'a DashStep,
+    index: &'a mut DashIndexCache,
+    eps: f32,
 }
 
 impl Attention {
-    fn forward(&self, x: &MlxArray, cache: &mut KvCache) -> Result<MlxArray, MlxError> {
+    fn forward(
+        &self,
+        x: &MlxArray,
+        cache: &mut KvCache,
+        dash: Option<DashIo<'_>>,
+    ) -> Result<MlxArray, MlxError> {
+        if let (Some(io), Some(layer)) = (dash, &self.dash) {
+            return self.forward_dash(x, cache, io, layer);
+        }
         let s = x.shape()?;
         let (b, l) = (s[0], s[1]);
         let hd = self.head_dim;
@@ -108,6 +136,112 @@ impl Attention {
             .reshape(&[b, l, self.heads * hd])?;
         self.o.linear(&o)
     }
+
+    /// `DashAttention.__call__` (batch 1).
+    fn forward_dash(
+        &self,
+        x: &MlxArray,
+        cache: &mut KvCache,
+        io: DashIo<'_>,
+        (router, consts): &(DashRouter, DashLayerConsts),
+    ) -> Result<MlxArray, MlxError> {
+        let s = x.shape()?;
+        let (b, l) = (s[0], s[1]);
+        let hd = self.head_dim;
+        let step = io.step;
+        let decode = step.decode();
+        let proj = |w: &QWeights, heads: usize| -> Result<MlxArray, MlxError> {
+            w.linear(x)?
+                .reshape(&[b, l, heads, hd])?
+                .transpose(&[0, 2, 1, 3])
+        };
+        let q = proj(&self.q, self.heads)?.dash_apply_rope(&step.cos, &step.sin, decode)?;
+        let k = proj(&self.k, self.kv_heads)?.dash_apply_rope(&step.cos, &step.sin, decode)?;
+        let v = proj(&self.v, self.kv_heads)?;
+        cache.update_and_fetch(&k, &v)?;
+        let (keys, values) = cache.buffers().expect("updated");
+
+        let (idx_q, idx_k) = router.index_qk(x, step, io.eps)?;
+        let p = &io.spec.params;
+        io.index
+            .add_index_keys(&idx_k, router.head_cls(), p.block_size as usize)?;
+        let cand = step.cand.as_ref();
+        let o = if let Some(pos) = &step.pos {
+            let cand = cand.expect("decode candidates");
+            let cap = cand.shape()?[1];
+            let sums = io.index.summary_buffer(cap, io.spec.index_dim)?;
+            q.dash_decode(
+                keys,
+                values,
+                &idx_q,
+                &sums,
+                cand,
+                pos,
+                p,
+                consts,
+                DashMode::Auto,
+            )?
+        } else {
+            let sums = io.index.block_summaries()?;
+            let (o, route) = q.dash_prefill(
+                keys,
+                values,
+                &idx_q,
+                sums.as_ref(),
+                cand,
+                step.offset as i32,
+                p,
+                consts,
+                DashMode::Auto,
+                route_probe::active(),
+            )?;
+            route_probe::record(route);
+            o
+        };
+        let o = o
+            .transpose(&[0, 2, 1, 3])?
+            .reshape(&[b, l, self.heads * hd])?;
+        self.o.linear(&o)
+    }
+}
+
+/// Test hook: the prefill routing of each layer, in call order.
+#[cfg(test)]
+pub(crate) mod route_probe {
+    use std::cell::RefCell;
+
+    use aimd_mlx::DashRoute;
+
+    thread_local! {
+        static ROUTES: RefCell<Option<Vec<DashRoute>>> = const { RefCell::new(None) };
+    }
+
+    pub(crate) fn start() {
+        ROUTES.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    }
+
+    pub(crate) fn take() -> Vec<DashRoute> {
+        ROUTES.with(|r| r.borrow_mut().take()).unwrap_or_default()
+    }
+
+    pub(super) fn active() -> bool {
+        ROUTES.with(|r| r.borrow().is_some())
+    }
+
+    pub(super) fn record(route: Option<DashRoute>) {
+        if let Some(route) = route {
+            ROUTES.with(|r| r.borrow_mut().as_mut().map(|v| v.push(route)));
+        }
+    }
+}
+
+#[cfg(not(test))]
+mod route_probe {
+    pub(super) fn active() -> bool {
+        false
+    }
+
+    pub(super) fn record(_: Option<aimd_mlx::DashRoute>) {}
 }
 
 /// `DeepseekMLP`: `down(swiglu(gate(x), up(x)))`.
@@ -314,6 +448,37 @@ pub struct OcrDecoder {
     norm: MlxArray,
     lm_head: QWeights,
     eps: f32,
+    dash: Option<DashSpec>,
+}
+
+/// Generation cache: per-layer KV plus, for Unlimited-OCR-2, the DASH
+/// prompt/decode state and router caches.
+pub(crate) struct OcrCache {
+    pub(crate) kv: Vec<KvCache>,
+    pub(crate) dash: Option<DashRun>,
+}
+
+impl OcrCache {
+    /// Arrays to evaluate after a prefill chunk (`cache.state` + router
+    /// summaries).
+    pub(crate) fn state(&self) -> Result<Vec<MlxArray>, MlxError> {
+        let mut out = Vec::with_capacity(self.kv.len() * 3);
+        for c in &self.kv {
+            out.extend(c.state()?);
+        }
+        if let Some(run) = &self.dash {
+            for l in &run.layers {
+                for a in l.state() {
+                    out.push(a.try_clone()?);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn offset(&self) -> usize {
+        self.kv.first().map_or(0, KvCache::offset)
+    }
 }
 
 impl std::fmt::Debug for OcrDecoder {
@@ -359,6 +524,13 @@ impl OcrDecoder {
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
         // Custom Metal kernels need Metal; CPU and CUDA keep mlx ops.
         let gpu = aimd_mlx::metal_kernels_available().unwrap_or(false);
+        let dash = match &full.sparse_attention_config {
+            Some(sp) if sp.is_dash() => Some(
+                DashSpec::from_config(sp, cfg.num_hidden_layers, head_dim)
+                    .map_err(DecoderError::Config)?,
+            ),
+            _ => None,
+        };
         let fused_moe = bits == 4 && gpu;
         let p = "language_model.model";
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
@@ -374,6 +546,18 @@ impl OcrDecoder {
                 head_dim,
                 rope_base: cfg.rope_theta,
                 sdpa_decode: gpu,
+                dash: match &dash {
+                    Some(spec) => Some((
+                        DashRouter::load(
+                            store,
+                            &format!("{l}.self_attn.dash_router"),
+                            cfg.hidden_size,
+                            spec.index_dim,
+                        )?,
+                        spec.consts(i, head_dim),
+                    )),
+                    None => None,
+                },
             };
             let mlp = if i >= cfg.first_k_dense_replace && cfg.n_routed_experts > 0 {
                 let gate_w = dense(
@@ -449,7 +633,17 @@ impl OcrDecoder {
             layers,
             lm_head,
             cfg,
+            dash,
         })
+    }
+
+    /// The `<PAGE>` marker id of an Unlimited-OCR-2 decoder.
+    pub(crate) fn page_token_id(&self) -> Option<u32> {
+        self.dash.as_ref().and_then(|d| d.page_token_id)
+    }
+
+    pub fn is_dash(&self) -> bool {
+        self.dash.is_some()
     }
 
     pub fn config(&self) -> &LanguageConfig {
@@ -479,6 +673,54 @@ impl OcrDecoder {
         Ok(MlxArray::from_u32(&[1, ids.len()], ids)?)
     }
 
+    /// Generation cache for `prompt_ids`: ring KV caches (v1, `window`
+    /// overriding the config) or full caches plus the DASH state (v2).
+    pub(crate) fn new_cache(
+        &self,
+        window: Option<usize>,
+        prompt_ids: &[u32],
+    ) -> Result<OcrCache, DecoderError> {
+        let Some(spec) = &self.dash else {
+            return Ok(OcrCache {
+                kv: self.make_cache(window),
+                dash: None,
+            });
+        };
+        let n = self.layers.len();
+        Ok(OcrCache {
+            kv: (0..n).map(|_| KvCache::new(None)).collect(),
+            dash: Some(DashRun::start(prompt_ids, spec, n).map_err(DecoderError::Dash)?),
+        })
+    }
+
+    /// One forward over `h` `[1, L, hidden]` at the cache offset. DASH
+    /// decode steps (past the prompt) need the input `token` (`[1, 1]`,
+    /// in-graph) for the page state.
+    pub(crate) fn step(
+        &self,
+        h: &MlxArray,
+        cache: &mut OcrCache,
+        token: Option<&MlxArray>,
+    ) -> Result<MlxArray, DecoderError> {
+        let offset = cache.offset();
+        let (Some(spec), Some(run)) = (&self.dash, cache.dash.as_mut()) else {
+            return Ok(self.forward(h, &mut cache.kv)?);
+        };
+        let len = h.shape()?[1];
+        let step = run
+            .step(spec, offset, len, token, h.dtype()?)
+            .map_err(DecoderError::Dash)?;
+        let ios = run.layers.iter_mut().map(|index| {
+            Some(DashIo {
+                spec,
+                step: &step,
+                index,
+                eps: self.eps,
+            })
+        });
+        Ok(self.run_layers(h, &mut cache.kv, ios)?)
+    }
+
     /// `DeepseekV2RingSlidingModel.__call__(inputs_embeds=h, cache)`:
     /// layers + final norm -> `[B, L, hidden]`.
     pub(crate) fn forward(
@@ -486,11 +728,20 @@ impl OcrDecoder {
         h: &MlxArray,
         caches: &mut [KvCache],
     ) -> Result<MlxArray, MlxError> {
+        self.run_layers(h, caches, std::iter::repeat_with(|| None))
+    }
+
+    fn run_layers<'a>(
+        &self,
+        h: &MlxArray,
+        caches: &mut [KvCache],
+        dash: impl Iterator<Item = Option<DashIo<'a>>>,
+    ) -> Result<MlxArray, MlxError> {
         let mut h = h.try_clone()?;
-        for (layer, cache) in self.layers.iter().zip(caches.iter_mut()) {
+        for ((layer, cache), io) in self.layers.iter().zip(caches.iter_mut()).zip(dash) {
             let r = layer
                 .attn
-                .forward(&h.rms_norm(Some(&layer.input_ln), self.eps)?, cache)?;
+                .forward(&h.rms_norm(Some(&layer.input_ln), self.eps)?, cache, io)?;
             let hh = h.add(&r)?;
             let xn = hh.rms_norm(Some(&layer.post_ln), self.eps)?;
             h = match &layer.mlp {
@@ -518,7 +769,8 @@ mod tests {
         OCR_IMAGE_TOKEN_ID, OcrGenerationSettings, greedy_ocr_token_stream, splice_image_features,
     };
     use crate::models::unlimited_ocr::test_support::{
-        Parity, compare_rows, mlx_rows_f32, ocr_decoder_golden as golden, shared_pipeline,
+        Parity, compare_rows, mlx_rows_f32, ocr_decoder_golden as golden,
+        ocr2_decoder_golden as golden2, shared_pipeline, shared_pipeline2,
     };
     use std::collections::BTreeSet;
 
@@ -704,5 +956,163 @@ mod tests {
             crate::models::unlimited_ocr::generate::FinishReason::Length
         );
         assert_eq!(stream.tokens, want[..3]);
+    }
+
+    /// A greedy step whose reference top-2 logits are this close may flip
+    /// (bf16 ties: the stream has exact ties).
+    const TIE_GAP: f64 = 0.5;
+
+    fn u32_rows(a: &MlxArray) -> Vec<u32> {
+        a.astype(aimd_mlx::MlxDtype::U32)
+            .unwrap()
+            .to_u32_vec()
+            .unwrap()
+    }
+
+    /// Unlimited-OCR-2 (DASH) against the mlx-vlm port on a two-page
+    /// base request: prefill logits rows, prefill routing on sampled
+    /// layers, the forced greedy stream (both `<PAGE>` markers, EOS) and
+    /// the decode logits after each `<PAGE>`.
+    #[test]
+    fn decoder2_dash_golden() {
+        let Some(p) = shared_pipeline2() else {
+            return;
+        };
+        let dec = p.decoder();
+        assert!(dec.is_dash());
+        let m = golden2::manifest();
+        let prompt = golden::u32s(&m["prompt_ids"]);
+        let feats = golden2::image_features(&m);
+        let image_token = m["image_token_id"].as_u64().unwrap() as u32;
+        let embeds = splice_image_features(dec, &prompt, &feats, image_token).unwrap();
+        let mut cache = dec.new_cache(None, &prompt).unwrap();
+        route_probe::start();
+        let h = dec.step(&embeds, &mut cache, None).unwrap();
+        let routes = route_probe::take();
+        let (logits, vocab) = mlx_rows_f32(&dec.logits(&h).unwrap());
+        let mut fails = Vec::new();
+        let kept = golden::usizes(&m["logits_kept_positions"]);
+        let want = golden2::read_bf16_f32("logits.bf16");
+        compare_rows(
+            "prefill logits",
+            &logits,
+            vocab,
+            &kept,
+            &want,
+            LOGITS,
+            &mut fails,
+        );
+
+        assert_eq!(routes.len(), dec.layers.len(), "one route per layer");
+        let rows = golden::usizes(&m["route_rows"]);
+        for probe in m["routes"].as_array().unwrap() {
+            let layer = probe["layer"].as_u64().unwrap() as usize;
+            let r = &routes[layer];
+            let k = r.topi.shape().unwrap()[1];
+            let topi = u32_rows(&r.topi);
+            let valid = u32_rows(&r.valid);
+            let bias = r.bias.to_f32_vec().unwrap();
+            for (i, &q) in rows.iter().enumerate() {
+                let wt = golden::u32s(&probe["topi"][i]);
+                let wv: Vec<bool> = probe["valid"][i]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_bool().unwrap())
+                    .collect();
+                let mut want_sel: Vec<(u32, f64)> = (0..k)
+                    .filter(|&j| wv[j])
+                    .map(|j| (wt[j], probe["bias"][i][j].as_f64().unwrap()))
+                    .collect();
+                let mut got_sel: Vec<(u32, f64)> = (0..k)
+                    .filter(|&j| valid[q * k + j] != 0)
+                    .map(|j| (topi[q * k + j], bias[q * k + j] as f64))
+                    .collect();
+                want_sel.sort_by_key(|x| x.0);
+                got_sel.sort_by_key(|x| x.0);
+                let same_blocks = want_sel.iter().map(|x| x.0).eq(got_sel.iter().map(|x| x.0));
+                // Layer 0 sees the spliced embeddings directly (bias error
+                // ~5e-7); deeper layers inherit bf16 hidden-state drift,
+                // which the log-prior amplifies in the entmax tail
+                // (measured: 0.38 on a -5.1 bias, a ~e^-5 weight).
+                let bias_excess = want_sel
+                    .iter()
+                    .zip(&got_sel)
+                    .map(|(a, b)| (a.1 - b.1).abs() - (0.05 + 0.1 * a.1.abs()))
+                    .fold(f64::NEG_INFINITY, f64::max);
+                eprintln!(
+                    "layer {layer} row {q}: blocks equal {same_blocks}, bias excess {bias_excess:.3e}"
+                );
+                if !same_blocks || bias_excess > 0.0 {
+                    fails.push(format!(
+                        "layer {layer} row {q} routing: want {want_sel:?} got {got_sel:?}"
+                    ));
+                }
+            }
+        }
+
+        let want_tokens = golden::u32s(&m["greedy_tokens"]);
+        let gaps: Vec<f64> = m["top2_gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g.as_f64().unwrap())
+            .collect();
+        let decode_kept = golden::usizes(&m["decode_kept_steps"]);
+        let p_len = prompt.len();
+        let mut row = logits[(p_len - 1) * vocab..p_len * vocab].to_vec();
+        let mut decode_rows = Vec::new();
+        let mut flips = Vec::new();
+        for (k, &tok) in want_tokens.iter().enumerate() {
+            let got = argmax(&row);
+            if got != tok {
+                if gaps[k] < TIE_GAP {
+                    flips.push(k);
+                } else {
+                    fails.push(format!(
+                        "greedy step {k}: want {tok} got {got} (gap {})",
+                        gaps[k]
+                    ));
+                    break;
+                }
+            }
+            if k + 1 == want_tokens.len() {
+                break;
+            }
+            let ids = dec.ids_array(&[tok]).unwrap().reshape(&[1, 1]).unwrap();
+            let emb = dec.embed_ids(&ids).unwrap();
+            let h = dec.step(&emb, &mut cache, Some(&ids)).unwrap();
+            row = mlx_rows_f32(&dec.logits(&h).unwrap()).0;
+            if decode_kept.contains(&k) {
+                decode_rows.extend_from_slice(&row);
+            }
+        }
+        eprintln!(
+            "greedy stream: {} tokens, tie flips at {flips:?}",
+            want_tokens.len()
+        );
+        let idx: Vec<usize> = (0..decode_kept.len()).collect();
+        let want = golden2::read_bf16_f32("decode_logits.bf16");
+        compare_rows(
+            "decode logits",
+            &decode_rows,
+            vocab,
+            &idx,
+            &want,
+            LOGITS,
+            &mut fails,
+        );
+        assert!(fails.is_empty(), "{}", fails.join("\n"));
+
+        // The production loop (chunked prefill, pipelined in-graph DASH
+        // decode) agrees with the reference up to the first bf16 tie.
+        let eos: BTreeSet<u32> = [m["eos_id"].as_u64().unwrap() as u32].into();
+        let settings = OcrGenerationSettings {
+            max_new_tokens: 64,
+            ..OcrGenerationSettings::default()
+        };
+        let (stream, _) = greedy_ocr_token_stream(dec, &prompt, &embeds, &eos, settings).unwrap();
+        let first_tie = flips.first().copied().unwrap_or(64).min(64);
+        assert_eq!(stream.tokens[..first_tie], want_tokens[..first_tie]);
     }
 }

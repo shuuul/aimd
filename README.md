@@ -32,7 +32,7 @@ no Transformers.
   audio and transcribes it locally.
 - **Local ASR** with [Qwen3-ASR](#models) (1.7B or 0.6B), with automatic
   language detection and context biasing from page metadata.
-- **Local OCR** for images and scanned PDFs: [Unlimited-OCR](#models)
+- **Local OCR** for images and scanned PDFs: [Unlimited-OCR-2](#models)
   (default), [PaddleOCR-VL-1.6](#models), or the fast [PP-OCRv6](#models)
   line detector and recognizer.
 - **Document conversion** through Pandoc. EPUB keeps spine order and extracts
@@ -303,7 +303,8 @@ document_name/
 aimd page.png
 aimd scan.pdf                      # OCR when the PDF has no usable text layer
 aimd scan.pdf --task ocr           # force OCR
-aimd scan.pdf --precision 8bit     # Unlimited-OCR 8-bit checkpoint
+aimd scan.pdf --precision 8bit     # Unlimited-OCR-2 8-bit checkpoint
+aimd scan.pdf --model unlimited-ocr  # Unlimited-OCR v1, 5-page requests
 aimd scan.pdf --model paddleocr-vl  # PaddleOCR-VL-1.6
 aimd photo.jpg --model pp-ocrv6    # PP-OCRv6: fast plain text lines
 aimd scan.pdf --start 0 --end 2    # 0-based inclusive page range
@@ -312,14 +313,20 @@ aimd scan.pdf --start 0 --end 2    # 0-based inclusive page range
 Images always go to OCR. For PDFs, pdf-inspector checks the text layer. PDFs
 with clean text are converted as documents. Scanned PDFs, and PDFs whose
 fonts cannot be decoded, go to OCR. aimd renders those pages with `mutool`
-and runs OCR one page at a time. Unlimited-OCR uses single-image gundam mode
-(`document parsing.` prompt), a sliding-window no-repeat n-gram guard
-(n=35, window 128), and at most 8192 tokens per page.
+and runs OCR on them. The default Unlimited-OCR-2 reads PDFs 10 pages per
+request (base mode, 273 image tokens per page; progress and cancellation
+between requests) and single images in gundam mode. Unlimited-OCR v1 reads
+PDFs 5 pages per request the same way and single images in gundam mode
+(`document parsing.` prompt), with a sliding-window no-repeat n-gram guard
+(n=35, window 128) and at most 8192 tokens per page. PaddleOCR-VL and PP-OCRv6
+run one page at a time.
 
 Which OCR model to use:
 
-- `unlimited-ocr` (default): full document parsing to Markdown, including
-  tables and formulas.
+- `unlimited-ocr-2` (default): full document parsing to Markdown, including
+  tables, formulas and paragraphs or tables that continue across pages. A
+  block-sparse (DASH) decoder parses up to 10 pages in one request.
+- `unlimited-ocr`: Unlimited-OCR v1, the same Markdown in 5-page requests.
 - `paddleocr-vl`: PaddleOCR-VL-1.6 (0.9B) with its full-page `OCR:` prompt.
   A smaller model that still produces layout-aware Markdown.
 - `pp-ocrv6`: PP-OCRv6 medium text detection + recognition. Well under a
@@ -351,7 +358,7 @@ it; `chunk_list` keeps it. `page` is 1-based and `bbox` is
 Revenue grew 12% year over year...
 ```
 
-Unlimited-OCR anchors each layout block. PaddleOCR-VL, PP-OCRv6, and remote
+Unlimited-OCR and Unlimited-OCR-2 anchor each layout block. PaddleOCR-VL, PP-OCRv6, and remote
 OCR anchor the whole page. PP-OCRv6 line boxes, and PaddleOCR-VL line boxes
 from its `Spotting:` pass (run only with `--format json` or MCP
 `include_segments`), appear in the JSON `segments`.
@@ -393,7 +400,8 @@ aimd downloads these checkpoints from Hugging Face on first use:
 | Qwen3-ASR 1.7B | Transcription (default) | `qwen3-asr-1.7b` | [4bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-4bit), [6bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-6bit), [8bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit) | [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) |
 | Qwen3-ASR 0.6B | Transcription | `qwen3-asr-0.6b` | [4bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-4bit), [6bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-6bit), [8bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-8bit) | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) |
 | Qwen3-ForcedAligner 0.6B | Transcript timestamps (`--anchors`, SRT/VTT/JSON) | automatic | [8bit](https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-8bit) | [Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) |
-| Unlimited-OCR | OCR (default) | `unlimited-ocr` | [4bit](https://huggingface.co/mlx-community/Unlimited-OCR-4bit), [6bit](https://huggingface.co/mlx-community/Unlimited-OCR-6bit), [8bit](https://huggingface.co/mlx-community/Unlimited-OCR-8bit) | [baidu/Unlimited-OCR](https://huggingface.co/baidu/Unlimited-OCR) |
+| Unlimited-OCR | OCR | `unlimited-ocr` | [4bit](https://huggingface.co/mlx-community/Unlimited-OCR-4bit), [6bit](https://huggingface.co/mlx-community/Unlimited-OCR-6bit), [8bit](https://huggingface.co/mlx-community/Unlimited-OCR-8bit) | [baidu/Unlimited-OCR](https://huggingface.co/baidu/Unlimited-OCR) |
+| Unlimited-OCR-2 | OCR (default, multi-page) | `unlimited-ocr-2` | [4bit](https://huggingface.co/mlx-community/Unlimited-OCR-2-4bit), [6bit](https://huggingface.co/mlx-community/Unlimited-OCR-2-6bit), [8bit](https://huggingface.co/mlx-community/Unlimited-OCR-2-8bit) | [baidu/Unlimited-OCR-2](https://huggingface.co/baidu/Unlimited-OCR-2) |
 | PaddleOCR-VL-1.6 | OCR | `paddleocr-vl` | [bf16](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6), quantized to 4/6/8-bit at load | [PaddlePaddle/PaddleOCR-VL-1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6) |
 | PP-OCRv6 medium | OCR (plain text lines) | `pp-ocrv6` | [det](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det_safetensors) + [rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec_safetensors) | PaddlePaddle |
 
@@ -404,7 +412,7 @@ The model (`--model`) and the precision (`--precision`) are separate options.
 | `--model` | Precisions | Default |
 |-----------|------------|---------|
 | `qwen3-asr-1.7b`, `qwen3-asr-0.6b` | `4bit`, `6bit`, `8bit` | `4bit` |
-| `unlimited-ocr` | `4bit`, `6bit`, `8bit` | `4bit` |
+| `unlimited-ocr`, `unlimited-ocr-2` | `4bit`, `6bit`, `8bit` | `4bit` |
 | `paddleocr-vl` | `bf16`, `4bit`, `6bit`, `8bit` | `bf16` |
 | `pp-ocrv6` | none (ignored with a warning) | - |
 
@@ -414,10 +422,10 @@ aimd scan.pdf --model unlimited-ocr --precision 8bit
 aimd scan.pdf --model paddleocr-vl --precision 4bit
 ```
 
-Explicit `mlx-community/Qwen3-ASR-*` and `mlx-community/Unlimited-OCR-*`
+Explicit `mlx-community/Qwen3-ASR-*` and `mlx-community/Unlimited-OCR{,-2}-*`
 checkpoint IDs are also accepted. If a checkpoint ID already contains a
 precision, a different `--precision` is an error. Other models are rejected.
-bf16 (dense) Qwen3-ASR and Unlimited-OCR checkpoints are not supported by the
+bf16 (dense) Qwen3-ASR and Unlimited-OCR (1 and 2) checkpoints are not supported by the
 native engine yet. PaddleOCR-VL always downloads the official bf16 checkpoint;
 `4bit`/`6bit`/`8bit` quantize it at load time (4-bit is bit-identical to
 `mlx-community/PaddleOCR-VL-1.6-4bit`).

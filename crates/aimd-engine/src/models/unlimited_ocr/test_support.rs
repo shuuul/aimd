@@ -23,6 +23,7 @@ use aimd_mlx::{MlxArray, MlxDtype};
 use super::pipeline::UnlimitedOcrPipeline;
 
 const OCR_REPO_4BIT: &str = "models--mlx-community--Unlimited-OCR-4bit";
+const OCR2_REPO_4BIT: &str = "models--mlx-community--Unlimited-OCR-2-4bit";
 
 fn hf_cache() -> PathBuf {
     PathBuf::from(
@@ -36,18 +37,27 @@ fn hf_cache() -> PathBuf {
 /// no GPU): the checkpoint tier is far too slow there, so only hermetic tests
 /// run (TEST RULES budget).
 pub(crate) fn checkpoint_dir() -> Option<PathBuf> {
+    snapshot_dir(OCR_REPO_4BIT)
+}
+
+/// The cached `Unlimited-OCR-2-4bit` snapshot (same rules as
+/// [`checkpoint_dir`]).
+pub(crate) fn checkpoint2_dir() -> Option<PathBuf> {
+    snapshot_dir(OCR2_REPO_4BIT)
+}
+
+fn snapshot_dir(repo: &str) -> Option<PathBuf> {
     if aimd_mlx::device_is_cpu().unwrap_or(true) {
         eprintln!("skipping: checkpoint tier needs the Metal device (MLX CPU device selected)");
         return None;
     }
     let required = ["config.json", "model.safetensors", "tokenizer.json"];
-    let mut candidates: Vec<PathBuf> =
-        std::fs::read_dir(hf_cache().join(OCR_REPO_4BIT).join("snapshots"))
-            .ok()?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|dir| required.iter().all(|f| dir.join(f).is_file()))
-            .collect();
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(hf_cache().join(repo).join("snapshots"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|dir| required.iter().all(|f| dir.join(f).is_file()))
+        .collect();
     candidates.sort();
     candidates.into_iter().next()
 }
@@ -77,6 +87,24 @@ pub(crate) fn shared_pipeline() -> Option<&'static UnlimitedOcrPipeline> {
         eprintln!("skipping: Unlimited-OCR-4bit not available");
     }
     p
+}
+
+/// The process-wide Unlimited-OCR-2 pipeline, loaded once (`None` when
+/// the checkpoint is not cached).
+pub(crate) fn shared_pipeline2() -> Option<&'static UnlimitedOcrPipeline> {
+    static PIPELINE: OnceLock<Option<UnlimitedOcrPipeline>> = OnceLock::new();
+    PIPELINE
+        .get_or_init(|| {
+            let Some(dir) = checkpoint2_dir() else {
+                eprintln!("skipping: {OCR2_REPO_4BIT} not in HF cache");
+                return None;
+            };
+            match UnlimitedOcrPipeline::load(&dir) {
+                Ok(p) => Some(p),
+                Err(e) => panic!("Unlimited-OCR-2 checkpoint present but failed to load: {e}"),
+            }
+        })
+        .as_ref()
 }
 
 /// Bounds for one compared tensor (see the module docs).
@@ -277,6 +305,40 @@ pub(crate) mod ocr_decoder_golden {
             "f16 snap count"
         );
         MlxArray::from_f32(&[n, d], &snapped)
+            .unwrap()
+            .astype(MlxDtype::Bf16)
+            .unwrap()
+    }
+}
+
+pub(crate) mod ocr2_decoder_golden {
+    use super::*;
+
+    pub(crate) fn dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/ocr2_decoder")
+    }
+
+    pub(crate) fn manifest() -> serde_json::Value {
+        json(&dir(), "manifest.json")
+    }
+
+    pub(crate) fn read_bf16_f32(name: &str) -> Vec<f32> {
+        bf16_le(&read_bytes(&dir(), name))
+    }
+
+    /// The per-page image features in page order, concatenated as a bf16
+    /// `[pages * per_page, hidden]` array.
+    pub(crate) fn image_features(m: &serde_json::Value) -> MlxArray {
+        let n = m["per_page_image_tokens"].as_u64().unwrap() as usize;
+        let d = m["hidden"].as_u64().unwrap() as usize;
+        let pages = m["pages"].as_array().unwrap().len();
+        let mut all = Vec::with_capacity(pages * n * d);
+        for p in 0..pages {
+            let raw = read_bf16_f32(&format!("page{p}_features.bf16"));
+            assert_eq!(raw.len(), n * d, "page {p} feature geometry");
+            all.extend(raw);
+        }
+        MlxArray::from_f32(&[pages * n, d], &all)
             .unwrap()
             .astype(MlxDtype::Bf16)
             .unwrap()

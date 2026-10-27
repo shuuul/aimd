@@ -94,6 +94,10 @@ impl AsrModel for ScriptedAsr {
 struct ScriptedOcr {
     outputs: Mutex<VecDeque<std::result::Result<String, OcrFailure>>>,
     calls: Mutex<Vec<PathBuf>>,
+    /// `pages_per_request`; above 1, PDFs go through `recognize_pages`.
+    window: usize,
+    /// Page count of each `recognize_pages` request.
+    requests: Mutex<Vec<usize>>,
 }
 
 impl OcrModel for ScriptedOcr {
@@ -104,6 +108,27 @@ impl OcrModel for ScriptedOcr {
             .unwrap()
             .pop_front()
             .unwrap_or(Err(OcrFailure::Other("no scripted output".into())))
+    }
+
+    fn pages_per_request(&self) -> usize {
+        self.window
+    }
+
+    fn recognize_pages(&self, pages: &[&[u8]]) -> std::result::Result<Vec<LocatedOcr>, OcrFailure> {
+        self.requests.lock().unwrap().push(pages.len());
+        let mut outputs = self.outputs.lock().unwrap();
+        pages
+            .iter()
+            .map(|_| {
+                let markdown = outputs
+                    .pop_front()
+                    .unwrap_or(Err(OcrFailure::Other("no scripted output".into())))?;
+                Ok(LocatedOcr {
+                    markdown,
+                    ..LocatedOcr::default()
+                })
+            })
+            .collect()
     }
 }
 
@@ -172,12 +197,23 @@ impl Mock {
         self
     }
 
-    fn with_ocr(mut self, id: &str, outputs: Vec<std::result::Result<String, OcrFailure>>) -> Self {
+    fn with_ocr(self, id: &str, outputs: Vec<std::result::Result<String, OcrFailure>>) -> Self {
+        self.with_ocr_window(id, 1, outputs)
+    }
+
+    fn with_ocr_window(
+        mut self,
+        id: &str,
+        window: usize,
+        outputs: Vec<std::result::Result<String, OcrFailure>>,
+    ) -> Self {
         self.ocr.insert(
             id.into(),
             Arc::new(ScriptedOcr {
                 outputs: Mutex::new(outputs.into()),
                 calls: Mutex::default(),
+                window,
+                requests: Mutex::default(),
             }),
         );
         self
@@ -310,7 +346,9 @@ impl ProcessHooks for RecHooks {
 
 const ASR_4BIT: &str = "mlx-community/Qwen3-ASR-1.7B-4bit";
 const ASR_8BIT: &str = "mlx-community/Qwen3-ASR-1.7B-8bit";
-const OCR_4BIT: &str = "mlx-community/Unlimited-OCR-4bit";
+/// The default OCR model.
+const OCR_4BIT: &str = "mlx-community/Unlimited-OCR-2-4bit";
+const OCR2_4BIT: &str = OCR_4BIT;
 
 fn ok_output(stdout: &str) -> std::io::Result<CommandOutput> {
     Ok(CommandOutput {
@@ -1252,7 +1290,7 @@ fn pdf_ocr_renders_with_mutool_and_assembles_pages() {
     let hooks = RecHooks::default();
     let err = process_input_with(&req, &hooks, &rt).unwrap_err();
     // Empty page content from the model is a hard error (Python parity).
-    assert_eq!(err.message, "Unlimited-OCR produced empty content");
+    assert_eq!(err.message, "Unlimited-OCR-2 produced empty content");
 
     let rt = make_rt(vec![
         Ok("second".into()),
@@ -1373,6 +1411,85 @@ fn pdf_ocr_cancellation_and_missing_mutool() {
 }
 
 #[test]
+fn pdf_ocr_multi_page_windows() {
+    let dir = TempDir::new(None, "aimd-ocr-").unwrap();
+    let pdf = dir.path().join("scan.pdf");
+    std::fs::write(&pdf, b"%PDF").unwrap();
+    let make_rt = || {
+        Mock {
+            pdf_ocr: true,
+            pdf_pages: 5,
+            ..Mock::default()
+        }
+        .tool("mutool")
+        .with_ocr_window(
+            OCR2_4BIT,
+            2,
+            ["one", "two", "", "four", "five"]
+                .map(|t| Ok(t.to_string()))
+                .into(),
+        )
+        .respond(|_, args| {
+            let (a, b) = args.last().unwrap().split_once('-').unwrap();
+            for page in a.parse::<u32>().unwrap()..=b.parse().unwrap() {
+                std::fs::write(args[3].replace("%04d", &format!("{page:04}")), b"png").unwrap();
+            }
+            ok_output("")
+        })
+    };
+    let req = request(&pdf);
+    let rt = make_rt();
+    let hooks = RecHooks::default();
+    let result = process_input_with(&req, &hooks, &rt).unwrap();
+    // A blank page inside a window is not an error; it renders empty.
+    assert_eq!(
+        result.markdown,
+        "## Page 1\n\none\n\n## Page 2\n\ntwo\n\n## Page 3\n\n## Page 4\n\nfour\n\n## Page 5\n\nfive"
+    );
+    assert_eq!(*rt.ocr[OCR2_4BIT].requests.lock().unwrap(), [2, 2, 1]);
+    assert!(rt.ocr[OCR2_4BIT].calls.lock().unwrap().is_empty());
+    let messages: Vec<_> = hooks
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e.3.clone())
+        .filter(|m| m.starts_with("Processed OCR pages"))
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "Processed OCR pages 1-2 of 5",
+            "Processed OCR pages 3-4 of 5",
+            "Processed OCR pages 5-5 of 5",
+        ]
+    );
+
+    // Cancellation lands between windows, never inside one.
+    let rt = make_rt();
+    let n = RecHooks::default();
+    process_input_with(&req, &n, &rt).unwrap();
+    let first_window = n
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .position(|e| e.3.as_deref() == Some("Processed OCR pages 1-2 of 5"))
+        .unwrap();
+    let rt = make_rt();
+    let hooks = RecHooks {
+        cancel_after: Some(first_window + 1),
+        ..RecHooks::default()
+    };
+    let err = process_input_with(&req, &hooks, &rt).unwrap_err();
+    assert_eq!(
+        (err.kind, err.message.as_str()),
+        (ErrorKind::Cancelled, "OCR cancelled between page windows")
+    );
+    assert_eq!(*rt.ocr[OCR2_4BIT].requests.lock().unwrap(), [2]);
+}
+
+#[test]
 fn ocr_page_range_and_model_validation() {
     let dir = TempDir::new(None, "aimd-ocr-").unwrap();
     let png = dir.path().join("a.png");
@@ -1414,7 +1531,7 @@ fn ocr_page_range_and_model_validation() {
         process_input_with(&request(&png), &NoHooks, &rt)
             .unwrap_err()
             .message,
-        "Unlimited-OCR inference failed: bad"
+        "Unlimited-OCR-2 inference failed: bad"
     );
     // Located OCR: one anchor per layout block; lines are segments only.
     let seg = |text: &str, kind: &str, bbox: [f32; 4]| aimd_core::Segment {

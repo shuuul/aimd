@@ -12,6 +12,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 
 | Spec | Status | Outcome |
 | --- | --- | --- |
+| [008-unlimited-ocr-2.md](008-unlimited-ocr-2.md) | Active | Unlimited-OCR-2 (DASH decoder) native OCR with 10-page multi-page PDF windows |
 
 ## Archived specs
 

@@ -119,6 +119,7 @@ aimd page.png --output page.md
 aimd scan.pdf --output scan.md
 aimd scan.pdf --start 0 --end 2 --output scan-pages.md
 aimd scan.pdf --model unlimited-ocr --precision 8bit --output scan.md
+aimd scan.pdf --model unlimited-ocr-2 --output scan.md   # 10 pages per request
 ```
 
 ## Temporary directory handling

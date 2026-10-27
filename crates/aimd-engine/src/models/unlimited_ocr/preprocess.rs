@@ -467,12 +467,72 @@ const RATIO_ORDER: [(u32, u32); 118] = [
     (2, 16),
 ];
 
-/// Pillow `find_closest_aspect_ratio` (image_size = 640).
-fn find_closest_aspect_ratio(aspect: f64, width: u32, height: u32) -> (u32, u32) {
+/// The same order for `max_num=16`, Unlimited-OCR-2's single-page
+/// gundam limit (`max_crops`). Not a filter of [`RATIO_ORDER`]: the set's
+/// iteration order depends on its contents.
+const RATIO_ORDER_16: [(u32, u32); 49] = [
+    (1, 2),
+    (2, 1),
+    (3, 1),
+    (1, 3),
+    (2, 2),
+    (4, 1),
+    (1, 4),
+    (5, 1),
+    (1, 5),
+    (1, 6),
+    (6, 1),
+    (3, 2),
+    (2, 3),
+    (7, 1),
+    (1, 7),
+    (4, 2),
+    (2, 4),
+    (1, 8),
+    (8, 1),
+    (1, 9),
+    (3, 3),
+    (9, 1),
+    (2, 5),
+    (5, 2),
+    (10, 1),
+    (1, 10),
+    (11, 1),
+    (1, 11),
+    (12, 1),
+    (3, 4),
+    (4, 3),
+    (1, 12),
+    (6, 2),
+    (2, 6),
+    (13, 1),
+    (1, 13),
+    (14, 1),
+    (2, 7),
+    (1, 14),
+    (7, 2),
+    (1, 15),
+    (5, 3),
+    (15, 1),
+    (3, 5),
+    (1, 16),
+    (2, 8),
+    (16, 1),
+    (8, 2),
+    (4, 4),
+];
+
+/// Pillow `find_closest_aspect_ratio` (image_size = 640) over `ratios`.
+fn find_closest_aspect_ratio(
+    aspect: f64,
+    width: u32,
+    height: u32,
+    ratios: &[(u32, u32)],
+) -> (u32, u32) {
     let mut best_ratio_diff = f64::INFINITY;
     let mut best_ratio = (1u32, 1u32);
     let area = width as f64 * height as f64;
-    for &(i, j) in &RATIO_ORDER {
+    for &(i, j) in ratios {
         let target_aspect_ratio = i as f64 / j as f64;
         let ratio_diff = (aspect - target_aspect_ratio).abs();
         if ratio_diff < best_ratio_diff {
@@ -508,6 +568,27 @@ pub fn preprocess_gundam(
     width: usize,
     height: usize,
 ) -> Result<GundamPreprocess, PreprocessError> {
+    preprocess_page(rgb, width, height, PageLayout::Gundam32)
+}
+
+/// How one page is laid out for the vision towers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageLayout {
+    /// v1 gundam: up to 32 local crops plus the global view.
+    Gundam32,
+    /// Unlimited-OCR-2 single page: up to 16 local crops (`max_crops`).
+    Gundam16,
+    /// Unlimited-OCR-2 multi-page base mode: the 1024 global view only.
+    Base,
+}
+
+/// [`preprocess_gundam`] with the crop policy of `layout`.
+pub fn preprocess_page(
+    rgb: &[u8],
+    width: usize,
+    height: usize,
+    layout: PageLayout,
+) -> Result<GundamPreprocess, PreprocessError> {
     if rgb.len() != width * height * 3 {
         return Err(PreprocessError::Layout(format!(
             "rgb buffer {} does not match {width}x{height}x3",
@@ -517,9 +598,14 @@ pub fn preprocess_gundam(
     let (w, h) = (width as u32, height as u32);
     let mut crops = Vec::new();
     let mut crop_ratio = (1usize, 1usize);
-    if w > GUNDAM_CROP_PX as u32 || h > GUNDAM_CROP_PX as u32 {
+    let ratios: &[(u32, u32)] = match layout {
+        PageLayout::Gundam32 => &RATIO_ORDER,
+        PageLayout::Gundam16 => &RATIO_ORDER_16,
+        PageLayout::Base => &[],
+    };
+    if !ratios.is_empty() && (w > GUNDAM_CROP_PX as u32 || h > GUNDAM_CROP_PX as u32) {
         let aspect = w as f64 / h as f64;
-        let (rw, rh) = find_closest_aspect_ratio(aspect, w, h);
+        let (rw, rh) = find_closest_aspect_ratio(aspect, w, h, ratios);
         crop_ratio = (rw as usize, rh as usize);
         let target_w = GUNDAM_CROP_PX * rw as usize;
         let target_h = GUNDAM_CROP_PX * rh as usize;

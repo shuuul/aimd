@@ -8,7 +8,7 @@
 
 `aimd` is a native Rust context-preparation toolkit for LLM workflows. It turns URLs,
 audio/video, and documents into Markdown plus a chunked text context. Local ASR
-(Qwen3-ASR) and OCR (Unlimited-OCR, PaddleOCR-VL-1.6, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
+(Qwen3-ASR) and OCR (Unlimited-OCR, Unlimited-OCR-2, PaddleOCR-VL-1.6, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
 runtime.
 
 Interfaces (one binary each):
@@ -73,7 +73,7 @@ flowchart TD
     Asr["aimd-process::asr\nffmpeg decode/segment, retry"]
     Ocr["aimd-process::ocr\nimages + mutool-rendered PDFs"]
     Remote["aimd-process::remote\nOpenAI-compatible ASR/OCR"]
-    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR,\nPaddleOCR-VL, PP-OCRv6"]
+    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR 1/2,\nPaddleOCR-VL, PP-OCRv6"]
     Mlx["aimd-mlx\nMLX C++ shim (Metal)"]
 
     CLI --> Core
@@ -119,8 +119,8 @@ flowchart TD
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
 | Document conversion | `crates/aimd-doc/src/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
-| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
-| MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. |
+| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
+| MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. |
 | Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. |
 | Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
 
@@ -185,14 +185,14 @@ flowchart TD
   then audio download + ASR. If both produce no text, the request is a processing
   failure. Stale-extractor yt-dlp stderr gets the `brew upgrade yt-dlp` hint.
 - **Model naming**: user-facing aliases are kebab-case: `qwen3-asr-1.7b` (default),
-  `qwen3-asr-0.6b`, `unlimited-ocr`, `paddleocr-vl`, and `pp-ocrv6`. Legacy underscore aliases and explicit
+  `qwen3-asr-0.6b`, `unlimited-ocr-2` (OCR default), `unlimited-ocr`, `paddleocr-vl`, and `pp-ocrv6`. Legacy underscore aliases and explicit
   `mlx-community/*` ids remain compatibility inputs but must not be the canonical names in
   docs or help text. GLM-OCR and Transformers/`Qwen/*` ids are not supported and must
   not reappear in help text.
 - **Precision separation**: model family/size goes through `model`; quantization goes
   through the separate `precision` option. The parser accepts `4bit`, `6bit`, `8bit`, and
   `bf16` (dash/space/case variants normalized in `aimd_core::precision`). The native
-  engine runs Qwen3-ASR and Unlimited-OCR at `4bit` (default), `6bit`, and `8bit`;
+  engine runs Qwen3-ASR and Unlimited-OCR (1 and 2) at `4bit` (default), `6bit`, and `8bit`;
   `bf16` is rejected for them as `BackendUnavailable`. PaddleOCR-VL defaults to
   dense bf16 and quantizes at load; PP-OCRv6 ignores precision with one warning. A precision that conflicts
   with an explicit checkpoint id is an error.
@@ -324,10 +324,28 @@ Supported model families are intentionally narrow:
   ASR, every segment, the 8-bit retry, and the URL audio fallback; URL metadata and
   title heuristics steer subtitle choice only. Explicit codes come from
   `aimd_engine::tokenizer::ASR_LANGUAGES` (30 languages).
-- **OCR**: `unlimited-ocr`, resolving to `mlx-community/Unlimited-OCR-{4bit,6bit,8bit}`
+- **OCR v1**: `unlimited-ocr`, resolving to `mlx-community/Unlimited-OCR-{4bit,6bit,8bit}`
   (default 4bit). OCR uses single-image gundam mode (`document parsing.`), the
-  sliding-window no-repeat n-gram guard (35/128), `max_tokens=8192`, and page-by-page PDF
-  OCR.
+  sliding-window no-repeat n-gram guard (35/128), and `max_tokens=8192` per page.
+  PDFs go in 5-page `recognize_pages` windows (upstream `infer_multi`: one 1024 base
+  view per page, `Multi page parsing.`, no `<PAGE>` in the prompt). v1 writes `<PAGE>`
+  as 3 text tokens; the page-count guard matches that sequence and substitutes it for
+  an EOS before the last page. A window of one page keeps the gundam request. v1
+  matched page-by-page output through 6 pages; 7+ loop or repeat page 1 (spec 008).
+- **Unlimited-OCR-2**: `unlimited-ocr-2`, resolving to
+  `mlx-community/Unlimited-OCR-2-{4bit,6bit,8bit}` (default 4bit). The default OCR model (omitted `model`);
+  a separate model from v1, which stays `unlimited-ocr`. The decoder uses DASH block-sparse
+  attention (block 32, local window 128, top-k 12 routed blocks, entmax15 prior, page2d
+  RoPE) through the `aimd_mlx::dash` shim ops: custom Metal kernels, the same block
+  selection from mlx gathers elsewhere. Never fall back to dense attention; the dense
+  `DashMode` is a test oracle only. Prompt: `[bos] + ([<PAGE>] + <image>*n)` per page +
+  `Multi page parsing.`. One image = gundam (max 16 crops); several = base mode (273
+  tokens/page). PDFs go through `OcrModel::recognize_pages` in 10-page windows
+  (`pages_per_request`), with progress and cancellation between windows. Generation
+  carries the upstream page-count guard (EOS banned until every `<PAGE>`, forced past
+  it, 20000 tokens per page) and widens the n-gram window to 1024 for multi-page
+  requests. `markdown2::render_unlimited_ocr2` turns the 0..999 page-relative boxes
+  into per-page located items.
 - **PaddleOCR-VL**: `paddleocr-vl` (`paddleocr-vl-1.6`) always loads the official
   `PaddlePaddle/PaddleOCR-VL-1.6` bf16 checkpoint. Omitted precision = dense bf16;
   `4bit`/`6bit`/`8bit` quantize at load (affine, group 64, mlx-vlm convert rule: every
@@ -341,7 +359,7 @@ Supported model families are intentionally narrow:
   Paddle `.pdparams` pickles). Output: lines scoring >= 0.5 in reading order. Parity
   with mlx4ocr is bit-exact from decoded pixels on; JPEG decoding (zune-jpeg vs
   libjpeg-turbo) differs by a few levels.
-- **bf16** resolves but is rejected by the native gate for Qwen3-ASR and Unlimited-OCR (`ensure_native_asr` /
+- **bf16** resolves but is rejected by the native gate for Qwen3-ASR and Unlimited-OCR 1/2 (`ensure_native_asr` /
   `ensure_native_ocr`).
 - Explicit `mlx-community/*` ids for these families remain compatibility inputs; unknown
   models fail with the "Unsupported MLX ... model" `ProcessingFailed` message.
@@ -382,8 +400,9 @@ Tests are lean by rule; weights are the expensive resource.
 - **Golden fixtures**: live in the owning crate's `tests/golden/<set>/`, located via
   `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-weights` (`aimd-mlx` reads it
   via `../aimd-weights/tests/golden/quant`). `mel`, `tokenizer`, `asr_encoder`,
-  `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `paddleocr_vl`, and
-  `ppocrv6` belong to `aimd-engine`.
+  `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `ocr2_decoder`,
+  `ocr2_markdown`, `paddleocr_vl`, and `ppocrv6` belong to `aimd-engine`.
+  `ocr2_decoder` comes from the shuuul/mlx-vlm port (`export_ocr2_decoder_reference.py`).
   `aimd-url/tests/golden/subtitles` is frozen: its Python oracle was deleted, so update it
   only with a reviewed, intentional behavior change. Regenerate the others with
   `uv run scripts/export_*_reference.py` (PEP 723 standalone scripts). Never hand-edit
