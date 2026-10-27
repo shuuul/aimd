@@ -30,8 +30,7 @@ TABLE_A = (
     "<tr><td>apple</td><td>1</td></tr></table>"
 )
 TABLE_B_REPEAT = (
-    "<table><tr><th>Ｎame</th><th>Qty</th></tr>"
-    "<tr><td>pear</td><td>2</td></tr></table>"
+    "<table><tr><th>Ｎame</th><th>Qty</th></tr><tr><td>pear</td><td>2</td></tr></table>"
 )
 TABLE_C_REPEAT2 = (
     "<table><tr><th> name </th><th>QTY</th></tr>"

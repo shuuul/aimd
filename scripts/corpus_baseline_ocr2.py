@@ -33,6 +33,7 @@ from reference_unlimited_ocr import (
     UNLIMITED_OCR_NGRAM_SIZE,
     UNLIMITED_OCR_NGRAM_WINDOW,
     SlidingWindowNoRepeatNgramProcessor,
+    patch_mlx_vlm_to_baidu,
 )
 
 PROMPT = "Multi page parsing."
@@ -54,7 +55,9 @@ class PageCountGuard:
     def __call__(self, tokens, logits):
         import mlx.core as mx
 
-        seq = [int(t) for t in (tokens.tolist() if hasattr(tokens, "tolist") else tokens)]
+        seq = [
+            int(t) for t in (tokens.tolist() if hasattr(tokens, "tolist") else tokens)
+        ]
         markers = seq.count(self.page_id)
         last = max((i for i, t in enumerate(seq) if t == self.page_id), default=-1)
         page_len = len(seq) - last - 1 if last >= 0 else len(seq)
@@ -97,6 +100,7 @@ def run_ocr(corpus: Path, items: list[dict], repo: str) -> dict[str, dict]:
     from mlx_vlm.prompt_utils import apply_chat_template
 
     model, processor = load(repo)
+    patch_mlx_vlm_to_baidu(model)
     tokenizer = processor.tokenizer
     page_id = int(model.language_model.dash_params.page_token_id)
     eos_id = int(tokenizer.eos_token_id)
@@ -129,7 +133,9 @@ def run_ocr(corpus: Path, items: list[dict], repo: str) -> dict[str, dict]:
             "raw": raw,
             "finish": last.finish_reason if last else "error",
         }
-        print(f"{item['id']}: {n} pages, {len(tokens)} tokens, {out[item['id']]['finish']}")
+        print(
+            f"{item['id']}: {n} pages, {len(tokens)} tokens, {out[item['id']]['finish']}"
+        )
     return out
 
 

@@ -34,6 +34,7 @@ from reference_unlimited_ocr import (
     UNLIMITED_OCR_SINGLE_PROMPT,
     SlidingWindowNoRepeatNgramProcessor,
     normalize_unlimited_ocr_markdown,
+    patch_mlx_vlm_to_baidu,
 )
 
 
@@ -55,6 +56,7 @@ def run_ocr(corpus: Path, items: list[dict], repo: str) -> dict[str, dict]:
     from mlx_vlm.prompt_utils import apply_chat_template
 
     model, processor = load(repo)
+    patch_mlx_vlm_to_baidu(model)
     prompt = apply_chat_template(
         processor, model.config, UNLIMITED_OCR_SINGLE_PROMPT, num_images=1
     )

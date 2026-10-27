@@ -100,6 +100,8 @@ def main() -> None:
     from mlx_vlm.prompt_utils import apply_chat_template
     from mlx_vlm.utils import prepare_inputs
 
+    from reference_unlimited_ocr import patch_mlx_vlm_to_baidu
+
     routes = []
     route_select = dash.route_select
 
@@ -112,6 +114,7 @@ def main() -> None:
 
     snapshot = resolve_checkpoint(args.checkpoint)
     model, processor = load(str(snapshot))
+    patch_mlx_vlm_to_baidu(model)
     lm = model.language_model
     prompt = apply_chat_template(processor, model.config, PROMPT, num_images=len(PAGES))
     inputs = prepare_inputs(processor, images=[str(p) for p in PAGES], prompts=prompt)
@@ -133,7 +136,11 @@ def main() -> None:
     shas: dict[str, str] = {}
     feats = emb[0][mx.array(image_pos)]
     for p in range(n_pages):
-        write(f"page{p}_features.bf16", bf16_bits(feats[p * per_page : (p + 1) * per_page]), shas)
+        write(
+            f"page{p}_features.bf16",
+            bf16_bits(feats[p * per_page : (p + 1) * per_page]),
+            shas,
+        )
 
     cache = lm.make_cache()
     lm._prompt_ids = prompt_ids

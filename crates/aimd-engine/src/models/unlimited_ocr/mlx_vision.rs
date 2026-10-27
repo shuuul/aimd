@@ -1,38 +1,41 @@
 //! Unlimited-OCR vision encoder on MLX: SAM ViT-B + CLIP-L towers, the
 //! 4-bit linear projector, and the gundam token shaping.
 //!
-//! # Op-for-op port of the mlx_vlm graph
+//! # Port of the Baidu reference graph
 //!
-//! The porting source of truth is mlx_vlm 0.7.0
-//! (`.venv/.../mlx_vlm/models/deepseekocr/{sam.py, vision.py,
-//! deepseekocr.py}` + `unlimited_ocr/unlimitedocr.py`); every stage mirrors
-//! one Python call with the same dtypes (bf16 activations, bf16 weights,
-//! fast LayerNorm/SDPA kernels, exact-erf GELU), so Metal sees the same
-//! kernel sequence:
+//! The numerical source of truth is Baidu's `deepencoder.py` (shipped with
+//! `baidu/Unlimited-OCR`, identical for v1 and v2); the graph layout
+//! follows mlx_vlm (`deepseekocr/{sam.py, vision.py, deepseekocr.py}` +
+//! `unlimited_ocr/unlimitedocr.py`) with bf16 activations, bf16 weights and
+//! the fast LayerNorm/SDPA kernels. mlx_vlm 0.7.0 diverges from the
+//! reference in four places, which this port follows the reference on:
+//! CLIP `quick_gelu`, CLIP layer LayerNorm eps 1e-5, the CLIP pos-embed
+//! spatial bicubic-antialias resample, and the half-pixel SAM rel-pos
+//! resample.
 //!
 //! - SAM: `patch_embed` conv 16x16/s16 + bias, `+ pos_embed` (raw `[1, 64,
 //!   64, 768]` for the 1024 view; bicubic-antialias resample to the 40-grid
 //!   for 640 crops), 12 pre-LN blocks (window 14 with zero padding, global
-//!   blocks 2/5/8/11) whose attention adds the decomposed rel-pos bias
-//!   (`einsum("bhwc,hkc->bhwk")` + `einsum("bhwc,wkc->bhwk")`, expressed as
-//!   batched matmuls over the same operands) as an additive SDPA mask,
-//!   then the neck (1x1 conv, LN, 3x3 conv, LN) and the `net_2`/`net_3`
-//!   stride-2 convs.
+//!   blocks 2/5/8/11, exact-erf GELU MLP) whose attention adds the
+//!   decomposed rel-pos bias (`einsum("bhwc,hkc->bhwk")` +
+//!   `einsum("bhwc,wkc->bhwk")`, expressed as batched matmuls over the same
+//!   operands) as an additive SDPA mask, then the neck (1x1 conv, LN, 3x3
+//!   conv, LN) and the `net_2`/`net_3` stride-2 convs.
 //! - CLIP: `flatten(sam_out)` patch embeds after a broadcast class token,
-//!   `+ position_embedding` (raw 257 rows, or the quirky `Upsample(cubic)`
-//!   interpolation for crops), `pre_layrnorm` (eps 1e-5), 24 pre-LN layers
-//!   (fused qkv, 16 heads, unmasked SDPA, GELU MLP).
+//!   `+ position_embedding` (raw 257 rows, or the 16 -> 10 spatial
+//!   bicubic-antialias resample for crops), `pre_layrnorm` (eps 1e-5), 24
+//!   pre-LN layers (eps 1e-5, fused qkv, 16 heads, unmasked SDPA,
+//!   `quick_gelu` MLP).
 //! - `concat(clip[:, 1:], sam.flatten(1, 2))` -> quantized projector (+bias);
 //!   crops are batched in one tower call (`B = n_crops`), the global view
 //!   runs with `B = 1`; local rows get one `image_newline` per grid row,
 //!   then the global grid with its newline column, then `view_separator`.
 //!
-//! Host-side tables (Rust, bit-compatible with the Python kernels and
-//! locked by the golden tests): the rel-pos gathers (+ the 127 -> 79 linear
-//! resample for 40-grid global blocks), the SAM pos-embed bicubic resample
-//! and the CLIP pos-embed interpolation. They are computed once per grid
-//! size, cached, and uploaded as bf16 (exactly the reference's
-//! `.astype(bf16)` values).
+//! Host-side tables (Rust f32, locked by the golden tests against the
+//! torch reference): the rel-pos gathers (+ the 127 -> 79 linear resample
+//! for 40-grid global blocks), the SAM pos-embed bicubic resample and the
+//! CLIP pos-embed resample. They are computed once per grid size, cached,
+//! and uploaded as bf16 (the reference's `.to(bf16)` values).
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -548,8 +551,8 @@ impl Clip {
         {
             let l = format!("{p}.transformer.layers.{i}");
             layers.push(ClipLayer {
-                ln1: LayerNorm::load(store, &format!("{l}.layer_norm1"), 1e-6)?,
-                ln2: LayerNorm::load(store, &format!("{l}.layer_norm2"), 1e-6)?,
+                ln1: LayerNorm::load(store, &format!("{l}.layer_norm1"), 1e-5)?,
+                ln2: LayerNorm::load(store, &format!("{l}.layer_norm2"), 1e-5)?,
                 qkv: Linear::load(store, &format!("{l}.self_attn.qkv_proj"), true)?,
                 out: Linear::load(store, &format!("{l}.self_attn.out_proj"), true)?,
                 fc1: Linear::load(store, &format!("{l}.mlp.fc1"), true)?,
@@ -575,7 +578,7 @@ impl Clip {
         })
     }
 
-    /// `VisionEmbeddings._get_abs_pos` for a `tokens = 1 + side^2` sequence.
+    /// Baidu `get_abs_pos` for a `tokens = 1 + side^2` sequence.
     fn pos_for(&self, tokens: usize) -> Result<MlxArray, VisionError> {
         let rows = self.pos_host.len() / self.hidden;
         if tokens.isqrt() == (rows - 1).isqrt() {
@@ -617,6 +620,7 @@ impl Clip {
         let hd = d / heads;
         let scale = (hd as f32).powf(-0.5);
         let n = l + 1;
+        let quick_gelu_k = MlxArray::scalar_bf16(1.702)?;
         for (i, layer) in self.layers.iter().enumerate() {
             let y = layer.ln1.forward(&x)?;
             let qkv = layer.qkv.forward(&y)?;
@@ -631,9 +635,10 @@ impl Clip {
                 .transpose(&[0, 2, 1, 3])?
                 .reshape(&[b, n, d])?;
             x = x.add(&layer.out.forward(&o)?)?;
-            let m = layer
-                .fc2
-                .forward(&layer.fc1.forward(&layer.ln2.forward(&x)?)?.gelu()?)?;
+            let h = layer.fc1.forward(&layer.ln2.forward(&x)?)?;
+            // `quick_gelu`: x * sigmoid(1.702 x).
+            let h = h.multiply(&h.multiply(&quick_gelu_k)?.sigmoid()?)?;
+            let m = layer.fc2.forward(&h)?;
             x = x.add(&m)?;
             push_stage(stages, StageTag::ClipLayer(i), &x)?;
         }
@@ -854,26 +859,32 @@ mod tests {
         Parity, compare_rows, mlx_rows_f32, ocr_vision_golden as golden, shared_pipeline,
     };
 
-    /// Tolerances (see the module docs of `test_support`). Against the
-    /// mlx 0.32.2 reference every vision stage is bit-exact on brew mlx
-    /// 0.32.4; the bounds leave headroom for kernel-order drift across MLX
-    /// releases while still catching wiring bugs (O(1) rel RMS). SAM
-    /// stages and CLIP through layer 11:
+    /// Tolerances (see the module docs of `test_support`). The goldens
+    /// are Baidu's `deepencoder.py` in torch f32, so the bounds measure
+    /// this bf16 port's rounding error, not kernel-for-kernel agreement.
+    /// Baidu's own bf16 run drifts from the f32 truth by the same order
+    /// (clip.final 0.042, projectors 0.025, small final features 0.074 rel
+    /// RMS); Metal measures 0.019 / 0.059 / 0.041 / 0.052 for stages / clip
+    /// final / projectors / final features. The mlx-vlm 0.7.0 graph bugs
+    /// (exact GELU and eps 1e-6 in CLIP, transposed CLIP pos resample,
+    /// non-half-pixel rel pos) sit at 0.24..0.74 and fail every bound.
+    /// SAM stages and CLIP through layer 11:
     const STAGE: Parity = Parity {
-        rel_rms: 0.02,
-        max_frac: 0.02,
-    };
-    /// CLIP final and projector outputs (sampled rows).
-    const HEAD: Parity = Parity {
         rel_rms: 0.03,
         max_frac: 0.05,
     };
-    /// Final `[n_tokens, 1280]` features.
-    const FINAL: Parity = Parity {
-        rel_rms: 0.03,
-        max_frac: 0.08,
+    /// CLIP final and projector outputs (sampled rows).
+    const HEAD: Parity = Parity {
+        rel_rms: 0.09,
+        max_frac: 0.15,
     };
-    /// Pure-f32 host interpolation tables vs the MLX kernels (~1 ulp).
+    /// Final `[n_tokens, 1280]` features (max_frac is set by one outlier
+    /// projector column, 978, in both bf16 runs).
+    const FINAL: Parity = Parity {
+        rel_rms: 0.08,
+        max_frac: 0.35,
+    };
+    /// Pure-f32 host interpolation tables vs the torch reference (~1 ulp).
     const ATOL_INTERP: f64 = 1e-6;
 
     // ------------------------------------------------------------------
@@ -936,6 +947,20 @@ mod tests {
             .fold(0f64, f64::max);
         eprintln!("vision_interp: rel pos 127->79 max abs {max:.3e}");
         assert!(max <= ATOL_INTERP, "rel pos interp: {max:.3e}");
+        // CLIP pos embed 16 -> 10 bicubic (antialias), class row kept.
+        let d = vision.clip.hidden;
+        let got = clip_pos_embed_interp(&vision.clip.pos_host, d, 1 + 10 * 10);
+        let e = golden::dump_entry(&m, "aux.clip_pos_embed_interp_10");
+        let rows = golden::dump_rows(e);
+        let want = golden::read_f32(e["file"].as_str().unwrap());
+        let mut max = 0f64;
+        for (ri, &r) in rows.iter().enumerate() {
+            for c in 0..d {
+                max = max.max((got[r * d + c] - want[ri * d + c]).abs() as f64);
+            }
+        }
+        eprintln!("vision_interp: clip pos embed 16->10 max abs {max:.3e}");
+        assert!(max <= ATOL_INTERP, "clip pos embed interp: {max:.3e}");
     }
 
     /// The vision bounds hold Metal mlx rounding: the 24-layer tower

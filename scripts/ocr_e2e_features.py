@@ -23,11 +23,14 @@ from PIL import Image
 from mlx_vlm import load
 from mlx_vlm.prompt_utils import apply_chat_template
 
+from reference_unlimited_ocr import patch_mlx_vlm_to_baidu
+
 
 def main():
     fixtures, out = Path(sys.argv[1]), Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
     model, processor = load("mlx-community/Unlimited-OCR-4bit")
+    patch_mlx_vlm_to_baidu(model)
     prompt = apply_chat_template(
         processor, model.config, "document parsing.", num_images=1
     )

@@ -186,8 +186,8 @@ pub fn resolve_mlx_ocr_model(model: Option<&str>, precision: Option<&str>) -> Re
     }
     let Some((_, repo)) = MLX_OCR_FAMILY_REPOS.iter().find(|(f, _)| *f == candidate) else {
         return Err(AimdError::failed(format!(
-            "Unsupported MLX VLM OCR model {model_repr}. Supported models: unlimited-ocr \
-             (default), unlimited-ocr-2, pp-ocrv6, paddleocr-vl, or an explicit \
+            "Unsupported MLX VLM OCR model {model_repr}. Supported models: unlimited-ocr-2 \
+             (default), unlimited-ocr, pp-ocrv6, paddleocr-vl, or an explicit \
              mlx-community/Unlimited-OCR{{,-2}}-{{4bit,6bit,8bit,bf16}} Hugging Face model ID."
         )));
     };
@@ -392,7 +392,7 @@ mod tests {
             assert_eq!(err.kind, ErrorKind::ProcessingFailed, "{removed}");
             assert!(err.message.starts_with("Unsupported MLX VLM OCR model"));
             assert!(err.message.ends_with(
-                "Supported models: unlimited-ocr (default), unlimited-ocr-2, pp-ocrv6, paddleocr-vl, \
+                "Supported models: unlimited-ocr-2 (default), unlimited-ocr, pp-ocrv6, paddleocr-vl, \
                  or an explicit mlx-community/Unlimited-OCR{,-2}-{4bit,6bit,8bit,bf16} Hugging \
                  Face model ID."
             ));

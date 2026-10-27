@@ -681,10 +681,13 @@ impl OcrDecoder {
         prompt_ids: &[u32],
     ) -> Result<OcrCache, DecoderError> {
         let Some(spec) = &self.dash else {
-            return Ok(OcrCache {
-                kv: self.make_cache(window),
-                dash: None,
-            });
+            // R-SWA keeps the whole prompt, as the reference's one-call
+            // prefill does; the chunked prefill must not move that boundary.
+            let mut kv = self.make_cache(window);
+            for c in &mut kv {
+                c.retain_prompt(prompt_ids.len());
+            }
+            return Ok(OcrCache { kv, dash: None });
         };
         let n = self.layers.len();
         Ok(OcrCache {

@@ -10,6 +10,7 @@ so the scripts keep working after the Python package is removed.
 from __future__ import annotations
 
 from importlib import import_module
+import math
 import re
 from typing import Any
 
@@ -141,3 +142,110 @@ def _as_int_list(tokens: Any) -> list[int]:
         return [int(tokens)]
     except (TypeError, ValueError):
         return []
+
+
+# ---------------------------------------------------------------------------
+# mlx-vlm -> Baidu reference patches (added after the frozen copy above).
+# ---------------------------------------------------------------------------
+
+
+def patch_mlx_vlm_to_baidu(model: Any) -> None:
+    """Make a loaded mlx-vlm Unlimited-OCR (v1/v2) follow Baidu's native code.
+
+    mlx-vlm (0.7.x, deepseekocr vision + unlimited_ocr R-SWA) diverges from
+    ``deepencoder.py`` / ``modeling_deepseekv2.py`` in five places; the
+    golden exporters patch them so their references match the native model:
+
+    1. CLIP MLP: ``quick_gelu`` (x * sigmoid(1.702 x)), not exact GELU.
+    2. CLIP layer LayerNorm eps 1e-5 (``layernorm_epsilon``), not 1e-6.
+    3. CLIP pos-embed resample over the two spatial axes (bicubic,
+       antialias), not over (dim, src) through a channels-last Upsample.
+    4. SAM ``get_rel_pos``: ``F.interpolate(mode="linear")`` half-pixel
+       source index, not ``m * scale``.
+    5. v1 R-SWA keeps the whole prompt: the reference prefills it in one call,
+       so ``prefill_length`` is the prompt length even though mlx-vlm feeds the
+       last prompt token as the first decode step.
+    """
+    import mlx.core as mx
+
+    vision_mod = import_module("mlx_vlm.models.deepseekocr.vision")
+    sam_mod = import_module("mlx_vlm.models.deepseekocr.sam")
+    kernels = import_module("mlx_vlm.models.kernels")
+
+    def quick_gelu(x):
+        return x * mx.sigmoid(1.702 * x)
+
+    for _, module in model.vision_model.named_modules():
+        if isinstance(module, vision_mod.EncoderLayer):
+            module.mlp.activation_fn = quick_gelu
+            module.layer_norm1.eps = 1e-5
+            module.layer_norm2.eps = 1e-5
+
+    def get_abs_pos(self, abs_pos, tgt_size):
+        dim = abs_pos.shape[-1]
+        abs_pos_new = mx.squeeze(abs_pos, axis=0)
+        cls_token, old = abs_pos_new[:1], abs_pos_new[1:]
+        src = int(math.sqrt(abs_pos_new.shape[0] - 1))
+        tgt = int(math.sqrt(tgt_size))
+        if src == tgt:
+            return abs_pos
+        grid = old.reshape(1, src, src, dim).transpose(0, 3, 1, 2)
+        new = kernels.bicubic_interpolate(
+            grid.astype(mx.float32), size=(tgt, tgt), antialias=True
+        ).astype(abs_pos.dtype)
+        new = new.transpose(0, 2, 3, 1).reshape(tgt * tgt, dim)
+        return mx.concatenate([cls_token, new], axis=0).reshape(1, tgt * tgt + 1, dim)
+
+    vision_mod.VisionEmbeddings._get_abs_pos = get_abs_pos
+
+    def get_rel_pos(q_size, k_size, rel_pos):
+        max_rel = int(2 * max(q_size, k_size) - 1)
+        if rel_pos.shape[0] != max_rel:
+            dtype = rel_pos.dtype
+            src = rel_pos.astype(mx.float32)
+            n = src.shape[0]
+            real = mx.maximum(
+                (mx.arange(max_rel, dtype=mx.float32) + 0.5) * (n / max_rel) - 0.5, 0.0
+            )
+            lo = real.astype(mx.int32)
+            hi = mx.minimum(lo + 1, n - 1)
+            w = (real - lo.astype(mx.float32))[:, None]
+            rel_pos = ((1 - w) * src[lo] + w * src[hi]).astype(dtype)
+        q = mx.arange(q_size)[:, None] * max(k_size / q_size, 1.0)
+        k = mx.arange(k_size)[None, :] * max(q_size / k_size, 1.0)
+        rel = (q - k) + (k_size - 1) * max(q_size / k_size, 1.0)
+        return rel_pos[rel.astype(mx.int32)]
+
+    sam_mod.get_rel_pos = get_rel_pos
+
+    try:
+        lang = import_module("mlx_vlm.models.unlimited_ocr.language")
+    except ImportError:
+        return
+    ring = getattr(lang, "RingSlidingKVCache", None)
+    if ring is None or getattr(ring, "_aimd_patched", False):
+        return
+    base_update = lang.KVCache.update_and_fetch
+    orig_update = ring.update_and_fetch
+
+    def update_and_fetch(self, keys, values):
+        if self.prefill_length is None:
+            if getattr(self, "_aimd_chunk", False):
+                return base_update(self, keys, values)
+            # First non-chunk call ends the prompt.
+            self.prefill_length = self.offset + int(keys.shape[2])
+        return orig_update(self, keys, values)
+
+    ring.update_and_fetch = update_and_fetch
+    ring._aimd_patched = True
+    lm_cls = type(model.language_model)
+    orig_call = lm_cls.__call__
+
+    def call(self, *args, cache=None, **kwargs):
+        chunk = "n_to_process" in kwargs
+        for c in cache or []:
+            if isinstance(c, ring):
+                c._aimd_chunk = chunk
+        return orig_call(self, *args, cache=cache, **kwargs)
+
+    lm_cls.__call__ = call

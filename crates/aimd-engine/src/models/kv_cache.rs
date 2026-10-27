@@ -4,9 +4,14 @@
 //!
 //! [`KvCache::update_and_fetch`] grows by `ceil(seq / 256) * 256` zero rows
 //! (trimming to `offset` first when `offset % 256 != 0`) and slice-assigns
-//! `[prev, offset)`; the ring mode fixes `prefill_length` at the first
-//! single-token update, appends until `prefill_length + window` rows, then
-//! overwrites ring slots while the absolute RoPE offset keeps increasing.
+//! `[prev, offset)`; the ring mode keeps the first `prefill_length` rows,
+//! appends until `prefill_length + window` rows, then overwrites ring slots
+//! while the absolute RoPE offset keeps increasing. `prefill_length` is
+//! fixed at the first single-token update unless [`KvCache::retain_prompt`]
+//! pinned it: Baidu's `SlidingWindowLlamaAttention` prefills the whole
+//! prompt in one call, so a chunked prefill that feeds the last prompt
+//! token as the first decode step must pin the full prompt length, or that
+//! token (and a 1-row final chunk) lands in the ring and is overwritten.
 
 use aimd_mlx::{MlxArray, MlxError};
 
@@ -33,6 +38,14 @@ impl KvCache {
             window,
             prefill_length: None,
             ring_pos: 0,
+        }
+    }
+
+    /// Keep the first `len` rows (the whole prompt) out of the ring. No-op
+    /// for a plain cache.
+    pub(crate) fn retain_prompt(&mut self, len: usize) {
+        if self.window.is_some() {
+            self.prefill_length = Some(len);
         }
     }
 
@@ -217,6 +230,20 @@ mod tests {
         let (k, _) = c.update_and_fetch(&row(6.0, 1), &row(6.0, 1)).unwrap();
         assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 6.0, 5.0]);
         assert_eq!(c.offset(), 8);
+        // Pinned prompt (chunked prefill of prompt[:-1] = 2 + 1 rows, then
+        // the last prompt token as a single step): all 4 prompt rows stay.
+        let mut r = KvCache::new(Some(2));
+        r.retain_prompt(4);
+        r.update_and_fetch(&row(1.0, 2), &row(1.0, 2)).unwrap();
+        r.update_and_fetch(&row(1.0, 1), &row(1.0, 1)).unwrap();
+        r.update_and_fetch(&row(1.0, 1), &row(1.0, 1)).unwrap();
+        assert_eq!((r.offset(), r.prefill_length()), (4, Some(4)));
+        for v in 2..=5 {
+            r.update_and_fetch(&row(v as f32, 1), &row(v as f32, 1))
+                .unwrap();
+        }
+        let (k, _) = r.update_and_fetch(&row(6.0, 1), &row(6.0, 1)).unwrap();
+        assert_eq!(col0(&k), vec![1.0, 1.0, 1.0, 1.0, 6.0, 5.0]);
         // Step-256 growth: the backing buffer holds one 256-row block.
         assert_eq!(c.keys_buffer().unwrap().shape().unwrap()[2], 256);
         // Plain cache: growth past 256 trims to offset first.

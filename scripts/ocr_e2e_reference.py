@@ -83,9 +83,11 @@ def main():
         UNLIMITED_OCR_SINGLE_PROMPT,
         SlidingWindowNoRepeatNgramProcessor,
         normalize_unlimited_ocr_markdown,
+        patch_mlx_vlm_to_baidu,
     )
 
     model, processor = load("mlx-community/Unlimited-OCR-4bit")
+    patch_mlx_vlm_to_baidu(model)
     prompt = apply_chat_template(
         processor, model.config, UNLIMITED_OCR_SINGLE_PROMPT, num_images=1
     )

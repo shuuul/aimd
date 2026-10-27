@@ -2,20 +2,31 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
+#     "easydict==1.13",
+#     "einops==0.8.1",
 #     "mlx==0.32.2",
 #     "mlx-vlm==0.7.0",
 #     "numpy==2.4.6",
 #     "pillow==12.3.0",
+#     "safetensors==0.8.0",
+#     "torch==2.9.0",
 # ]
 # ///
 """Export golden reference tensors for the Unlimited-OCR vision path (WS-07a).
 
-Loads `mlx-community/Unlimited-OCR-4bit` from the local HF cache through the
-real mlx-vlm graph (`mlx_vlm.models.unlimited_ocr`), runs the vision path on
-deterministic synthetic images in gundam mode (1024 global view + 640 local
-crops), and dumps per-stage tensors as raw little-endian f32 (plus bf16-bit
-final features and u8 resized pixels) with a `manifest.json` into
-`crates/aimd-engine/tests/golden/ocr_vision/`.
+The towers run Baidu's native reference code: `deepencoder.py` from the
+`baidu/Unlimited-OCR` HF snapshot (SAM ViT-B + CLIP-L, QuickGELU, CLIP
+LayerNorm eps 1e-5, bicubic-antialias position embeddings, half-pixel
+rel-pos interpolation), in torch f32, with the weights aimd loads: the bf16
+vision tensors of `mlx-community/Unlimited-OCR-4bit` (identical to Baidu's)
+and its 4-bit affine projector dequantized. mlx-vlm 0.7.0 only supplies the
+gundam preprocessing (`dynamic_preprocess`, checked against its processor);
+its vision graph diverged from the reference (Blaizzy/mlx-vlm#2603).
+
+Runs the vision path on deterministic synthetic images in gundam mode (1024
+global view + 640 local crops) and dumps per-stage tensors as raw
+little-endian f32 (plus bf16-bit final features and u8 resized pixels) with a
+`manifest.json` into `crates/aimd-engine/tests/golden/ocr_vision/`.
 
 Stages dumped per image (mirroring `Model.get_input_embeddings`):
 
@@ -37,22 +48,25 @@ Deterministic: fixed synthetic images (no RNG, no fonts), fixed prompt.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
+import torch
 from PIL import Image, ImageDraw, ImageOps
+from safetensors import safe_open
 
 from mlx_vlm import load
 from mlx_vlm.models.deepseekocr.processing_deepseekocr import dynamic_preprocess
-from mlx_vlm.models.deepseekocr.sam import get_abs_pos_sam, get_rel_pos
 
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "crates" / "aimd-engine" / "tests" / "golden" / "ocr_vision"
 IMAGES_DIR = OUT / "images"
 
 CHECKPOINT = "mlx-community/Unlimited-OCR-4bit"
+REFERENCE = "baidu/Unlimited-OCR"
 BASE_SIZE = 1024
 IMAGE_SIZE = 640
 IMAGE_MEAN = (0.5, 0.5, 0.5)
@@ -255,43 +269,111 @@ def pixel_rows(length: int) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
-# Staged tower runs (mirror mlx_vlm get_input_embeddings exactly).
+# Baidu reference towers (torch f32) with aimd's checkpoint weights.
 # ---------------------------------------------------------------------------
 
 
+def find_reference_snapshot() -> Path:
+    base = Path.home() / ".cache" / "huggingface" / "hub"
+    root = base / "models--baidu--Unlimited-OCR" / "snapshots"
+    for entry in sorted(root.iterdir()):
+        if (entry / "deepencoder.py").is_file():
+            return entry
+    raise SystemExit(f"deepencoder.py not found under {root}")
+
+
+def load_deepencoder(snapshot: Path):
+    spec = importlib.util.spec_from_file_location(
+        "baidu_deepencoder", snapshot / "deepencoder.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def to_torch(a: np.ndarray) -> torch.Tensor:
+    return torch.from_numpy(np.ascontiguousarray(a, dtype=np.float32))
+
+
+def dequantize_affine(w: np.ndarray, scales, biases, group: int = 64, bits: int = 4):
+    """MLX affine dequantization: uint32 words packing 32/bits values, low bits first."""
+    per = 32 // bits
+    shifts = (np.arange(per, dtype=np.uint32) * bits)[None, None, :]
+    q = (w[..., None] >> shifts) & np.uint32((1 << bits) - 1)
+    q = q.reshape(w.shape[0], -1).astype(np.float32)
+    q = q.reshape(w.shape[0], -1, group)
+    out = q * scales[..., None] + biases[..., None]
+    return out.reshape(w.shape[0], -1)
+
+
+def load_reference_towers(deepencoder, checkpoint: Path):
+    """SAM / CLIP / projector modules from Baidu's code with the MLX checkpoint.
+
+    MLX stores convolutions OHWI; torch expects OIHW."""
+    sam = deepencoder.build_sam_vit_b()
+    clip = deepencoder.build_clip_l()
+    projector = torch.nn.Linear(2048, 1280)
+    with safe_open((checkpoint / "model.safetensors").as_posix(), "pt") as ft:
+
+        def tensor(key: str) -> torch.Tensor:
+            return ft.get_tensor(key).to(torch.float32)
+
+        for prefix, module in (("sam_model.", sam), ("vision_model.", clip)):
+            state = {}
+            for name, ref in module.state_dict().items():
+                if name == "embeddings.position_ids":
+                    state[name] = ref
+                    continue
+                t = tensor(prefix + name)
+                if t.ndim == 4 and t.shape != ref.shape:
+                    t = t.permute(0, 3, 1, 2)
+                assert t.shape == ref.shape, (prefix + name, t.shape, ref.shape)
+                state[name] = t
+            module.load_state_dict(state, strict=True)
+        w = dequantize_affine(
+            ft.get_tensor("projector.layers.weight").numpy(),
+            tensor("projector.layers.scales").numpy(),
+            tensor("projector.layers.biases").numpy(),
+        )
+        projector.load_state_dict(
+            {"weight": to_torch(w), "bias": tensor("projector.layers.bias")}
+        )
+        image_newline = tensor("image_newline")
+        view_separator = tensor("view_separator")
+    for m in (sam, clip, projector):
+        m.eval().to(torch.float32)
+    return sam, clip, projector, image_newline, view_separator
+
+
+def flat_np(t: torch.Tensor) -> np.ndarray:
+    return t.reshape(-1, t.shape[-1]).detach().numpy()
+
+
+@torch.no_grad()
 def run_sam_staged(
+    deepencoder,
     sam,
-    patches_bf16: mx.array,
+    pixels: torch.Tensor,
     manifest_dumps: list[dict],
     prefix: str,
     dump: bool = True,
 ):
-    """patches_bf16: [N, 3, H, W]. Returns final SAM output [N, h, w, 1024]."""
-    x = patches_bf16.transpose(0, 2, 3, 1)  # NHWC
-    pe = sam.patch_embed(x)
-    x1 = pe + get_abs_pos_sam(sam.pos_embed, pe.shape[1])
+    """pixels: [N, 3, H, W] f32. Returns the SAM output [N, 1024, h, w] (NCHW).
 
-    def flat(t: mx.array) -> np.ndarray:
-        return np.asarray(t.reshape(-1, t.shape[-1]).astype(mx.float32))
-
+    Mirrors ``ImageEncoderViT.forward`` with stage taps; dumps are NHWC
+    token-flat like the Rust port."""
+    pe = sam.patch_embed(pixels)  # NHWC
+    x1 = pe + deepencoder.get_abs_pos_sam(sam.pos_embed, pe.size(1))
     if dump:
-        entry = {"stage": f"{prefix}.sam.patch_embed", "layout": "token_flat"}
-        dump_f32_rows(
-            f"{prefix}_sam_patch_embed.f32",
-            flat(pe),
-            stage_rows(pe.shape[1] * pe.shape[2]),
-            entry,
-        )
-        manifest_dumps.append(entry)
-        entry = {"stage": f"{prefix}.sam.pos_added", "layout": "token_flat"}
-        dump_f32_rows(
-            f"{prefix}_sam_pos_added.f32",
-            flat(x1),
-            stage_rows(x1.shape[1] * x1.shape[2]),
-            entry,
-        )
-        manifest_dumps.append(entry)
-
+        for stage, t in (("patch_embed", pe), ("pos_added", x1)):
+            entry = {"stage": f"{prefix}.sam.{stage}", "layout": "token_flat"}
+            dump_f32_rows(
+                f"{prefix}_sam_{stage}.f32",
+                flat_np(t),
+                stage_rows(t.shape[1] * t.shape[2]),
+                entry,
+            )
+            manifest_dumps.append(entry)
     h = x1
     for i, blk in enumerate(sam.blocks):
         h = blk(h)
@@ -299,71 +381,56 @@ def run_sam_staged(
             entry = {"stage": f"{prefix}.sam.block{i}", "layout": "token_flat"}
             dump_f32_rows(
                 f"{prefix}_sam_block{i}.f32",
-                flat(h),
+                flat_np(h),
                 stage_rows(h.shape[1] * h.shape[2]),
                 entry,
             )
             manifest_dumps.append(entry)
-    for n in sam.neck:
-        h = n(h)
-    h = sam.net_2(h)
-    h = sam.net_3(h)
+    h = sam.neck(h.permute(0, 3, 1, 2))
+    h = sam.net_3(sam.net_2(h))
     if dump:
+        nhwc = h.permute(0, 2, 3, 1)
         entry = {"stage": f"{prefix}.sam.final", "layout": "token_flat"}
         dump_f32_rows(
             f"{prefix}_sam_final.f32",
-            flat(h),
-            stage_rows(h.shape[1] * h.shape[2]),
+            flat_np(nhwc),
+            stage_rows(nhwc.shape[1] * nhwc.shape[2]),
             entry,
         )
         manifest_dumps.append(entry)
     return h
 
 
+@torch.no_grad()
 def run_clip_staged(
-    vm,
-    x_nhwc: mx.array,
-    patch_embeds: mx.array,
+    clip,
+    pixels: torch.Tensor,
+    sam_out: torch.Tensor,
     manifest_dumps: list[dict],
     prefix: str,
     dump: bool = True,
 ):
-    """Returns CLIP output [N, 1+L, 1024]. x_nhwc only supplies batch/dtype.
+    """Returns the CLIP output [N, 1+L, 1024] (``VitModel.forward`` with taps)."""
 
-    The CLIP tower runs over 1 + the SAM token grid (257 tokens for the
-    1024 global view, 101 for 640 crops with a resized position embedding),
-    so callers may skip its stage dumps for passes already covered."""
-    emb = vm.embeddings(x_nhwc, patch_embeds)
-    h = vm.pre_layrnorm(emb)
-    if dump:
-        entry = {"stage": f"{prefix}.clip.pre_layernorm", "layout": "token_flat"}
+    def tap(stage: str, h: torch.Tensor):
+        if not dump:
+            return
+        entry = {"stage": f"{prefix}.clip.{stage}", "layout": "token_flat"}
         dump_f32_rows(
-            f"{prefix}_clip_pre_layernorm.f32",
-            np.asarray(h.reshape(-1, h.shape[-1]).astype(mx.float32)),
+            f"{prefix}_clip_{stage}.f32",
+            flat_np(h),
             stage_rows(h.shape[0] * h.shape[1]),
             entry,
         )
         manifest_dumps.append(entry)
-    for i, layer in enumerate(vm.transformer.layers):
+
+    h = clip.pre_layrnorm(clip.embeddings(pixels, sam_out))
+    tap("pre_layernorm", h)
+    for i, layer in enumerate(clip.transformer.layers):
         h = layer(h)
-        if dump and i in (0, 1, 6, 11):
-            entry = {"stage": f"{prefix}.clip.layer{i}", "layout": "token_flat"}
-            dump_f32_rows(
-                f"{prefix}_clip_layer{i}.f32",
-                np.asarray(h.reshape(-1, h.shape[-1]).astype(mx.float32)),
-                stage_rows(h.shape[0] * h.shape[1]),
-                entry,
-            )
-            manifest_dumps.append(entry)
-    if dump:
-        entry = {"stage": f"{prefix}.clip.final", "layout": "token_flat"}
-        dump_f32_rows(
-            f"{prefix}_clip_final.f32",
-            np.asarray(h.reshape(-1, h.shape[-1]).astype(mx.float32)),
-            stage_rows(h.shape[0] * h.shape[1]),
-            entry,
-        )
-        manifest_dumps.append(entry)
+        if i in (0, 1, 6, 11):
+            tap(f"layer{i}", h)
+    tap("final", h)
     return h
 
 
@@ -392,12 +459,19 @@ def main() -> None:
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     snapshot = find_snapshot()
 
-    model, processor = load(snapshot.as_posix())
+    # mlx-vlm: gundam preprocessing only (checked against its processor).
+    _, processor = load(snapshot.as_posix())
+    reference = find_reference_snapshot()
+    deepencoder = load_deepencoder(reference)
+    sam, clip, projector, image_newline, view_separator = load_reference_towers(
+        deepencoder, snapshot
+    )
 
     manifest: dict = {
         "kind": "ocr_vision",
         "checkpoint": CHECKPOINT,
         "checkpoint_snapshot": snapshot.as_posix(),
+        "reference": f"{REFERENCE} deepencoder.py ({reference.name}), torch f32",
         "gundam": {
             "base_size": BASE_SIZE,
             "image_size": IMAGE_SIZE,
@@ -419,6 +493,9 @@ def main() -> None:
             "safetensors header survey in the WS-07a report.",
             "Stage tensors are token-flattened [L, C] f32 row samples "
             "(channels complete); final features are full bf16 bits.",
+            "Towers: Baidu deepencoder.py in torch f32 (pixels rounded to "
+            "bf16 first, like the reference pipeline); the 4-bit projector is "
+            "dequantized to f32.",
         ],
     }
 
@@ -522,40 +599,36 @@ def main() -> None:
         )
         dumps.append(nentry)
 
-        # --- towers ---------------------------------------------------------
-        image_ori = ori_ref  # [1, 3, 1024, 1024] bf16
+        # --- towers (Baidu reference, torch f32) ------------------------------
+        def pixels(arr: mx.array) -> torch.Tensor:
+            return to_torch(np.asarray(arr.astype(mx.float32)))
+
+        image_ori = pixels(ori_ref)  # [1, 3, 1024, 1024], bf16-rounded values
         # The global 1024 pass exercises the 64x64 grid (window pad 64->70);
-        # the crop pass exercises the 40x40 grid (rel-pos interp). The CLIP
-        # tower is size-independent, so its stage dumps are taken once (crop
-        # pass). The small image keeps only pixels/projector/final dumps.
+        # the crop pass exercises the 40x40 grid (rel-pos interp) and the
+        # 16->10 CLIP pos-embed resample. The CLIP tower stage dumps are taken
+        # once (crop pass). The small image keeps only pixels/projector/final.
         tower_dump = tag == "crop"
         sam_global = run_sam_staged(
-            model.sam_model, image_ori, dumps, f"{tag}_global", dump=tower_dump
+            deepencoder, sam, image_ori, dumps, f"{tag}_global", dump=tower_dump
         )
         clip_global = run_clip_staged(
-            model.vision_model,
-            image_ori.transpose(0, 2, 3, 1),
-            sam_global,
-            dumps,
-            f"{tag}_global",
-            dump=False,
+            clip, image_ori, sam_global, dumps, f"{tag}_global", dump=False
         )
 
-        def projector_out(sam_out: mx.array, clip_out: mx.array) -> mx.array:
-            feats = mx.concatenate(
-                (clip_out[:, 1:], sam_out.flatten(start_axis=1, end_axis=2)), axis=-1
+        @torch.no_grad()
+        def projector_out(sam_out: torch.Tensor, clip_out: torch.Tensor):
+            feats = torch.cat(
+                (clip_out[:, 1:], sam_out.flatten(2).permute(0, 2, 1)), dim=-1
             )
-            return model.projector(feats)
+            return projector(feats)
 
         proj_global = projector_out(sam_global, clip_global)
-        rows = stage_rows(proj_global.shape[0] * proj_global.shape[1])
         entry = {"stage": f"{tag}.global.projector", "layout": "token_flat"}
         dump_f32_rows(
             f"{tag}_global_projector.f32",
-            np.asarray(
-                proj_global.reshape(-1, proj_global.shape[-1]).astype(mx.float32)
-            ),
-            rows,
+            flat_np(proj_global),
+            stage_rows(proj_global.shape[0] * proj_global.shape[1]),
             entry,
         )
         dumps.append(entry)
@@ -564,34 +637,25 @@ def main() -> None:
         gf = proj_global[0]
         hw, n_dim = gf.shape
         h = w = int(hw**0.5)
-        gf = gf.reshape(h, w, n_dim)
-        gf = mx.concatenate(
-            [gf, mx.broadcast_to(model.image_newline[None, None, :], (h, 1, n_dim))],
-            axis=1,
+        gf = torch.cat(
+            [gf.reshape(h, w, n_dim), image_newline[None, None, :].expand(h, 1, n_dim)],
+            dim=1,
         ).reshape(-1, n_dim)
 
         if crops_u8:
-            crops_bf16 = crops_ref
+            crops = pixels(crops_ref)
             sam_local = run_sam_staged(
-                model.sam_model, crops_bf16, dumps, f"{tag}_crops", dump=True
+                deepencoder, sam, crops, dumps, f"{tag}_crops", dump=True
             )
             clip_local = run_clip_staged(
-                model.vision_model,
-                crops_bf16.transpose(0, 2, 3, 1),
-                sam_local,
-                dumps,
-                f"{tag}_crops",
-                dump=True,
+                clip, crops, sam_local, dumps, f"{tag}_crops", dump=True
             )
             proj_local = projector_out(sam_local, clip_local)
-            rows = stage_rows(proj_local.shape[0] * proj_local.shape[1])
             entry = {"stage": f"{tag}.crops.projector", "layout": "token_flat"}
             dump_f32_rows(
                 f"{tag}_crops_projector.f32",
-                np.asarray(
-                    proj_local.reshape(-1, proj_local.shape[-1]).astype(mx.float32)
-                ),
-                rows,
+                flat_np(proj_local),
+                stage_rows(proj_local.shape[0] * proj_local.shape[1]),
                 entry,
             )
             dumps.append(entry)
@@ -601,22 +665,22 @@ def main() -> None:
             h2 = w2 = int(hw2**0.5)
             lf = (
                 proj_local.reshape(height_crop_num, width_crop_num, h2, w2, n_dim2)
-                .transpose(0, 2, 1, 3, 4)
+                .permute(0, 2, 1, 3, 4)
                 .reshape(height_crop_num * h2, width_crop_num * w2, n_dim2)
             )
-            lf = mx.concatenate(
+            lf = torch.cat(
                 [
                     lf,
-                    mx.broadcast_to(
-                        model.image_newline[None, None, :],
-                        (height_crop_num * h2, 1, n_dim2),
+                    image_newline[None, None, :].expand(
+                        height_crop_num * h2, 1, n_dim2
                     ),
                 ],
-                axis=1,
+                dim=1,
             ).reshape(-1, n_dim2)
-            features = mx.concatenate([lf, gf, model.view_separator[None, :]], axis=0)
+            features = torch.cat([lf, gf, view_separator[None, :]], dim=0)
         else:
-            features = mx.concatenate([gf, model.view_separator[None, :]], axis=0)
+            features = torch.cat([gf, view_separator[None, :]], dim=0)
+        features = mx.array(features.numpy())
 
         n_tokens = features.shape[0]
         fentry = {"stage": f"{tag}.final_features", "layout": "full_bf16"}
@@ -633,24 +697,36 @@ def main() -> None:
 
         # --- aux tables (crop path only) ------------------------------------
         if tag == "crop" and crops_u8:
-            # SAM pos-embed bicubic interpolation (64 -> 40).
-            sam = model.sam_model
-            pe_grid = get_abs_pos_sam(sam.pos_embed, IMAGE_SIZE // 16)
-            flat = np.asarray(pe_grid.reshape(-1, pe_grid.shape[-1]).astype(mx.float32))
-            rows = stage_rows(flat.shape[0])
+            # SAM pos-embed bicubic-antialias interpolation (64 -> 40).
+            grid = IMAGE_SIZE // 16
+            pe_grid = deepencoder.get_abs_pos_sam(sam.pos_embed, grid).detach()
+            flat = flat_np(pe_grid)
             entry = {"stage": "aux.sam_pos_embed_interp_40", "layout": "token_flat"}
-            dump_f32_rows("aux_sam_pos_embed_interp_40.f32", flat, rows, entry)
-            dumps.append(entry)
-            # rel_pos linear interpolation for global-attn blocks at 40x40.
-            blk = sam.blocks[2]  # global attention block
-            rp = get_rel_pos(IMAGE_SIZE // 16, IMAGE_SIZE // 16, blk.attn.rel_pos_h)
-            entry = {"stage": "aux.rel_pos_h_interp_40"}
-            dump_f32(
-                "aux_rel_pos_h_interp_40.f32", np.asarray(rp.astype(mx.float32)), entry
+            dump_f32_rows(
+                "aux_sam_pos_embed_interp_40.f32",
+                flat,
+                stage_rows(flat.shape[0]),
+                entry,
             )
             dumps.append(entry)
-
-        mx.eval(features)
+            # rel_pos half-pixel linear interpolation for global-attn blocks at 40x40.
+            rel = sam.blocks[2].attn.rel_pos_h  # global attention block
+            rp = deepencoder.get_rel_pos(grid, grid, rel).detach().numpy()
+            entry = {"stage": "aux.rel_pos_h_interp_40"}
+            dump_f32("aux_rel_pos_h_interp_40.f32", rp, entry)
+            dumps.append(entry)
+            # CLIP pos-embed bicubic-antialias interpolation (16 -> 10, + cls).
+            pos = clip.embeddings.position_embedding(clip.embeddings.position_ids)
+            cp = deepencoder.get_abs_pos(pos, 1 + (IMAGE_SIZE // 64) ** 2).detach()
+            flat = flat_np(cp)
+            entry = {"stage": "aux.clip_pos_embed_interp_10", "layout": "token_flat"}
+            dump_f32_rows(
+                "aux_clip_pos_embed_interp_10.f32",
+                flat,
+                stage_rows(flat.shape[0]),
+                entry,
+            )
+            dumps.append(entry)
 
     total_bytes += sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
 

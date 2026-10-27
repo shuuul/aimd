@@ -47,6 +47,7 @@ pub enum PreprocessError {
 }
 
 /// Round-to-nearest-even f32 -> bf16 -> f32 (an MLX `.astype(bfloat16)`).
+#[cfg(test)]
 #[inline]
 pub(crate) fn bfr(x: f32) -> f32 {
     bf16::from_f32(x).to_f32()
@@ -698,7 +699,7 @@ pub(crate) fn pixels_nhwc_bf16(u8img: &[u8]) -> Vec<bf16> {
 // Interpolation helpers (SAM pos embed bicubic + rel pos linear)
 // ---------------------------------------------------------------------------
 
-/// `cubic_kernel_a(x, a)` from the mlx_vlm Metal kernel.
+/// Keys cubic kernel with parameter `a` (torch antialias uses -0.5).
 fn cubic_kernel_a(x: f32, a: f32) -> f32 {
     let absx = x.abs();
     let absx2 = absx * absx;
@@ -712,9 +713,9 @@ fn cubic_kernel_a(x: f32, a: f32) -> f32 {
     }
 }
 
-/// Channel-last bicubic interpolation with PyTorch antialias semantics,
-/// mirroring the mlx_vlm Metal kernel exactly (`bicubic_interpolate` with
-/// `antialias=True`, `align_corners=False`, support 2.0, a = -0.5): f32
+/// Channel-last bicubic interpolation with PyTorch antialias semantics
+/// (`F.interpolate(bicubic, antialias=True, align_corners=False)`, as in
+/// the mlx_vlm Metal kernel: support 2.0, a = -0.5): f32
 /// coordinate math, tap range clamped in-bounds, weight-sum normalization.
 /// `src`: `[in_h, in_w, c]`; returns `[out_h, out_w, c]`.
 pub(crate) fn bicubic_interp_antialias(
@@ -763,8 +764,9 @@ pub(crate) fn bicubic_interp_antialias(
     dst
 }
 
-/// SAM `get_abs_pos_sam`: f32 bicubic (antialias) then round back to bf16
-/// precision. Returns `[tgt, tgt, c]` with bf16-exact f32 values.
+/// SAM `get_abs_pos_sam` (Baidu `deepencoder.py`): f32 bicubic
+/// (antialias). Returns `[tgt, tgt, c]` in f32; the upload rounds it to
+/// bf16 like the reference's `.to(dtype)`.
 pub(crate) fn sam_pos_embed_interp(
     pos_embed: &[f32],
     src: usize,
@@ -772,101 +774,32 @@ pub(crate) fn sam_pos_embed_interp(
     c_dim: usize,
 ) -> Vec<f32> {
     bicubic_interp_antialias(pos_embed, src, src, tgt, tgt, c_dim)
-        .into_iter()
-        .map(bfr)
-        .collect()
 }
 
-/// CLIP `VisionEmbeddings._get_abs_pos` (mlx_vlm `deepseekocr/vision.py`)
-/// for a `tgt_tokens = 1 + side^2` sequence, reproduced EXACTLY including
-/// its layout quirk.
-///
-/// The reference transposes the `[src, src, dim]` grid to `(1, dim, src,
-/// src)` and feeds it to `mlx.nn.Upsample(mode="cubic",
-/// align_corners=False)` via `base.interpolate`. MLX `Upsample` treats an
-/// input as channels-LAST (`B, *spatial, C`), so the two "spatial" axes it
-/// resizes are `(dim, src_h)` and `src_w` is carried as the feature axis:
-/// the output is `(1, dim*s, side, src)` with `s = side / src`, which the
-/// reference transposes `(0, 2, 3, 1)` and reshapes to `[side^2, dim]`.
-/// The CLIP rows therefore get a scrambled-but-deterministic pos embed; the
-/// 4-bit checkpoint's crop outputs (and the golden fixtures) depend on it.
-///
-/// Interpolation: non-antialiased cubic, `a = -0.75` (`_cubic_indices`),
-/// f32 index math mirroring `_scaled_indices` (Python scalars weak-typed to
-/// f32), border-clamped taps, and the `_interpolate` 4x4 tap order
-/// (dim-0 outer, dim-1 inner, sequential f32 sum from 0). The result is
-/// rounded to bf16 (`.astype(dtype)`). `pos` is `[1 + src^2, dim]`; returns
-/// `[tgt_tokens', dim]` where `tgt_tokens' = 1 + isqrt(tgt_tokens-1)^2`
-/// (equal to `pos` when the grid already matches).
+/// CLIP `get_abs_pos` (Baidu `deepencoder.py`) for a `tgt_tokens = 1 +
+/// side^2` sequence: the `[src, src, dim]` grid is resampled over its two
+/// spatial axes (`view(1, src, src, dim).permute(0, 3, 1, 2)` +
+/// `F.interpolate(bicubic, antialias=True, align_corners=False)`) and the
+/// class row is kept. `pos` is `[1 + src^2, dim]`; returns `[1 + side^2,
+/// dim]` with `side = isqrt(tgt_tokens)` (equal to `pos` when the grid
+/// already matches). f32; the upload rounds it to bf16.
 pub(crate) fn clip_pos_embed_interp(pos: &[f32], dim: usize, tgt_tokens: usize) -> Vec<f32> {
     let src = (pos.len() / dim - 1).isqrt();
     let side = tgt_tokens.isqrt(); // `int(math.sqrt(tgt_size))`
     if src == side {
         return pos.to_vec();
     }
-    let scale = side as f64 / src as f64;
-    // (axis length N, output length M) for the two resized axes.
-    let axes = [(dim, (scale * dim as f64) as usize), (src, side)];
-    // Per axis: 4 taps of (clamped index, f32 weight) per output position,
-    // in `_cubic_indices` return order (l1, r1, l2, r2).
-    let taps: Vec<Vec<[(usize, f32); 4]>> = axes
-        .iter()
-        .map(|&(n, m)| {
-            let step = 1.0 / scale;
-            let start = ((m as f64 - 1.0) * step - n as f64 + 1.0) / 2.0;
-            let (step32, start32) = (step as f32, start as f32);
-            let a = -0.75f32;
-            let w1 = |x: f32| ((a + 2.0) * x - (a + 3.0)) * x * x + 1.0;
-            let w2 = |x: f32| (((x - 5.0) * x + 8.0) * x - 4.0) * a;
-            let clamp = |v: f32| v.clamp(0.0, (n - 1) as f32) as usize;
-            (0..m)
-                .map(|i| {
-                    let ind = i as f32 * step32 - start32;
-                    let l1 = ind.floor();
-                    let r1 = (ind + 1.0).floor();
-                    let l2 = l1 - 1.0;
-                    let r2 = r1 + 1.0;
-                    [
-                        (clamp(l1), w1((ind - l1).abs())),
-                        (clamp(r1), w1((ind - r1).abs())),
-                        (clamp(l2), w2((ind - l2).abs())),
-                        (clamp(r2), w2((ind - r2).abs())),
-                    ]
-                })
-                .collect()
-        })
-        .collect();
-    let (m0, m1) = (axes[0].1, axes[1].1);
-    let feat = src; // carried "channel" axis = src_w
-    // a[c][h][w] = pos[1 + h*src + w][c]
-    let a_at = |c: usize, h: usize, w: usize| pos[(1 + h * src + w) * dim + c];
-    // out[c'][h'][w] (m0, m1, feat), flattened to [side^2, dim] through the
-    // (0, 2, 3, 1) transpose: flat index = (h' * feat + w) * m0 + c'.
-    let mut flat = vec![0f32; m0 * m1 * feat];
-    for (c_out, t0) in taps[0].iter().enumerate() {
-        for (h_out, t1) in taps[1].iter().enumerate() {
-            for w in 0..feat {
-                let mut acc = 0f32;
-                for &(i0, w0) in t0 {
-                    for &(i1, w1v) in t1 {
-                        acc += (w0 * w1v) * a_at(i0, i1, w);
-                    }
-                }
-                flat[(h_out * feat + w) * m0 + c_out] = bfr(acc);
-            }
-        }
-    }
-    debug_assert_eq!(flat.len(), side * side * dim);
+    let grid = bicubic_interp_antialias(&pos[dim..], src, src, side, side, dim);
     let mut out = Vec::with_capacity((1 + side * side) * dim);
     out.extend_from_slice(&pos[..dim]);
-    out.extend_from_slice(&flat);
+    out.extend_from_slice(&grid);
     out
 }
 
 /// SAM `get_rel_pos` for `q_size == k_size` (the only shape this model
-/// runs): linear interpolation of the `[rows, c]` table to
-/// `max_rel = 2*q-1` rows when needed (rounded back to bf16 like the
-/// reference's `.astype(dtype)`), then gathered by
+/// runs): `F.interpolate(mode="linear", align_corners=False)` of the
+/// `[rows, c]` table to `max_rel = 2*q-1` rows when needed (half-pixel
+/// source index clamped at 0, f32), then gathered by
 /// `relative_coords[i][j] = i - j + (q - 1)` -> `[q, k, c]`.
 pub(crate) fn get_rel_pos_table(
     rel_pos: &[f32],
@@ -879,14 +812,15 @@ pub(crate) fn get_rel_pos_table(
         let scale = rel_rows as f32 / max_rel as f32;
         let mut out = vec![0f32; max_rel * c_dim];
         for m in 0..max_rel {
-            let indices = m as f32 * scale;
-            let idx_floor = indices.floor();
-            let idx_ceil = (idx_floor + 1.0).min((rel_rows - 1) as f32);
-            let weight = indices - idx_floor;
+            let real = ((m as f32 + 0.5) * scale - 0.5).max(0.0);
+            let lo_i = real as usize;
+            let hi_i = if lo_i < rel_rows - 1 { lo_i + 1 } else { lo_i };
+            let l1 = real - lo_i as f32;
+            let l0 = 1.0 - l1;
             for c in 0..c_dim {
-                let lo = rel_pos[idx_floor as usize * c_dim + c];
-                let hi = rel_pos[idx_ceil as usize * c_dim + c];
-                out[m * c_dim + c] = bfr(lo * (1.0 - weight) + hi * weight);
+                let lo = rel_pos[lo_i * c_dim + c];
+                let hi = rel_pos[hi_i * c_dim + c];
+                out[m * c_dim + c] = l0 * lo + l1 * hi;
             }
         }
         out
