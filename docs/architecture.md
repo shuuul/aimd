@@ -109,7 +109,7 @@ from `ProcessResult.markdown`; interfaces must not rebuild them from
 |------|----------|--------------|
 | Transcript | `aimd-url` for URL subtitles/audio; `aimd-process::asr` for transcription | Qwen3-ASR 1.7B/0.6B (`mlx-community/Qwen3-ASR-*-{4,6,8}bit`) on MLX, or remote `/v1/audio/transcriptions` when `AIMD_ASR_BASE_URL` is set. |
 | Convert | `aimd-doc` | Pandoc CLI, pdf-inspector, passthrough for `.txt`/`.md`. |
-| OCR | `aimd-process::ocr` | Unlimited-OCR (`mlx-community/Unlimited-OCR-{4,6,8}bit`) on MLX, or remote `/v1/chat/completions` when `AIMD_OCR_BASE_URL` is set. |
+| OCR | `aimd-process::ocr` | Unlimited-OCR (`mlx-community/Unlimited-OCR-{4,6,8}bit`, 5-page PDF windows) or Unlimited-OCR-2 (`mlx-community/Unlimited-OCR-2-{4,6,8}bit`, 10-page PDF windows) on MLX, or remote `/v1/chat/completions` when `AIMD_OCR_BASE_URL` is set. |
 
 The README is the user-facing source of truth for `--model` values. Resolution lives in
 `aimd-process/src/models.rs`, and the CLI help texts live in `aimd-core/src/output.rs`.

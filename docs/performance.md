@@ -18,7 +18,8 @@ This document records practical performance expectations for `aimd` processing p
 | Task | Backend | Model family | Expected performance profile |
 |------|--------|--------------|------------------------------|
 | Transcription | native MLX | Qwen3-ASR 1.7B/0.6B (`4bit`, `6bit`, `8bit`) | Default `qwen3-asr-1.7b` 4-bit. The 0.6B model and lower bit widths trade quality for lower memory and faster load. 4-bit segments that loop retry once on 8-bit. |
-| OCR | native MLX | Unlimited-OCR (`4bit`, `6bit`, `8bit`) | Default 4-bit. Single-image gundam mode per page, no-repeat n-gram guard (`ngram=35`, `window=128`), `max_tokens=8192`. Without the guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
+| OCR | native MLX | Unlimited-OCR-2 (`4bit`, `6bit`, `8bit`), default | Default 4-bit. PDFs 10 pages per request (base mode); single images gundam (<= 16 crops); n-gram guard window 1024 for multi-page requests; upstream page-count guard. |
+| OCR | native MLX | Unlimited-OCR (`4bit`, `6bit`, `8bit`) | Default 4-bit. PDFs 5 pages per request (base mode; 10 scanned pages 17.7 s vs 34.5 s page by page on M2 Pro, same text); single images gundam mode, no-repeat n-gram guard (`ngram=35`, `window=128`), `max_tokens=8192`. Without the guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
 | ASR / OCR | remote OpenAI-compatible | server-defined | Latency is network plus server-side; no local load. |
 
 ## Native Rust engine (MLX backend)
