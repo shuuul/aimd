@@ -365,9 +365,9 @@ impl UnlimitedOcrPipeline {
     }
 
     /// Up to [`Self::max_pages`] encoded page images in order, as one
-    /// request (upstream auto layout: gundam tiles, at most 16, for one
-    /// page, which for v1 is the single-image request; one 1024 base view
-    /// per page otherwise).
+    /// request: v2 tiles every page (gundam, at most 16 crops); v1 sends a
+    /// lone page as the single-image request and several pages as one 1024
+    /// base view each.
     ///
     /// `request.prompt` is replaced by [`UNLIMITED_OCR2_PROMPT`] when it is
     /// the single-page default. The page-count guard expects one `<PAGE>`
@@ -409,7 +409,10 @@ impl UnlimitedOcrPipeline {
                 timings: r.timings,
             });
         }
-        let layout = if n == 1 {
+        // v2 tiles every page (mlx-vlm's default since c3ae82e2: base mode
+        // misreads small text and loops on longer documents); v1 keeps the
+        // `infer_multi` base view per page.
+        let layout = if self.is_v2() {
             PageLayout::Gundam16
         } else {
             PageLayout::Base

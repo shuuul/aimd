@@ -314,9 +314,9 @@ Images always go to OCR. For PDFs, pdf-inspector checks the text layer. PDFs
 with clean text are converted as documents. Scanned PDFs, and PDFs whose
 fonts cannot be decoded, go to OCR. aimd renders those pages with `mutool`
 and runs OCR on them. The default Unlimited-OCR-2 reads PDFs 10 pages per
-request (base mode, 273 image tokens per page; progress and cancellation
-between requests) and single images in gundam mode. Unlimited-OCR v1 reads
-PDFs 5 pages per request the same way and single images in gundam mode
+request (gundam tiles per page; progress and cancellation between
+requests) and single images in gundam mode. Unlimited-OCR v1 reads PDFs 5
+pages per request (one 1024 base view per page) and single images in gundam mode
 (`document parsing.` prompt), with a sliding-window no-repeat n-gram guard
 (n=35, window 128) and at most 8192 tokens per page. PaddleOCR-VL and PP-OCRv6
 run one page at a time.

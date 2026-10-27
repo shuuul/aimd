@@ -3,7 +3,7 @@ id: "008"
 title: "Unlimited-OCR-2: DASH decoder and windowed multi-page PDF OCR"
 status: Active
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
 coordinator: "Claude (Opus 5.5) session with shuuul"
 ---
 
@@ -92,6 +92,8 @@ Not in scope:
 | 2026-10-27 | v1 stays page by page | Upstream v1 `infer_multi` (one `<image>`, base 1024) dropped page 2 of the 2-page article in mlx-vlm (one `<PAGE>`, EOS after page 1); v1's `<PAGE>` is 3 text tokens, so the v2 page guard does not apply. PaddleOCR-VL / PP-OCRv6 are single-image models | WS-04 |
 | 2026-10-27 | Supersedes the row above: v1 reads PDFs in 5-page requests (`infer_multi` layout: one 1024 base view per page, no `<PAGE>` in the prompt, `Multi page parsing.`); a lone page keeps the gundam request | The earlier probe ran mlx-vlm at 640 px with no guard. Natively at 1024 with the page guard on v1's 3-token text `<PAGE>`, and the marker substituted for an EOS before the last page, v1 matched page-by-page output through 6 pages; the 7th looped and the 8th repeated page 1 | WS-04 |
 | 2026-10-27 | No dense-attention fallback on any backend: block-sparse prefill (custom Metal kernel; sparse gather from mlx ops on CUDA/CPU) and gathered decode. A dense masked path exists only as a test oracle | User decision; prefill with a full [L, S] mask costs as much as dense attention | WS-02 |
+| 2026-10-28 | Supersedes the 10-page base-mode row's layout: v2 tiles every page (gundam, <= 16 crops), multi-page requests included; 10-page windows stay. v1 multi-page keeps base | User decision, following mlx-vlm c3ae82e2 (base mode looped on page 3 of the 6-page technical report; tiles finished with EOS). On the corpus the text is identical and 10 pages take 41.4 s vs 23.2 s | WS-03, WS-04 |
+| 2026-10-28 | The vision towers and v1 R-SWA follow Baidu's native code (`deepencoder.py`, `modeling_deepseekv2.py`), not mlx-vlm 0.7.0: CLIP `quick_gelu`, CLIP layer LayerNorm eps 1e-5, spatial bicubic-antialias CLIP pos resample, half-pixel SAM rel-pos resample, and the ring keeps the whole prompt. The `ocr_vision` golden comes from `deepencoder.py` in torch f32; mlx-vlm-based exporters and corpus baselines call `patch_mlx_vlm_to_baidu` | User decision; mlx-vlm PR #2603 found the same divergences, confirmed against the Baidu source | WS-02, WS-03 |
 
 ## Workstreams
 
@@ -288,6 +290,41 @@ cargo xtask check-specs
   34.5 s vs two 5-page requests 17.7 s, all 10 pages 1.00; 11 pages
   (5+5+1) all 1.00.
 - Next action: gates, commit.
+
+### 2026-10-28 — Claude — WS-02/WS-03
+
+- Changed: the four vision divergences and the R-SWA prompt boundary
+  (decision above). `mlx_vision.rs`: CLIP `quick_gelu`, layer LN eps 1e-5.
+  `preprocess.rs`: `clip_pos_embed_interp` resamples the `[16, 16, dim]`
+  grid spatially with the torch bicubic antialias filter;
+  `get_rel_pos_table` uses the half-pixel linear index; host tables stay
+  f32 and round on upload. `KvCache::retain_prompt` pins `prefill_length`
+  to the prompt length (`OcrDecoder::new_cache`, v1 only); before, chunked
+  prefill of `prompt[:-1]` left the last prompt token (two with a 1-row
+  final chunk) in the ring, overwritten after 128 generated tokens.
+  `export_ocr_vision_reference.py` runs Baidu `deepencoder.py` in torch f32
+  with the mlx-community weights (projector dequantized);
+  `reference_unlimited_ocr.patch_mlx_vlm_to_baidu` patches mlx-vlm for the
+  e2e, decoder, ocr2 decoder exporters and both corpus baselines. All
+  Unlimited-OCR goldens re-exported.
+- Evidence (M2 Pro Metal, 4-bit): old (mlx-vlm) vs Baidu golden rel RMS
+  0.48..0.74 on the crop CLIP stages, 0.24..0.60 on projectors. Baidu's own
+  bf16 torch run vs its f32 run: clip.final 0.042, projectors 0.025, small
+  final features 0.074; the Rust port: stages <= 0.019, clip.final 0.059,
+  projectors <= 0.041, final features 0.052 / 0.049. Vision bounds
+  re-baselined to f32 truth (STAGE 0.03/0.05, HEAD 0.09/0.15, FINAL
+  0.08/0.35). Patched mlx-vlm final features give the same 0.052 / 0.049
+  (unpatched 0.28 / 0.44). Corpus gate PASS for v1 and v2, every page
+  identical to the new baselines; v1 baselines unchanged, v2 baselines keep
+  the text and move boxes by a few units, list items, heading labels.
+  Hermetic, checkpoint and E2E tiers pass; prek, fmt, clippy clean.
+- Changed (same day): v2 multi-page requests tile every page
+  (`recognize_pages`, decision above). 10 scanned corpus pages (article x2,
+  essay, notice, report, twice) on M2 Pro: gundam 41.4 s, base 23.2 s,
+  byte-identical Markdown; both differ from page-by-page output only in
+  heading levels. The c3ae82e2 KV quantization has no aimd counterpart
+  (aimd has no KV-cache quantization option).
+- Next action: commit.
 
 ## Completion summary
 

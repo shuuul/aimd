@@ -324,6 +324,11 @@ Supported model families are intentionally narrow:
   ASR, every segment, the 8-bit retry, and the URL audio fallback; URL metadata and
   title heuristics steer subtitle choice only. Explicit codes come from
   `aimd_engine::tokenizer::ASR_LANGUAGES` (30 languages).
+- **Unlimited-OCR vision + R-SWA** (v1 and v2 share the towers): the numerical source of
+  truth is Baidu's `deepencoder.py` / `modeling_deepseekv2.py`, not mlx-vlm. CLIP uses
+  `quick_gelu` and LayerNorm eps 1e-5; crop pos embeds resample the CLIP grid spatially
+  (bicubic antialias) and SAM rel pos with the half-pixel linear index. v1's ring cache
+  keeps the whole prompt (`KvCache::retain_prompt`), then a 128-token decode ring.
 - **OCR v1**: `unlimited-ocr`, resolving to `mlx-community/Unlimited-OCR-{4bit,6bit,8bit}`
   (default 4bit). OCR uses single-image gundam mode (`document parsing.`), the
   sliding-window no-repeat n-gram guard (35/128), and `max_tokens=8192` per page.
@@ -339,8 +344,9 @@ Supported model families are intentionally narrow:
   RoPE) through the `aimd_mlx::dash` shim ops: custom Metal kernels, the same block
   selection from mlx gathers elsewhere. Never fall back to dense attention; the dense
   `DashMode` is a test oracle only. Prompt: `[bos] + ([<PAGE>] + <image>*n)` per page +
-  `Multi page parsing.`. One image = gundam (max 16 crops); several = base mode (273
-  tokens/page). PDFs go through `OcrModel::recognize_pages` in 10-page windows
+  `Multi page parsing.`. Every page is gundam-tiled (max 16 crops), single images and
+  multi-page requests alike (mlx-vlm's default; upstream `infer` uses base mode for
+  several pages, which misreads small text and loops on long documents). PDFs go through `OcrModel::recognize_pages` in 10-page windows
   (`pages_per_request`), with progress and cancellation between windows. Generation
   carries the upstream page-count guard (EOS banned until every `<PAGE>`, forced past
   it, 20000 tokens per page) and widens the n-gram window to 1024 for multi-page
@@ -403,6 +409,11 @@ Tests are lean by rule; weights are the expensive resource.
   `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `ocr2_decoder`,
   `ocr2_markdown`, `paddleocr_vl`, and `ppocrv6` belong to `aimd-engine`.
   `ocr2_decoder` comes from the shuuul/mlx-vlm port (`export_ocr2_decoder_reference.py`).
+  `ocr_vision` comes from Baidu's `deepencoder.py` in torch f32 (its bounds measure the
+  bf16 port against f32 truth). Every mlx-vlm-based Unlimited-OCR exporter and corpus
+  baseline calls `reference_unlimited_ocr.patch_mlx_vlm_to_baidu`, which fixes mlx-vlm
+  0.7.x where it diverges from Baidu (CLIP `quick_gelu` and LN eps 1e-5, spatial CLIP
+  pos resample, half-pixel SAM rel pos, R-SWA keeping the whole prompt).
   `aimd-url/tests/golden/subtitles` is frozen: its Python oracle was deleted, so update it
   only with a reviewed, intentional behavior change. Regenerate the others with
   `uv run scripts/export_*_reference.py` (PEP 723 standalone scripts). Never hand-edit
