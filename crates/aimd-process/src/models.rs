@@ -37,7 +37,13 @@ const QWEN3_ASR_MODEL_ALIASES: [(&str, &str); 4] = [
 /// Quantized OCR families the native engine resolves to
 /// `mlx-community/<repo>-<precision>` (GLM-OCR was removed: it is an unknown
 /// model like any other).
-const MLX_OCR_FAMILY_REPOS: [(&str, &str); 1] = [("unlimited-ocr", "Unlimited-OCR")];
+const MLX_OCR_FAMILY_REPOS: [(&str, &str); 2] = [
+    ("unlimited-ocr", "Unlimited-OCR"),
+    ("unlimited-ocr-2", "Unlimited-OCR-2"),
+];
+
+/// Repo prefix of the Unlimited-OCR-2 checkpoints.
+const UNLIMITED_OCR2_PREFIX: &str = "mlx-community/Unlimited-OCR-2-";
 
 /// PP-OCRv6 medium: the model key names the `_det_safetensors` /
 /// `_rec_safetensors` repo pair. Dense f32, so precision does not apply.
@@ -55,6 +61,9 @@ const PADDLEOCR_VL_ALIASES: [&str; 2] = ["paddleocr-vl", "paddleocr-vl-1.6"];
 pub enum OcrFamily {
     /// `mlx-community/Unlimited-OCR-*`.
     UnlimitedOcr,
+    /// `mlx-community/Unlimited-OCR-2-*` (DASH decoder, multi-page
+    /// requests).
+    UnlimitedOcr2,
     /// [`PP_OCRV6_MODEL`].
     PpOcrV6,
     /// [`PADDLEOCR_VL_REPO`]; `quant_bits` `None` = dense bf16.
@@ -66,6 +75,7 @@ impl OcrFamily {
     pub fn name(self) -> &'static str {
         match self {
             Self::UnlimitedOcr => "Unlimited-OCR",
+            Self::UnlimitedOcr2 => "Unlimited-OCR-2",
             Self::PpOcrV6 => "PP-OCRv6",
             Self::PaddleOcrVl { .. } => "PaddleOCR-VL",
         }
@@ -83,6 +93,9 @@ pub fn ocr_family(model_id: &str) -> OcrFamily {
             .and_then(|p| p.strip_suffix("bit"))
             .and_then(|b| b.parse().ok());
         return OcrFamily::PaddleOcrVl { quant_bits };
+    }
+    if model_id.starts_with(UNLIMITED_OCR2_PREFIX) {
+        return OcrFamily::UnlimitedOcr2;
     }
     OcrFamily::UnlimitedOcr
 }
@@ -134,7 +147,7 @@ pub fn resolve_mlx_asr_model(model: Option<&str>, precision: Option<&str>) -> Re
 /// Returns a model key; see [`ocr_family`].
 pub fn resolve_mlx_ocr_model(model: Option<&str>, precision: Option<&str>) -> Result<String> {
     let normalized = normalize_precision(precision)?;
-    let requested = strip(model.unwrap_or("unlimited-ocr"))
+    let requested = strip(model.unwrap_or("unlimited-ocr-2"))
         .to_lowercase()
         .replace(' ', "_")
         .replace('_', "-");
@@ -174,8 +187,8 @@ pub fn resolve_mlx_ocr_model(model: Option<&str>, precision: Option<&str>) -> Re
     let Some((_, repo)) = MLX_OCR_FAMILY_REPOS.iter().find(|(f, _)| *f == candidate) else {
         return Err(AimdError::failed(format!(
             "Unsupported MLX VLM OCR model {model_repr}. Supported models: unlimited-ocr \
-             (default), pp-ocrv6, paddleocr-vl, or an explicit \
-             mlx-community/Unlimited-OCR-{{4bit,6bit,8bit,bf16}} Hugging Face model ID."
+             (default), unlimited-ocr-2, pp-ocrv6, paddleocr-vl, or an explicit \
+             mlx-community/Unlimited-OCR{{,-2}}-{{4bit,6bit,8bit,bf16}} Hugging Face model ID."
         )));
     };
     Ok(format!(
@@ -196,13 +209,18 @@ pub fn ensure_native_asr(model_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Native-engine gate for a resolved OCR model key: Unlimited-OCR runs
-/// quantized checkpoints only; PP-OCRv6 and PaddleOCR-VL load dense weights.
+/// Native-engine gate for a resolved OCR model key: Unlimited-OCR (1 and
+/// 2) runs quantized checkpoints only; PP-OCRv6 and PaddleOCR-VL load dense
+/// weights.
 pub fn ensure_native_ocr(model_id: &str) -> Result<()> {
-    if ocr_family(model_id) == OcrFamily::UnlimitedOcr && model_id.ends_with("-bf16") {
+    let family = ocr_family(model_id);
+    if matches!(family, OcrFamily::UnlimitedOcr | OcrFamily::UnlimitedOcr2)
+        && model_id.ends_with("-bf16")
+    {
         return Err(AimdError::backend_unavailable(format!(
-            "The native MLX engine does not support bf16 (dense) Unlimited-OCR checkpoints yet \
-             ({model_id}). Use --precision 4bit, 6bit, or 8bit."
+            "The native MLX engine does not support bf16 (dense) {} checkpoints yet \
+             ({model_id}). Use --precision 4bit, 6bit, or 8bit.",
+            family.name()
         )));
     }
     Ok(())
@@ -329,7 +347,11 @@ mod tests {
     fn ocr_aliases_and_precision() {
         assert_eq!(
             resolve_mlx_ocr_model(None, None).unwrap(),
-            "mlx-community/Unlimited-OCR-4bit"
+            "mlx-community/Unlimited-OCR-2-4bit"
+        );
+        assert_eq!(
+            resolve_mlx_ocr_model(None, Some("8bit")).unwrap(),
+            "mlx-community/Unlimited-OCR-2-8bit"
         );
         assert_eq!(
             resolve_mlx_ocr_model(Some("unlimited_ocr"), Some("8bit")).unwrap(),
@@ -339,6 +361,27 @@ mod tests {
             resolve_mlx_ocr_model(Some("mlx-community/Unlimited-OCR-6bit"), None).unwrap(),
             "mlx-community/Unlimited-OCR-6bit"
         );
+        for (model, precision, want) in [
+            (
+                "unlimited-ocr-2",
+                None,
+                "mlx-community/Unlimited-OCR-2-4bit",
+            ),
+            (
+                "Unlimited_OCR_2",
+                Some("8bit"),
+                "mlx-community/Unlimited-OCR-2-8bit",
+            ),
+            (
+                "mlx-community/Unlimited-OCR-2-6bit",
+                None,
+                "mlx-community/Unlimited-OCR-2-6bit",
+            ),
+        ] {
+            let id = resolve_mlx_ocr_model(Some(model), precision).unwrap();
+            assert_eq!(id, want);
+            assert_eq!(ocr_family(&id), OcrFamily::UnlimitedOcr2);
+        }
         for removed in [
             "glm-ocr",
             "GLM OCR",
@@ -349,8 +392,9 @@ mod tests {
             assert_eq!(err.kind, ErrorKind::ProcessingFailed, "{removed}");
             assert!(err.message.starts_with("Unsupported MLX VLM OCR model"));
             assert!(err.message.ends_with(
-                "Supported models: unlimited-ocr (default), pp-ocrv6, paddleocr-vl, or an explicit \
-                 mlx-community/Unlimited-OCR-{4bit,6bit,8bit,bf16} Hugging Face model ID."
+                "Supported models: unlimited-ocr (default), unlimited-ocr-2, pp-ocrv6, paddleocr-vl, \
+                 or an explicit mlx-community/Unlimited-OCR{,-2}-{4bit,6bit,8bit,bf16} Hugging \
+                 Face model ID."
             ));
         }
         let err = resolve_mlx_ocr_model(Some("mlx-community/Unlimited-OCR-8bit"), Some("4bit"))
@@ -383,6 +427,9 @@ mod tests {
             ErrorKind::BackendUnavailable
         );
         assert!(ensure_native_ocr("mlx-community/Unlimited-OCR-8bit").is_ok());
+        let err = ensure_native_ocr("mlx-community/Unlimited-OCR-2-bf16").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::BackendUnavailable);
+        assert!(err.message.contains("Unlimited-OCR-2 checkpoints"));
         assert!(is_transformers_asr_model(Some("Qwen/Qwen3-ASR-1.7B-hf")));
         assert!(!is_transformers_asr_model(Some("qwen3-asr-1.7b")));
         assert_eq!(

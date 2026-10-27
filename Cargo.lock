@@ -79,6 +79,7 @@ dependencies = [
  "aimd-weights",
  "half",
  "image",
+ "regex",
  "serde",
  "serde_json",
  "thiserror",

@@ -210,6 +210,66 @@ pub fn recognize_file(
         )?;
         let total = job.len();
         let mut pages = Vec::with_capacity(total);
+        let window = match &engine {
+            Engine::Local(model_id) => rt.load_ocr(model_id)?.pages_per_request(),
+            Engine::Remote(_) => 1,
+        };
+        if let (Engine::Local(model_id), true) = (&engine, window > 1) {
+            let model = rt.load_ocr(model_id)?;
+            let family = ocr_family(model_id).name();
+            let mut held: Vec<(usize, Vec<u8>)> = Vec::with_capacity(window);
+            job.run(|i, page_index, image| {
+                if held.is_empty() && i > 0 && hooks.is_cancelled() {
+                    return Err(AimdError::cancelled("OCR cancelled between page windows"));
+                }
+                let bytes = std::fs::read(image).map_err(|e| {
+                    AimdError::failed(format!("read rendered page {}: {e}", image.display()))
+                })?;
+                held.push((page_index, bytes));
+                if held.len() < window && i + 1 < total {
+                    return Ok(());
+                }
+                let refs: Vec<&[u8]> = held.iter().map(|(_, b)| b.as_slice()).collect();
+                let located = match model.recognize_pages(&refs) {
+                    Ok(l) if l.len() == held.len() => l,
+                    Ok(l) => {
+                        return Err(AimdError::failed(format!(
+                            "{family} returned {} pages for a {}-page request",
+                            l.len(),
+                            held.len()
+                        )));
+                    }
+                    Err(OcrFailure::Empty) => {
+                        return Err(AimdError::failed(format!(
+                            "{family} produced empty content"
+                        )));
+                    }
+                    Err(OcrFailure::Other(e)) => {
+                        return Err(AimdError::failed(format!("{family} inference failed: {e}")));
+                    }
+                };
+                let (first, last) = (held[0].0, held[held.len() - 1].0);
+                for ((page_index, _), ocr) in held.drain(..).zip(located) {
+                    let text = place(page_index + 1, ocr);
+                    pages.push(OcrPage {
+                        page_index: Some(page_index),
+                        text,
+                    });
+                }
+                hooks.progress(
+                    "ocr",
+                    Some(i as u64 + 1),
+                    Some(total as u64),
+                    Some(&format!(
+                        "Processed OCR pages {}-{} of {total}",
+                        first + 1,
+                        last + 1
+                    )),
+                );
+                Ok(())
+            })?;
+            return finish_pages(path, pages, segments);
+        }
         job.run(|i, page_index, image| {
             if i > 0 && hooks.is_cancelled() {
                 return Err(AimdError::cancelled("OCR cancelled between pages"));
@@ -235,6 +295,14 @@ pub fn recognize_file(
             Engine::Local(_) => "MLX VLM OCR supports image files and PDFs only.",
         }));
     };
+    finish_pages(path, pages, segments)
+}
+
+fn finish_pages(
+    path: &Path,
+    pages: Vec<OcrPage>,
+    segments: Option<Vec<Segment>>,
+) -> Result<OcrOutput> {
     if !pages.iter().any(|p| !p.text.trim().is_empty()) {
         return Err(AimdError::failed("OCR returned empty content"));
     }

@@ -43,16 +43,29 @@ use aimd_weights::{WeightsError, load_checkpoint};
 use super::config::{UnlimitedOcrConfig, parse_config};
 pub use super::generate::LayoutBlock;
 use super::generate::{
-    FinishReason, GenerateError, OCR_IMAGE_TOKEN_ID, OcrGenerationSettings, greedy_ocr_generate,
+    FinishReason, GenerateError, OCR_IMAGE_TOKEN_ID, OcrGenerationSettings,
+    UNLIMITED_OCR_NGRAM_WINDOW, UNLIMITED_OCR2_MULTI_PAGE_NGRAM_WINDOW, greedy_ocr_generate,
     normalize_unlimited_ocr_markdown, parse_unlimited_ocr_blocks, splice_image_features,
 };
+use super::markdown2::{Ocr2Item, Ocr2Render, render_unlimited_ocr2};
 use super::mlx_decoder::{DecoderError, OcrDecoder};
 use super::mlx_vision::{OcrVision, VisionError};
-use super::preprocess::{GundamPreprocess, PreprocessError, preprocess_gundam};
+use super::preprocess::{GundamPreprocess, PageLayout, PreprocessError, preprocess_page};
 use crate::tokenizer::{Tokenizer, TokenizerError, build_ocr_prompt_ids};
 
 /// The single-image gundam prompt (`UNLIMITED_OCR_SINGLE_PROMPT`).
 pub const UNLIMITED_OCR_SINGLE_PROMPT: &str = "document parsing.";
+
+/// The Unlimited-OCR-2 instruction after the `<PAGE><image>` pages.
+pub const UNLIMITED_OCR2_PROMPT: &str = "Multi page parsing.";
+
+/// Most pages per Unlimited-OCR-2 request (upstream SGLang window).
+pub const UNLIMITED_OCR2_MAX_PAGES: usize = 10;
+
+/// Pages per Unlimited-OCR v1 request. v1 matched its page-by-page output
+/// through 6 base pages; the 7th looped and the 8th repeated page 1
+/// (spec 008).
+pub const UNLIMITED_OCR_V1_MAX_PAGES: usize = 5;
 
 /// Gundam global view edge (`base_size`).
 const BASE_SIZE: usize = 1024;
@@ -203,6 +216,28 @@ pub struct UnlimitedOcrPipeline {
     decoder: OcrDecoder,
     tokenizer: Tokenizer,
     image_token_id: u32,
+    /// `<PAGE>` id of an Unlimited-OCR-2 checkpoint (`None` = v1).
+    page_token_id: Option<u32>,
+}
+
+/// Recognition output for one Unlimited-OCR-2 request of one or more
+/// pages.
+#[derive(Clone, Debug)]
+pub struct PagesResult {
+    /// [`render_unlimited_ocr2`] Markdown of the whole request.
+    pub markdown: String,
+    /// The located items behind `markdown` (1-based `page` within the
+    /// request).
+    pub items: Vec<Ocr2Item>,
+    /// Raw decoded generation (special tokens kept, stripped).
+    pub raw_text: String,
+    pub finish_reason: FinishReason,
+    /// Generated token ids (EOS excluded).
+    pub tokens: Vec<u32>,
+    pub prompt_tokens: usize,
+    /// `<image>` positions over all pages.
+    pub image_tokens: usize,
+    pub timings: OcrTimings,
 }
 
 impl UnlimitedOcrPipeline {
@@ -230,12 +265,40 @@ impl UnlimitedOcrPipeline {
                 cfg.projector_config.n_embed
             )));
         }
+        let page_token_id = match decoder.page_token_id() {
+            Some(id) => {
+                let tok = tokenizer.token_id("<PAGE>")?;
+                if tok != id {
+                    return Err(PipelineError::ConfigMismatch(format!(
+                        "tokenizer <PAGE> id {tok} != config page_token_id {id}"
+                    )));
+                }
+                Some(id)
+            }
+            None => None,
+        };
         Ok(Self {
             vision,
             decoder,
             tokenizer,
             image_token_id,
+            page_token_id,
         })
+    }
+
+    /// Whether the checkpoint is Unlimited-OCR-2 (DASH decoder,
+    /// `<PAGE>` protocol).
+    /// Pages per [`Self::recognize_pages`] request.
+    pub fn max_pages(&self) -> usize {
+        if self.is_v2() {
+            UNLIMITED_OCR2_MAX_PAGES
+        } else {
+            UNLIMITED_OCR_V1_MAX_PAGES
+        }
+    }
+
+    pub fn is_v2(&self) -> bool {
+        self.page_token_id.is_some()
     }
 
     pub fn tokenizer(&self) -> &Tokenizer {
@@ -269,10 +332,164 @@ impl UnlimitedOcrPipeline {
         image_bytes: &[u8],
         request: OcrRequest<'_>,
     ) -> Result<OcrResult, PipelineError> {
+        if self.is_v2() {
+            return self
+                .recognize_pages(&[image_bytes], request)
+                .map(single_page);
+        }
         let t0 = Instant::now();
         let prep = decode_and_preprocess(image_bytes)?;
         let preprocess = t0.elapsed();
         self.recognize_preprocessed(&prep, request, preprocess)
+    }
+
+    /// Multi-page prompt ids: `bos`, then per page `<PAGE>` (Unlimited-OCR-2
+    /// only) plus `image_tokens[i]` `<image>` ids, then `prompt`
+    /// (`"<PAGE><image>" * n + prompt`; v1 `infer_multi`: `"<image>" * n +
+    /// prompt`).
+    pub fn pages_prompt_ids(
+        &self,
+        image_tokens: &[usize],
+        prompt: &str,
+    ) -> Result<Vec<u32>, PipelineError> {
+        let tail = build_ocr_prompt_ids(&self.tokenizer, prompt, 0)?;
+        let total: usize = image_tokens.iter().map(|n| n + 1).sum();
+        let mut ids = Vec::with_capacity(tail.len() + total);
+        ids.push(tail[0]);
+        for &n in image_tokens {
+            ids.extend(self.page_token_id);
+            ids.extend(std::iter::repeat_n(self.image_token_id, n));
+        }
+        ids.extend_from_slice(&tail[1..]);
+        Ok(ids)
+    }
+
+    /// Up to [`Self::max_pages`] encoded page images in order, as one
+    /// request (upstream auto layout: gundam tiles, at most 16, for one
+    /// page, which for v1 is the single-image request; one 1024 base view
+    /// per page otherwise).
+    ///
+    /// `request.prompt` is replaced by [`UNLIMITED_OCR2_PROMPT`] when it is
+    /// the single-page default. The page-count guard expects one `<PAGE>`
+    /// per page (v1 writes it as text and gets it in place of an early
+    /// EOS), the token budget is `max_new_tokens` per page, and a
+    /// multi-page request widens the default n-gram window to 1024.
+    pub fn recognize_pages(
+        &self,
+        pages: &[&[u8]],
+        request: OcrRequest<'_>,
+    ) -> Result<PagesResult, PipelineError> {
+        let n = pages.len();
+        let max = self.max_pages();
+        if n == 0 || n > max {
+            return Err(PipelineError::Layout(format!(
+                "{n} pages per request, expected 1..={max}"
+            )));
+        }
+        if n == 1 && !self.is_v2() {
+            // A lone v1 page keeps the single-image gundam request.
+            let r = self.recognize(pages[0], request)?;
+            return Ok(PagesResult {
+                markdown: r.markdown,
+                items: r
+                    .blocks
+                    .into_iter()
+                    .map(|b| Ocr2Item {
+                        page: 1,
+                        kind: b.kind,
+                        bbox: Some(b.bbox),
+                        text: b.text,
+                    })
+                    .collect(),
+                raw_text: r.raw_text,
+                finish_reason: r.finish_reason,
+                tokens: r.tokens,
+                prompt_tokens: r.prompt_tokens,
+                image_tokens: r.image_tokens,
+                timings: r.timings,
+            });
+        }
+        let layout = if n == 1 {
+            PageLayout::Gundam16
+        } else {
+            PageLayout::Base
+        };
+        let (mut preprocess, mut vision) = (Duration::ZERO, Duration::ZERO);
+        let mut feats = Vec::with_capacity(n);
+        let mut counts = Vec::with_capacity(n);
+        for bytes in pages {
+            let t0 = Instant::now();
+            let prep = decode_and_preprocess_page(bytes, layout)?;
+            preprocess += t0.elapsed();
+            let t1 = Instant::now();
+            let f = self.vision.features_from_preprocessed(&prep)?;
+            f.eval()?;
+            vision += t1.elapsed();
+            let ratio = if prep.crops.is_empty() {
+                (1, 1)
+            } else {
+                prep.crop_ratio
+            };
+            counts.push(gundam_image_token_count(ratio));
+            feats.push(f);
+        }
+        let refs: Vec<&MlxArray> = feats.iter().collect();
+        let features = MlxArray::concatenate(&refs, 0)?;
+        let prompt = match request.prompt {
+            UNLIMITED_OCR_SINGLE_PROMPT => UNLIMITED_OCR2_PROMPT,
+            p => p,
+        };
+        let prompt_ids = self.pages_prompt_ids(&counts, prompt)?;
+        let image_tokens: usize = counts.iter().sum();
+        let rows = features.shape()?[0];
+        if rows != image_tokens {
+            return Err(PipelineError::Layout(format!(
+                "vision produced {rows} feature rows, prompt has {image_tokens} <image> tokens"
+            )));
+        }
+        let mut settings = request.settings;
+        settings.expected_pages = n;
+        settings.max_new_tokens = settings.max_new_tokens.saturating_mul(n);
+        if n > 1 && settings.ngram_window == UNLIMITED_OCR_NGRAM_WINDOW {
+            settings.ngram_window = UNLIMITED_OCR2_MULTI_PAGE_NGRAM_WINDOW;
+        }
+
+        let t2 = Instant::now();
+        let embeds =
+            splice_image_features(&self.decoder, &prompt_ids, &features, self.image_token_id)?;
+        let (generation, gen_timings) = greedy_ocr_generate(
+            &self.decoder,
+            &self.tokenizer,
+            &prompt_ids,
+            &embeds,
+            settings,
+        )?;
+        let generate = t2.elapsed();
+        let raw_text = generation.text.trim().to_string();
+        let render = if self.is_v2() {
+            render_unlimited_ocr2(&raw_text)
+        } else {
+            render_v1_pages(&raw_text)
+        };
+        if render.markdown.is_empty() {
+            return Err(PipelineError::EmptyContent);
+        }
+        Ok(PagesResult {
+            markdown: render.markdown,
+            items: render.items,
+            raw_text,
+            finish_reason: generation.finish_reason,
+            tokens: generation.tokens,
+            prompt_tokens: prompt_ids.len(),
+            image_tokens,
+            timings: OcrTimings {
+                preprocess,
+                vision,
+                generate,
+                prefill: gen_timings.prefill,
+                decode: gen_timings.decode,
+            },
+        })
     }
 
     /// Prompt ids for a preprocessed image (exposed for layout checks).
@@ -392,21 +609,85 @@ pub fn load_bf16_features(path: &Path, dim: usize) -> Result<MlxArray, PipelineE
     Ok(MlxArray::from_bytes(&raw, MlxDtype::Bf16, &[rows, dim])?)
 }
 
+/// v1 multi-page output: the text between `<PAGE>` markers, page by page,
+/// each through the single-page normalizer (the output opens with a
+/// marker).
+fn render_v1_pages(raw: &str) -> Ocr2Render {
+    let mut markdown = Vec::new();
+    let mut items = Vec::new();
+    let raw = raw.trim_start().strip_prefix("<PAGE>").unwrap_or(raw);
+    for (i, part) in raw.split("<PAGE>").enumerate() {
+        let md = normalize_unlimited_ocr_markdown(part);
+        if md.is_empty() {
+            continue;
+        }
+        items.extend(
+            parse_unlimited_ocr_blocks(part)
+                .into_iter()
+                .map(|b| Ocr2Item {
+                    page: i + 1,
+                    kind: b.kind,
+                    bbox: Some(b.bbox),
+                    text: b.text,
+                }),
+        );
+        markdown.push(md);
+    }
+    Ocr2Render {
+        markdown: markdown.join("\n\n"),
+        items,
+    }
+}
+
+/// A single-page [`PagesResult`] as an [`OcrResult`] (items become the
+/// located blocks; a block without a box covers the page).
+fn single_page(r: PagesResult) -> OcrResult {
+    let blocks = r
+        .items
+        .iter()
+        .map(|i| LayoutBlock {
+            kind: i.kind.clone(),
+            bbox: i.bbox.unwrap_or([0.0, 0.0, 1.0, 1.0]),
+            text: i.text.clone(),
+        })
+        .collect();
+    OcrResult {
+        markdown: r.markdown,
+        blocks,
+        raw_text: r.raw_text,
+        finish_reason: r.finish_reason,
+        tokens: r.tokens,
+        prompt_tokens: r.prompt_tokens,
+        image_tokens: r.image_tokens,
+        crop_ratio: (1, 1),
+        timings: r.timings,
+    }
+}
+
 /// Decode encoded image bytes to RGB8 (PIL `convert("RGB")`) and run the
 /// gundam preprocessing.
 pub fn decode_and_preprocess(image_bytes: &[u8]) -> Result<GundamPreprocess, PipelineError> {
+    decode_and_preprocess_page(image_bytes, PageLayout::Gundam32)
+}
+
+/// [`decode_and_preprocess`] with the crop policy of `layout`.
+pub fn decode_and_preprocess_page(
+    image_bytes: &[u8],
+    layout: PageLayout,
+) -> Result<GundamPreprocess, PipelineError> {
     let decoded =
         image::load_from_memory(image_bytes).map_err(|e| PipelineError::Image(e.to_string()))?;
     let rgb = decoded.to_rgb8();
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-    Ok(preprocess_gundam(rgb.as_raw(), w, h)?)
+    Ok(preprocess_page(rgb.as_raw(), w, h, layout)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::unlimited_ocr::test_support::{
-        Parity, checkpoint_dir, compare_rows, e2e_enabled, mlx_rows_f32, shared_pipeline,
+        Parity, checkpoint_dir, compare_rows, e2e_enabled, mlx_rows_f32, ocr2_decoder_golden,
+        shared_pipeline, shared_pipeline2,
     };
     use std::path::PathBuf;
 
@@ -737,5 +1018,70 @@ mod tests {
         assert_eq!(similarity("abc", "abc"), 1.0);
         assert!((similarity("abcd", "abce") - 0.75).abs() < 1e-9);
         assert_eq!(similarity("", ""), 1.0);
+    }
+
+    /// Unlimited-OCR-2 prompt layout = the mlx-vlm processor's ids for the
+    /// two-page base golden request.
+    #[test]
+    fn ocr2_pages_prompt_ids_match_processor() {
+        let Some(p) = shared_pipeline2() else {
+            return;
+        };
+        assert!(p.is_v2());
+        let m = ocr2_decoder_golden::manifest();
+        let want: Vec<u32> = m["prompt_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as u32)
+            .collect();
+        let n = m["per_page_image_tokens"].as_u64().unwrap() as usize;
+        assert_eq!(
+            p.pages_prompt_ids(&[n, n], UNLIMITED_OCR2_PROMPT).unwrap(),
+            want
+        );
+    }
+
+    /// Two-page base request end to end (native vision): both pages are
+    /// marked and the text matches the mlx-vlm greedy output.
+    #[test]
+    fn ocr2_two_page_request_e2e() {
+        if !e2e_enabled() {
+            return;
+        }
+        let Some(p) = shared_pipeline2() else {
+            return;
+        };
+        let m = ocr2_decoder_golden::manifest();
+        let pages: Vec<Vec<u8>> = m["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| std::fs::read(fixture_dir().join(n.as_str().unwrap())).unwrap())
+            .collect();
+        let refs: Vec<&[u8]> = pages.iter().map(Vec::as_slice).collect();
+        let r = p.recognize_pages(&refs, OcrRequest::default()).unwrap();
+        let want: Vec<u32> = m["greedy_tokens"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as u32)
+            .collect();
+        let want_raw = p
+            .tokenizer()
+            .decode(&want[..want.len() - 1], false)
+            .unwrap();
+        let sim = similarity(&r.raw_text, want_raw.trim());
+        eprintln!(
+            "ocr2 2 pages: {} prompt, {} tokens, sim {sim:.4}, {:?}\n{}",
+            r.prompt_tokens,
+            r.tokens.len(),
+            r.timings,
+            r.markdown
+        );
+        assert_eq!(r.finish_reason, FinishReason::Stop);
+        assert_eq!(r.raw_text.matches("<PAGE>").count(), 2);
+        assert!(sim >= 0.97, "similarity {sim}");
+        assert!(r.items.iter().any(|i| i.page == 2));
     }
 }

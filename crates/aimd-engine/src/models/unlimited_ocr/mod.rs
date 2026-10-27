@@ -19,6 +19,9 @@
 //!   LlamaAttention, layer 0 dense then 64 routed experts top-6 with
 //!   softmax scoring + 2 shared experts via `gather_qmm`) with the
 //!   Python-exact `RingSlidingKVCache` (window 128).
+//! - `dash`: Unlimited-OCR-2 DASH decoder state (config, `PromptPages`,
+//!   router weights, block-summary cache, per-forward page2d RoPE and
+//!   routing candidates); the attention kernels live in `aimd-mlx`.
 //! - [`generate`]: image-feature splice, mlx-vlm `generate_step` loop
 //!   (2048-token chunked prefill, pipelined greedy decode), the
 //!   sliding-window no-repeat n-gram guard (n=35, window=128, ported from
@@ -29,6 +32,8 @@
 //!   prompt ids (bos + one contiguous `<image>` run sized by
 //!   [`pipeline::gundam_image_token_count`]) -> embedding splice ->
 //!   guarded greedy generation -> strip + markdown normalization.
+//! - [`markdown2`]: Unlimited-OCR 2 raw layout blocks -> Markdown (port of
+//!   Baidu's `process_unlimitedOCR2.py`), plus page/block accessors.
 //!
 //! # Reference implementations
 //!
@@ -43,7 +48,9 @@
 //! only `pipeline` composes them.
 
 pub mod config;
+pub mod dash;
 pub mod generate;
+pub mod markdown2;
 pub mod mlx_decoder;
 pub mod mlx_vision;
 pub(crate) mod mlx_weights;

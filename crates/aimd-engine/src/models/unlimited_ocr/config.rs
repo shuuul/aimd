@@ -177,6 +177,18 @@ pub struct UnlimitedOcrConfig {
     pub first_k_dense_replace: usize,
     #[serde(default)]
     pub quantization: Option<QuantizationInfo>,
+    /// Unlimited-OCR-2 DASH sparse attention (absent on v1 checkpoints).
+    #[serde(default)]
+    pub sparse_attention_config: Option<super::dash::SparseAttentionConfig>,
+}
+
+impl UnlimitedOcrConfig {
+    /// Whether the decoder uses DASH attention (Unlimited-OCR-2).
+    pub fn is_dash(&self) -> bool {
+        self.sparse_attention_config
+            .as_ref()
+            .is_some_and(super::dash::SparseAttentionConfig::is_dash)
+    }
 }
 
 /// Affine quantization descriptor (`quantization` block of `config.json`).

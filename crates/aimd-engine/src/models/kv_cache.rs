@@ -51,6 +51,12 @@ impl KvCache {
         self.keys.as_ref()
     }
 
+    /// Full key/value buffers (all allocated rows, positions `>= offset`
+    /// unspecified), which the DASH kernels index directly.
+    pub(crate) fn buffers(&self) -> Option<(&MlxArray, &MlxArray)> {
+        self.keys.as_ref().zip(self.values.as_ref())
+    }
+
     /// `KVCache.update_and_fetch`.
     fn base_update(
         &mut self,

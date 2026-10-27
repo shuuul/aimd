@@ -97,7 +97,7 @@ impl Runtime for NativeRuntime {
             ))
         };
         let model = match family {
-            OcrFamily::UnlimitedOcr => {
+            OcrFamily::UnlimitedOcr | OcrFamily::UnlimitedOcr2 => {
                 let dir = crate::hf::resolve_checkpoint(model_id, &|k| self.env(k))?;
                 log_info!(
                     "Loading {} checkpoint {model_id} from {}",
@@ -251,6 +251,49 @@ impl OcrModel for NativeOcr {
     fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure> {
         self.recognize_located(image_path, false)
             .map(|ocr| ocr.markdown)
+    }
+
+    fn pages_per_request(&self) -> usize {
+        match self {
+            Self::Unlimited(p) => p.max_pages(),
+            _ => 1,
+        }
+    }
+
+    fn recognize_pages(&self, pages: &[&[u8]]) -> std::result::Result<Vec<LocatedOcr>, OcrFailure> {
+        let Self::Unlimited(p) = self else {
+            return Err(OcrFailure::Other(
+                "multi-page OCR requests are not supported".into(),
+            ));
+        };
+        let result = match p.recognize_pages(pages, OcrRequest::default()) {
+            Ok(r) => r,
+            Err(OcrPipelineError::EmptyContent) => return Err(OcrFailure::Empty),
+            Err(e) => return Err(OcrFailure::Other(e.to_string())),
+        };
+        // Items belong to the page of their first block (a chain that
+        // continues onto later pages stays whole on its first page).
+        let mut out = vec![Vec::new(); pages.len()];
+        for item in result.items {
+            let page = item.page.clamp(1, pages.len()) - 1;
+            out[page].push(Segment {
+                text: item.text,
+                kind: Some(item.kind),
+                bbox: Some(item.bbox.unwrap_or([0.0, 0.0, 1.0, 1.0])),
+                ..Segment::default()
+            });
+        }
+        Ok(out
+            .into_iter()
+            .map(|blocks: Vec<Segment>| {
+                let texts: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
+                LocatedOcr {
+                    markdown: texts.join("\n\n"),
+                    blocks: Some(blocks),
+                    lines: None,
+                }
+            })
+            .collect())
     }
 
     fn recognize_located(

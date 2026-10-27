@@ -48,6 +48,14 @@ pub const UNLIMITED_OCR_NGRAM_SIZE: usize = 35;
 /// Search window of the sliding-window guard (`UNLIMITED_OCR_NGRAM_WINDOW`).
 pub const UNLIMITED_OCR_NGRAM_WINDOW: usize = 128;
 
+/// Unlimited-OCR-2 guard window for multi-page requests (upstream
+/// `infer.py`: 1024 for several pages, 128 for one).
+pub const UNLIMITED_OCR2_MULTI_PAGE_NGRAM_WINDOW: usize = 1024;
+
+/// Per-page token cap of the Unlimited-OCR-2 page-count guard (upstream
+/// `infer(max_page_tokens=20000)`).
+pub const UNLIMITED_OCR2_MAX_PAGE_TOKENS: usize = 20000;
+
 /// The `<image>` token id (128815) replaced by vision features.
 pub const OCR_IMAGE_TOKEN_ID: u32 = 128815;
 
@@ -79,6 +87,12 @@ pub struct OcrGenerationSettings {
     pub ngram_window: usize,
     /// KV ring window override for tests (`None` = config `sliding_window`).
     pub kv_window: Option<usize>,
+    /// Page-count guard: the number of prompt pages the output must mark
+    /// with `<PAGE>` (0 disables it).
+    pub expected_pages: usize,
+    /// Page-count guard: tokens after which a page is closed (the next
+    /// `<PAGE>`, or EOS after the last page).
+    pub max_page_tokens: usize,
 }
 
 impl Default for OcrGenerationSettings {
@@ -88,6 +102,8 @@ impl Default for OcrGenerationSettings {
             ngram_size: UNLIMITED_OCR_NGRAM_SIZE,
             ngram_window: UNLIMITED_OCR_NGRAM_WINDOW,
             kv_window: None,
+            expected_pages: 0,
+            max_page_tokens: UNLIMITED_OCR2_MAX_PAGE_TOKENS,
         }
     }
 }
@@ -234,6 +250,93 @@ impl SlidingWindowNoRepeatNgramProcessor {
     }
 }
 
+/// Unlimited-OCR-2 page-count guard, a port of upstream
+/// `_uocr_page_count_guard` (vLLM `_PageCountGuard`) over the generated
+/// tokens: while fewer than `expected` `<PAGE>` markers were generated EOS
+/// is banned; past `expected` markers only EOS remains; a page longer than
+/// `max_page_tokens` is closed (forced `<PAGE>`, or EOS on the last page).
+#[derive(Clone, Debug)]
+pub struct PageCountGuard {
+    expected: usize,
+    /// The marker's token ids: `[<PAGE>]` for Unlimited-OCR-2,
+    /// [`UNLIMITED_OCR_V1_PAGE_MARKER`] (plain text) for v1.
+    marker: Vec<u32>,
+    eos_id: u32,
+    max_page_tokens: usize,
+    markers: usize,
+    page_len: usize,
+    /// The last `marker.len()` generated tokens.
+    tail: Vec<u32>,
+}
+
+/// What [`PageCountGuard::constraint`] imposes on the next sample.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageConstraint {
+    None,
+    BanEos,
+    Force(u32),
+}
+
+impl PageCountGuard {
+    pub fn new(expected: usize, marker: Vec<u32>, eos_id: u32, max_page_tokens: usize) -> Self {
+        assert!(!marker.is_empty(), "empty page marker");
+        Self {
+            expected,
+            tail: Vec::with_capacity(marker.len()),
+            marker,
+            eos_id,
+            max_page_tokens,
+            markers: 0,
+            page_len: 0,
+        }
+    }
+
+    /// Records one generated token.
+    pub fn push(&mut self, tok: u32) {
+        if self.tail.len() == self.marker.len() {
+            self.tail.remove(0);
+        }
+        self.tail.push(tok);
+        if self.tail == self.marker {
+            self.markers += 1;
+            self.page_len = 0;
+            self.tail.clear();
+        } else {
+            self.page_len += 1;
+        }
+    }
+
+    /// Marker tokens already at the end of the stream (a forced marker in
+    /// progress).
+    fn partial(&self) -> usize {
+        (1..self.marker.len())
+            .rev()
+            .find(|&j| self.tail.ends_with(&self.marker[..j]))
+            .unwrap_or(0)
+    }
+
+    /// The constraint on the next token.
+    pub fn constraint(&self) -> PageConstraint {
+        if self.markers > self.expected {
+            PageConstraint::Force(self.eos_id)
+        } else if self.max_page_tokens > 0 && self.page_len >= self.max_page_tokens {
+            PageConstraint::Force(if self.markers < self.expected {
+                self.marker[self.partial()]
+            } else {
+                self.eos_id
+            })
+        } else if self.markers < self.expected {
+            PageConstraint::BanEos
+        } else {
+            PageConstraint::None
+        }
+    }
+}
+
+/// v1 `<PAGE>` page separator: plain text (`<`, `PAGE`, `>`), not a
+/// special token.
+pub const UNLIMITED_OCR_V1_PAGE_MARKER: [u32; 3] = [100855, 16412, 32];
+
 /// mlx-vlm `DEFAULT_PREFILL_STEP_SIZE`.
 pub const PREFILL_STEP_SIZE: usize = 2048;
 
@@ -254,10 +357,11 @@ pub struct TokenStream {
     pub finish_reason: FinishReason,
 }
 
-/// Splices `features` (`[n, hidden]` bf16) over the prompt's `<image>` run:
-/// `embed_tokens(ids)` with `input_embeds[0, image_positions] = features`
-/// (`get_input_embeddings`). The run must be one contiguous block of
-/// exactly `n` image tokens (the gundam prompt layout).
+/// Splices `features` (`[n, hidden]` bf16) over the prompt's `<image>`
+/// tokens: `embed_tokens(ids)` with `input_embeds[0, image_positions] =
+/// features` (`get_input_embeddings`). The prompt must hold exactly `n`
+/// image tokens, in one run (v1 gundam) or one run per page (v2
+/// `<PAGE><image>...`); feature rows fill the runs in order.
 pub fn splice_image_features(
     decoder: &OcrDecoder,
     prompt_ids: &[u32],
@@ -275,29 +379,41 @@ pub fn splice_image_features(
         )));
     }
     let n = fs[0];
-    let first = prompt_ids.iter().position(|&t| t == image_token_id);
     let count = prompt_ids.iter().filter(|&&t| t == image_token_id).count();
     let embeds = decoder.embed_ids(&decoder.ids_array(prompt_ids)?)?;
-    let Some(first) = first else {
-        if n == 0 {
-            return Ok(embeds);
-        }
-        return Err(GenerateError::Layout("prompt has no <image> tokens".into()));
-    };
-    if count != n
-        || prompt_ids[first..first + n]
-            .iter()
-            .any(|&t| t != image_token_id)
-    {
+    if count != n {
         return Err(GenerateError::Layout(format!(
-            "prompt has {count} <image> tokens (contiguous from {first}) for {n} feature rows"
+            "prompt has {count} <image> tokens for {n} feature rows"
         )));
     }
-    let p = prompt_ids.len();
-    let head = embeds.slice(&[0, 0, 0], &[1, first, d], &[1, 1, 1])?;
-    let tail = embeds.slice(&[0, first + n, 0], &[1, p, d], &[1, 1, 1])?;
+    if n == 0 {
+        return Ok(embeds);
+    }
     let feats = features.astype(MlxDtype::Bf16)?.reshape(&[1, n, d])?;
-    Ok(MlxArray::concatenate(&[&head, &feats, &tail], 1)?)
+    let mut parts = Vec::new();
+    let (mut text, mut used, mut i) = (0, 0, 0);
+    while i < prompt_ids.len() {
+        if prompt_ids[i] != image_token_id {
+            i += 1;
+            continue;
+        }
+        let run = prompt_ids[i..]
+            .iter()
+            .take_while(|&&t| t == image_token_id)
+            .count();
+        if i > text {
+            parts.push(embeds.slice(&[0, text, 0], &[1, i, d], &[1, 1, 1])?);
+        }
+        parts.push(feats.slice(&[0, used, 0], &[1, used + run, d], &[1, 1, 1])?);
+        used += run;
+        i += run;
+        text = i;
+    }
+    if text < prompt_ids.len() {
+        parts.push(embeds.slice(&[0, text, 0], &[1, prompt_ids.len(), d], &[1, 1, 1])?);
+    }
+    let refs: Vec<&MlxArray> = parts.iter().collect();
+    Ok(MlxArray::concatenate(&refs, 1)?)
 }
 
 /// Greedy OCR generation over spliced prompt embeddings (tokenizer
@@ -329,12 +445,35 @@ pub fn greedy_ocr_generate(
 fn sample(
     logits: &MlxArray,
     guard: Option<&SlidingWindowNoRepeatNgramProcessor>,
+    pages: Option<&PageCountGuard>,
     stream: &[u32],
     vocab: usize,
 ) -> Result<MlxArray, MlxError> {
-    let banned = guard.map(|g| g.banned(stream, vocab)).unwrap_or_default();
+    let mut banned = guard.map(|g| g.banned(stream, vocab)).unwrap_or_default();
+    let mut logits = logits.try_clone()?;
+    // v1 has no page-count training: an early EOS opens the next page
+    // (its logit moves to the marker's first token).
+    if let (Some(g), Some(PageConstraint::BanEos)) = (pages, pages.map(PageCountGuard::constraint))
+        && g.marker.len() > 1
+        && g.partial() == 0
+    {
+        let pair = MlxArray::from_u32(&[1, 2], &[g.eos_id, g.marker[0]])?;
+        let best = logits.take_along_axis(&pair, 1)?.max_axes(&[1], true)?;
+        let idx = MlxArray::from_u32(&[1, 1], &[g.marker[0]])?;
+        logits = logits.put_along_axis(&idx, &best, 1)?;
+    }
+    match pages.map(PageCountGuard::constraint) {
+        Some(PageConstraint::Force(tok)) => return MlxArray::from_u32(&[1], &[tok]),
+        Some(PageConstraint::BanEos) => {
+            let eos = pages.expect("constraint").eos_id;
+            if let Err(i) = banned.binary_search(&eos) {
+                banned.insert(i, eos);
+            }
+        }
+        _ => {}
+    }
     let logits = if banned.is_empty() {
-        logits.try_clone()?
+        logits
     } else {
         let idx = MlxArray::from_u32(&[1, banned.len()], &banned)?;
         let vals = MlxArray::scalar_bf16(f32::NEG_INFINITY)?
@@ -380,19 +519,29 @@ pub fn greedy_ocr_token_stream(
     } else {
         None
     };
+    let marker = match decoder.page_token_id() {
+        Some(page_id) => vec![page_id],
+        None => UNLIMITED_OCR_V1_PAGE_MARKER.to_vec(),
+    };
+    let mut pages = match eos_ids.first() {
+        Some(&eos) if settings.expected_pages > 0 => Some(PageCountGuard::new(
+            settings.expected_pages,
+            marker,
+            eos,
+            settings.max_page_tokens,
+        )),
+        _ => None,
+    };
     let t0 = Instant::now();
-    let mut caches = decoder.make_cache(settings.kv_window);
+    let mut cache = decoder.new_cache(settings.kv_window, prompt_ids)?;
 
     // Chunked prefill over prompt[:-1]; only the cache state is evaluated.
     let mut start = 0usize;
     while p - start > 1 {
         let n = (p - start - 1).min(PREFILL_STEP_SIZE);
         let chunk = embeds.slice(&[0, start, 0], &[1, start + n, d], &[1, 1, 1])?;
-        decoder.forward(&chunk, &mut caches)?;
-        let mut state = Vec::with_capacity(caches.len() * 2);
-        for c in &caches {
-            state.extend(c.state()?);
-        }
+        decoder.step(&chunk, &mut cache, None)?;
+        let state = cache.state()?;
         let refs: Vec<&MlxArray> = state.iter().collect();
         MlxArray::eval_many(&refs)?;
         start += n;
@@ -402,9 +551,15 @@ pub fn greedy_ocr_token_stream(
     let mut guard_stream: Vec<u32> = Vec::with_capacity(settings.max_new_tokens.min(8192) + 1);
     guard_stream.push(prompt_ids[p - 1]);
     let last = embeds.slice(&[0, p - 1, 0], &[1, p, d], &[1, 1, 1])?;
-    let h = decoder.forward(&last, &mut caches)?;
+    let h = decoder.step(&last, &mut cache, None)?;
     let logits = decoder.logits(&h)?.reshape(&[1, vocab])?;
-    let mut y = sample(&logits, guard.as_ref(), &guard_stream, vocab)?;
+    let mut y = sample(
+        &logits,
+        guard.as_ref(),
+        pages.as_ref(),
+        &guard_stream,
+        vocab,
+    )?;
     MlxArray::async_eval(&[&y])?;
 
     let mut tokens: Vec<u32> = Vec::with_capacity(settings.max_new_tokens.min(1024));
@@ -417,8 +572,9 @@ pub fn greedy_ocr_token_stream(
             // token; dropped on stop. Sampling waits for the token: the
             // n-gram guard needs it on the host.
             let next_logits = if tokens.len() + 1 < settings.max_new_tokens {
-                let emb = decoder.embed_ids(&y.reshape(&[1, 1])?)?;
-                let h = decoder.forward(&emb, &mut caches)?;
+                let ids = y.reshape(&[1, 1])?;
+                let emb = decoder.embed_ids(&ids)?;
+                let h = decoder.step(&emb, &mut cache, Some(&ids))?;
                 let logits = decoder.logits(&h)?.reshape(&[1, vocab])?;
                 MlxArray::async_eval(&[&logits])?;
                 Some(logits)
@@ -438,7 +594,16 @@ pub fn greedy_ocr_token_stream(
                 break;
             };
             guard_stream.push(tok);
-            y = sample(&logits, guard.as_ref(), &guard_stream, vocab)?;
+            if let Some(pages) = pages.as_mut() {
+                pages.push(tok);
+            }
+            y = sample(
+                &logits,
+                guard.as_ref(),
+                pages.as_ref(),
+                &guard_stream,
+                vocab,
+            )?;
             MlxArray::async_eval(&[&y])?;
             if tokens.len().is_multiple_of(256) {
                 aimd_mlx::clear_cache()?;
@@ -785,6 +950,32 @@ mod tests {
             .filter(|&i| logits[i] == f32::NEG_INFINITY)
             .map(|i| i as u32)
             .collect()
+    }
+
+    #[test]
+    fn page_count_guard_counts_and_forces_multi_token_markers() {
+        let m = UNLIMITED_OCR_V1_PAGE_MARKER;
+        let mut g = PageCountGuard::new(2, m.to_vec(), 7, 3);
+        for t in m {
+            g.push(t);
+        }
+        g.push(5);
+        assert_eq!(g.constraint(), PageConstraint::BanEos);
+        // A partial marker is not a page; at the page limit the rest of the
+        // marker is forced token by token.
+        g.push(m[0]);
+        g.push(m[1]);
+        assert_eq!(g.constraint(), PageConstraint::Force(m[2]));
+        g.push(m[2]);
+        assert_eq!(g.constraint(), PageConstraint::None);
+        for t in [5, 5, 5] {
+            g.push(t);
+        }
+        assert_eq!(g.constraint(), PageConstraint::Force(7));
+        for t in m {
+            g.push(t);
+        }
+        assert_eq!(g.constraint(), PageConstraint::Force(7));
     }
 
     #[test]
