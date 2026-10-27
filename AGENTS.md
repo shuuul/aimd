@@ -211,7 +211,10 @@ flowchart TD
   CLI/MCP fields) opt into OpenAI-compatible HTTP backends and bypass local MLX
   preflight. Optional `AIMD_{ASR,OCR}_{MODEL,API_KEY}` have matching fields. Bare server
   URLs gain `/v1`. Explicit values override the environment. Remote precision is
-  server-owned, so a local `precision` is ignored with one warning.
+  server-owned, so a local `precision` is ignored with one warning. Remote OCR picks
+  the instruction from the served model name: `Unlimited-OCR-2*` gets
+  `<PAGE><image>\nMulti page parsing.` and `render_unlimited_ocr2`; anything else
+  gets v1's `<image>\ndocument parsing.`.
 - **MLX only**: MLX is the only compute backend (Metal on macOS, the mlx CUDA backend on
   Linux). Do not add CPU compute paths or hand-written CUDA. The WS-08 custom Metal
   kernels are gated on `aimd_mlx::metal_kernels_available()`; other GPU backends use

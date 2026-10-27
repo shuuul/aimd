@@ -7,6 +7,7 @@ use std::time::Duration;
 use aimd_core::{AimdError, RemoteBackendConfig, Result};
 use aimd_engine::models::qwen3_asr::generate::parse_qwen_output;
 use aimd_engine::models::unlimited_ocr::generate::normalize_unlimited_ocr_markdown;
+use aimd_engine::models::unlimited_ocr::markdown2::render_unlimited_ocr2;
 use serde_json::{Value, json};
 
 use crate::http::{self, HttpError, base64_encode, guess_mime, multipart_body};
@@ -17,6 +18,20 @@ const TIMEOUT: Duration = Duration::from_secs(600);
 const NGRAM_SIZE: u64 = 35;
 const NGRAM_WINDOW: u64 = 128;
 const MULTI_PAGE_WINDOW: u64 = 1024;
+/// Unlimited-OCR v1 single-image instruction.
+const OCR_PROMPT: &str = "<image>\ndocument parsing.";
+/// Unlimited-OCR-2 instruction: one `<PAGE>` per image, `Multi page parsing.`
+/// even for a single page (v2 does not take the v1 instruction).
+const OCR2_PROMPT: &str = "<PAGE><image>\nMulti page parsing.";
+
+/// Whether a served model name is Unlimited-OCR-2 (`Unlimited-OCR-2`,
+/// `baidu/Unlimited-OCR-2`, `unlimited_ocr_2-4bit`, ...).
+fn is_unlimited_ocr2(model: &str) -> bool {
+    let name = model.rsplit('/').next().unwrap_or(model);
+    name.to_ascii_lowercase()
+        .replace(['_', ' '], "-")
+        .starts_with("unlimited-ocr-2")
+}
 
 fn map_http_error(label: &str, base_url: &str, err: HttpError) -> AimdError {
     match err {
@@ -86,12 +101,13 @@ pub fn recognize_image(
 ) -> Result<String> {
     let mime = guess_mime(image_path).unwrap_or("image/png");
     let encoded = base64_encode(&read_file(image_path)?);
+    let ocr2 = is_unlimited_ocr2(&config.model);
     let payload = json!({
         "model": config.model,
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": "<image>\ndocument parsing."},
+                {"type": "text", "text": if ocr2 { OCR2_PROMPT } else { OCR_PROMPT }},
                 {"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{encoded}")}},
             ],
         }],
@@ -121,5 +137,34 @@ pub fn recognize_image(
     if text.trim().is_empty() {
         return Err(AimdError::failed("Remote OCR produced empty content"));
     }
-    Ok(normalize_unlimited_ocr_markdown(text).trim().to_string())
+    let markdown = if ocr2 {
+        render_unlimited_ocr2(text).markdown
+    } else {
+        normalize_unlimited_ocr_markdown(text)
+    };
+    Ok(markdown.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_unlimited_ocr2;
+
+    #[test]
+    fn unlimited_ocr2_detected_from_served_model_name() {
+        for name in [
+            "Unlimited-OCR-2",
+            "baidu/Unlimited-OCR-2",
+            "mlx-community/Unlimited-OCR-2-4bit",
+            "unlimited_ocr_2",
+        ] {
+            assert!(is_unlimited_ocr2(name), "{name}");
+        }
+        for name in [
+            "Unlimited-OCR",
+            "mlx-community/Unlimited-OCR-8bit",
+            "served",
+        ] {
+            assert!(!is_unlimited_ocr2(name), "{name}");
+        }
+    }
 }

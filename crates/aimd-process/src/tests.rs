@@ -1652,4 +1652,20 @@ fn remote_ocr_posts_chat_completion_with_page_window() {
     let recorded = server.join().unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&recorded[0].body).unwrap();
     assert_eq!(payload["window_size"], 1024);
+
+    // A served Unlimited-OCR-2 gets its own instruction and output converter.
+    let raw = "<PAGE><BLOCK>title<LEVEL2>[42, 65, 855, 101]<FORK>Preparing Context\n\
+               <BLOCK>text[40, 130, 954, 225]<FORK>Body.";
+    let (base, server) = serve(vec![(200, completion(raw))]);
+    let mut req = request(&png);
+    req.ocr_base_url = Some(base);
+    req.ocr_model = Some("baidu/Unlimited-OCR-2".into());
+    let result = process_input_with(&req, &NoHooks, &Mock::default()).unwrap();
+    assert_eq!(result.markdown, "## Preparing Context\n\nBody.");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&server.join().unwrap()[0].body).unwrap();
+    assert_eq!(
+        payload["messages"][0]["content"][0]["text"],
+        "<PAGE><image>\nMulti page parsing."
+    );
 }

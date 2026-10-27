@@ -465,6 +465,11 @@ AIMD_OCR_MODEL=Unlimited-OCR \
 Explicit options override the environment. MCP tool parameters use the same
 names in snake_case (`asr_base_url`, ...).
 
+The OCR instruction follows the served model name. A name starting with
+`Unlimited-OCR-2` (after any `org/` prefix; case, `_` and spaces ignored) gets
+`<PAGE><image>` + `Multi page parsing.` and its block output is converted to
+Markdown; any other name gets the v1 `<image>` + `document parsing.`.
+
 ## MCP server
 
 ```bash
