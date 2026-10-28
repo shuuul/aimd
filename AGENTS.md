@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-10-26
-**Version:** 1.3.1
+**Version:** 1.4.0
 **Branch:** main
 
 ## OVERVIEW
