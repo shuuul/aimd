@@ -53,6 +53,14 @@ impl KvCache {
         self.offset
     }
 
+    /// Drops the last `n` positions of a plain cache (mlx-lm
+    /// `KVCache.trim`): the rows stay allocated and the next update
+    /// overwrites them.
+    pub(crate) fn trim(&mut self, n: usize) {
+        debug_assert!(self.window.is_none(), "trim on a ring cache");
+        self.offset -= n.min(self.offset);
+    }
+
     #[cfg(test)]
     pub(crate) fn prefill_length(&self) -> Option<usize> {
         self.prefill_length

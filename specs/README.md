@@ -13,6 +13,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 | Spec | Status | Outcome |
 | --- | --- | --- |
 | [008-unlimited-ocr-2.md](008-unlimited-ocr-2.md) | Active | Unlimited-OCR-2 (DASH decoder) native OCR with 10-page multi-page PDF windows |
+| [009-minicpm-ocr.md](009-minicpm-ocr.md) | Active | MiniCPM-OCR 1.0 (SigLIP + Qwen3.5 Gated DeltaNet) with the PP-DocLayoutV3 region pipeline |
 
 ## Archived specs
 

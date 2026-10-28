@@ -8,7 +8,8 @@
 
 `aimd` is a native Rust context-preparation toolkit for LLM workflows. It turns URLs,
 audio/video, and documents into Markdown plus a chunked text context. Local ASR
-(Qwen3-ASR) and OCR (Unlimited-OCR, Unlimited-OCR-2, PaddleOCR-VL-1.6, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
+(Qwen3-ASR) and OCR (Unlimited-OCR, Unlimited-OCR-2, PaddleOCR-VL-1.6, MiniCPM-OCR 1.0 on
+PP-DocLayoutV3 regions, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
 runtime.
 
 Interfaces (one binary each):
@@ -37,7 +38,7 @@ gitignored.
 crates/
 ├── aimd-weights/   # safetensors mmap; MLX affine 4/8-bit unpack (test-only bit-exact oracle); tests/golden/quant
 ├── aimd-mlx/       # C-ABI shim over MLX C++ (build.rs + shim/); device selection; needs brew mlx
-├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6})
+├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,minicpm_ocr,pp_doclayout_v3,pp_ocrv6})
 ├── aimd-core/      # models, AimdError/ErrorKind, ProcessHooks, text shaping, precision, remote config,
 │                   # extension tables, output persistence + shared help texts, logging; no heavy deps
 ├── aimd-doc/       # Pandoc conversion, EPUB (hand-written zip + OPF/spine), cleanup, pdf-inspector PDFs
@@ -73,7 +74,7 @@ flowchart TD
     Asr["aimd-process::asr\nffmpeg decode/segment, retry"]
     Ocr["aimd-process::ocr\nimages + mutool-rendered PDFs"]
     Remote["aimd-process::remote\nOpenAI-compatible ASR/OCR"]
-    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR 1/2,\nPaddleOCR-VL, PP-OCRv6"]
+    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR 1/2,\nPaddleOCR-VL, MiniCPM-OCR,\nPP-DocLayoutV3, PP-OCRv6"]
     Mlx["aimd-mlx\nMLX C++ shim (Metal)"]
 
     CLI --> Core
@@ -119,8 +120,8 @@ flowchart TD
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
 | Document conversion | `crates/aimd-doc/src/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
-| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
-| MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. |
+| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,minicpm_ocr,pp_doclayout_v3,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
+| MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. `gated_delta`/`gated_delta_gates`/`conv1d` (Qwen3.5 decoder), `src/grid_sample.rs` (deformable attention). |
 | Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. |
 | Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
 
@@ -185,7 +186,7 @@ flowchart TD
   then audio download + ASR. If both produce no text, the request is a processing
   failure. Stale-extractor yt-dlp stderr gets the `brew upgrade yt-dlp` hint.
 - **Model naming**: user-facing aliases are kebab-case: `qwen3-asr-1.7b` (default),
-  `qwen3-asr-0.6b`, `unlimited-ocr-2` (OCR default), `unlimited-ocr`, `paddleocr-vl`, and `pp-ocrv6`. Legacy underscore aliases and explicit
+  `qwen3-asr-0.6b`, `unlimited-ocr-2` (OCR default), `unlimited-ocr`, `paddleocr-vl`, `minicpm-ocr`, and `pp-ocrv6`. Legacy underscore aliases and explicit
   `mlx-community/*` ids remain compatibility inputs but must not be the canonical names in
   docs or help text. GLM-OCR and Transformers/`Qwen/*` ids are not supported and must
   not reappear in help text.
@@ -193,8 +194,8 @@ flowchart TD
   through the separate `precision` option. The parser accepts `4bit`, `6bit`, `8bit`, and
   `bf16` (dash/space/case variants normalized in `aimd_core::precision`). The native
   engine runs Qwen3-ASR and Unlimited-OCR (1 and 2) at `4bit` (default), `6bit`, and `8bit`;
-  `bf16` is rejected for them as `BackendUnavailable`. PaddleOCR-VL defaults to
-  dense bf16 and quantizes at load; PP-OCRv6 ignores precision with one warning. A precision that conflicts
+  `bf16` is rejected for them as `BackendUnavailable`. PaddleOCR-VL and MiniCPM-OCR default to
+  dense bf16 and quantize at load; PP-OCRv6 ignores precision with one warning. A precision that conflicts
   with an explicit checkpoint id is an error.
 - **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI,
   MCP, URL audio fallback, local ASR, and OCR.
@@ -361,6 +362,28 @@ Supported model families are intentionally narrow:
   module with `in_dim % 64 == 0`; vision `fc2` stays dense), bit-exact with
   `mlx-community/PaddleOCR-VL-1.6-4bit`. Model key: the repo id, plus `:<precision>`
   when quantized. Full-page `OCR:` prompt, image pixels 112896..1003520, 4096 tokens.
+- **MiniCPM-OCR**: `minicpm-ocr` (`minicpm-ocr-1.0`) always loads the official
+  `openbmb/MiniCPM-OCR-1.0` bf16 checkpoint plus `PaddlePaddle/PP-DocLayoutV3_safetensors`
+  (f32, never quantized). Model key: the repo id, plus `:<precision>` when quantized;
+  `4bit`/`6bit`/`8bit` quantize only the full-attention q/k/v/o and the MLPs (mlx-vlm's
+  convert set). The model recognises regions, not pages: PP-DocLayoutV3 (SDK
+  preprocessing: BGR, cv2 cubic 800x800; SDK numpy post-process and reading order)
+  finds the regions, each crop goes through MiniCPM-V slicing with the SDK's per-label
+  prompt and token budget, and the SDK's normalization, OTSL -> HTML and Markdown
+  assembly build the page (`minicpm_ocr::{regions,markdown,otsl}`); image regions
+  emit nothing. Decode is greedy with the no-repeat n-gram guard at 100 over the
+  whole generation (generated tokens only, as in transformers). The numerical
+  reference is the original implementation: transformers 5.21 `minicpm_ocr` /
+  `qwen3_5` in torch bf16, not mlx-vlm. The port follows torch's rounding (f32
+  opmath, one bf16 rounding per op): DeltaNet q/k l2norm, query scale, gates
+  (`a + dt_bias`, softplus) and the recurrence in f32; RoPE cos/sin from f32
+  angles cast to bf16; SiLU (MLP, conv), vision `gelu_tanh`, merger erf GELU and
+  vision LayerNorms in f32 with one cast; f32 argmax; the image splice replaces
+  the placeholder embeddings exactly. Crops resize with a port of torchvision's
+  uint8 antialiased bicubic (the HF processor's `TorchvisionBackend`), bit-exact.
+  DSpark speculative decoding (`openbmb/MiniCPM-OCR-1.0-DSpark`, vLLM `dspark`
+  semantics, 15 proposals per round, greedy verification) loads with the
+  recogniser and is on by default; `aimd-process` downloads all three repos.
 - **PP-OCRv6**: `pp-ocrv6` (`pp-ocrv6-medium`), medium tier only. Model key
   `PaddlePaddle/PP-OCRv6_medium` names the `_det_safetensors` / `_rec_safetensors`
   repo pair. The HF rec checkpoint's `head.encoder.conv_block.{0,1}` are Paddle's
@@ -410,7 +433,11 @@ Tests are lean by rule; weights are the expensive resource.
   `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-weights` (`aimd-mlx` reads it
   via `../aimd-weights/tests/golden/quant`). `mel`, `tokenizer`, `asr_encoder`,
   `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `ocr2_decoder`,
-  `ocr2_markdown`, `paddleocr_vl`, and `ppocrv6` belong to `aimd-engine`.
+  `ocr2_markdown`, `paddleocr_vl`, `ppocrv6`, `minicpm_ocr`, `minicpm_regions`, and
+  `pp_doclayout_v3` belong to `aimd-engine`. `minicpm_ocr` comes from transformers
+  (torch bf16; 4-bit from mlx-vlm's quantized weights dequantized into the same graph),
+  `pp_doclayout_v3` from transformers behind the SDK pre/post-processing, and
+  `minicpm_regions` from the MiniCPM-OCR SDK functions.
   `ocr2_decoder` comes from the shuuul/mlx-vlm port (`export_ocr2_decoder_reference.py`).
   `ocr_vision` comes from Baidu's `deepencoder.py` in torch f32 (its bounds measure the
   bf16 port against f32 truth). Every mlx-vlm-based Unlimited-OCR exporter and corpus

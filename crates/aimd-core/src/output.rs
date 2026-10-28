@@ -274,15 +274,16 @@ pub fn get_request_temp_dir() -> std::io::Result<Option<PathBuf>> {
 /// `--model` help (native-engine model matrix).
 pub const MODEL_HELP_TEXT: &str = "Model for transcription or OCR. OCR: unlimited-ocr-2 (default; \
 Unlimited-OCR-2, PDFs in 10-page requests), unlimited-ocr (Unlimited-OCR v1, 5-page requests), \
-pp-ocrv6 (PP-OCRv6 medium det + rec; fast line-level text), or paddleocr-vl (PaddleOCR-VL-1.6), \
+pp-ocrv6 (PP-OCRv6 medium det + rec; fast line-level text), paddleocr-vl (PaddleOCR-VL-1.6), \
+or minicpm-ocr (MiniCPM-OCR 1.0 on PP-DocLayoutV3 regions), \
 or an explicit mlx-community/Unlimited-OCR{,-2}-{4bit,6bit,8bit} model ID. ASR: qwen3-asr-1.7b (default) or qwen3-asr-0.6b combined with --precision, or explicit \
 mlx-community/Qwen3-ASR-* model IDs (legacy underscore aliases still work).";
 
 /// `--precision` help.
 pub const PRECISION_HELP_TEXT: &str = "Model precision/quantization: 4bit, 6bit, 8bit, or bf16 \
 (dash variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR (1 and 2) select the matching \
-mlx-community checkpoint (default 4bit; bf16 is not supported there yet). paddleocr-vl defaults \
-to bf16 and quantizes at load for 4bit/6bit/8bit. pp-ocrv6 ignores precision.";
+mlx-community checkpoint (default 4bit; bf16 is not supported there yet). paddleocr-vl and \
+minicpm-ocr default to bf16 and quantize at load for 4bit/6bit/8bit. pp-ocrv6 ignores precision.";
 
 /// `--context` help.
 pub const CONTEXT_HELP_TEXT: &str = "ASR context/biasing text (proper nouns, names, domain \

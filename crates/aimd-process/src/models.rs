@@ -56,6 +56,15 @@ const PP_OCRV6_ALIASES: [&str; 2] = ["pp-ocrv6", "pp-ocrv6-medium"];
 pub const PADDLEOCR_VL_REPO: &str = "PaddlePaddle/PaddleOCR-VL-1.6";
 const PADDLEOCR_VL_ALIASES: [&str; 2] = ["paddleocr-vl", "paddleocr-vl-1.6"];
 
+/// MiniCPM-OCR 1.0: always the official bf16 checkpoint, keyed like
+/// PaddleOCR-VL (`<repo>:<precision>` quantizes at load). Runs behind the
+/// [`PP_DOCLAYOUT_V3_REPO`] layout model (f32, never quantized).
+pub const MINICPM_OCR_REPO: &str = "openbmb/MiniCPM-OCR-1.0";
+const MINICPM_OCR_ALIASES: [&str; 2] = ["minicpm-ocr", "minicpm-ocr-1.0"];
+
+/// PP-DocLayoutV3 layout detection for [`MINICPM_OCR_REPO`].
+pub const PP_DOCLAYOUT_V3_REPO: &str = "PaddlePaddle/PP-DocLayoutV3_safetensors";
+
 /// Native OCR family behind a resolved model key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OcrFamily {
@@ -68,6 +77,9 @@ pub enum OcrFamily {
     PpOcrV6,
     /// [`PADDLEOCR_VL_REPO`]; `quant_bits` `None` = dense bf16.
     PaddleOcrVl { quant_bits: Option<u32> },
+    /// [`MINICPM_OCR_REPO`] behind PP-DocLayoutV3; `quant_bits` `None` =
+    /// dense bf16.
+    MiniCpmOcr { quant_bits: Option<u32> },
 }
 
 impl OcrFamily {
@@ -78,6 +90,7 @@ impl OcrFamily {
             Self::UnlimitedOcr2 => "Unlimited-OCR-2",
             Self::PpOcrV6 => "PP-OCRv6",
             Self::PaddleOcrVl { .. } => "PaddleOCR-VL",
+            Self::MiniCpmOcr { .. } => "MiniCPM-OCR",
         }
     }
 }
@@ -87,12 +100,20 @@ pub fn ocr_family(model_id: &str) -> OcrFamily {
     if model_id == PP_OCRV6_MODEL {
         return OcrFamily::PpOcrV6;
     }
-    if let Some(rest) = model_id.strip_prefix(PADDLEOCR_VL_REPO) {
-        let quant_bits = rest
-            .strip_prefix(':')
+    let quant_bits = |rest: &str| {
+        rest.strip_prefix(':')
             .and_then(|p| p.strip_suffix("bit"))
-            .and_then(|b| b.parse().ok());
-        return OcrFamily::PaddleOcrVl { quant_bits };
+            .and_then(|b| b.parse().ok())
+    };
+    if let Some(rest) = model_id.strip_prefix(PADDLEOCR_VL_REPO) {
+        return OcrFamily::PaddleOcrVl {
+            quant_bits: quant_bits(rest),
+        };
+    }
+    if let Some(rest) = model_id.strip_prefix(MINICPM_OCR_REPO) {
+        return OcrFamily::MiniCpmOcr {
+            quant_bits: quant_bits(rest),
+        };
     }
     if model_id.starts_with(UNLIMITED_OCR2_PREFIX) {
         return OcrFamily::UnlimitedOcr2;
@@ -143,7 +164,8 @@ pub fn resolve_mlx_asr_model(model: Option<&str>, precision: Option<&str>) -> Re
     Ok(format!("mlx-community/Qwen3-ASR-{size}-{precision}"))
 }
 
-/// `resolve_mlx_vlm_model` plus the PP-OCRv6 and PaddleOCR-VL aliases.
+/// `resolve_mlx_vlm_model` plus the PP-OCRv6, PaddleOCR-VL and MiniCPM-OCR
+/// aliases.
 /// Returns a model key; see [`ocr_family`].
 pub fn resolve_mlx_ocr_model(model: Option<&str>, precision: Option<&str>) -> Result<String> {
     let normalized = normalize_precision(precision)?;
@@ -151,7 +173,7 @@ pub fn resolve_mlx_ocr_model(model: Option<&str>, precision: Option<&str>) -> Re
         .to_lowercase()
         .replace(' ', "_")
         .replace('_', "-");
-    let mut candidate = ["mlx-community/", "paddlepaddle/"]
+    let mut candidate = ["mlx-community/", "paddlepaddle/", "openbmb/"]
         .iter()
         .find_map(|prefix| requested.strip_prefix(prefix))
         .unwrap_or(&requested)
@@ -178,16 +200,21 @@ pub fn resolve_mlx_ocr_model(model: Option<&str>, precision: Option<&str>) -> Re
     if PP_OCRV6_ALIASES.contains(&candidate.as_str()) && embedded.is_none() {
         return Ok(PP_OCRV6_MODEL.to_string());
     }
-    if PADDLEOCR_VL_ALIASES.contains(&candidate.as_str()) {
-        return Ok(match precision {
-            None | Some("bf16") => PADDLEOCR_VL_REPO.to_string(),
-            Some(p) => format!("{PADDLEOCR_VL_REPO}:{p}"),
-        });
+    for (aliases, repo) in [
+        (&PADDLEOCR_VL_ALIASES, PADDLEOCR_VL_REPO),
+        (&MINICPM_OCR_ALIASES, MINICPM_OCR_REPO),
+    ] {
+        if aliases.contains(&candidate.as_str()) {
+            return Ok(match precision {
+                None | Some("bf16") => repo.to_string(),
+                Some(p) => format!("{repo}:{p}"),
+            });
+        }
     }
     let Some((_, repo)) = MLX_OCR_FAMILY_REPOS.iter().find(|(f, _)| *f == candidate) else {
         return Err(AimdError::failed(format!(
             "Unsupported MLX VLM OCR model {model_repr}. Supported models: unlimited-ocr-2 \
-             (default), unlimited-ocr, pp-ocrv6, paddleocr-vl, or an explicit \
+             (default), unlimited-ocr, pp-ocrv6, paddleocr-vl, minicpm-ocr, or an explicit \
              mlx-community/Unlimited-OCR{{,-2}}-{{4bit,6bit,8bit,bf16}} Hugging Face model ID."
         )));
     };
@@ -210,8 +237,8 @@ pub fn ensure_native_asr(model_id: &str) -> Result<()> {
 }
 
 /// Native-engine gate for a resolved OCR model key: Unlimited-OCR (1 and
-/// 2) runs quantized checkpoints only; PP-OCRv6 and PaddleOCR-VL load dense
-/// weights.
+/// 2) runs quantized checkpoints only; PP-OCRv6, PaddleOCR-VL and
+/// MiniCPM-OCR load dense weights.
 pub fn ensure_native_ocr(model_id: &str) -> Result<()> {
     let family = ocr_family(model_id);
     if matches!(family, OcrFamily::UnlimitedOcr | OcrFamily::UnlimitedOcr2)
@@ -344,6 +371,36 @@ mod tests {
     }
 
     #[test]
+    fn minicpm_ocr_family() {
+        for (model, precision, want, bits) in [
+            (Some("minicpm-ocr"), None, MINICPM_OCR_REPO, None),
+            (
+                Some("MiniCPM-OCR-1.0"),
+                Some("bf16"),
+                MINICPM_OCR_REPO,
+                None,
+            ),
+            (
+                Some("openbmb/MiniCPM-OCR-1.0"),
+                Some("4bit"),
+                "openbmb/MiniCPM-OCR-1.0:4bit",
+                Some(4),
+            ),
+            (
+                Some("minicpm_ocr"),
+                Some("6-bit"),
+                "openbmb/MiniCPM-OCR-1.0:6bit",
+                Some(6),
+            ),
+        ] {
+            let key = resolve_mlx_ocr_model(model, precision).unwrap();
+            assert_eq!(key, want, "{model:?} {precision:?}");
+            assert_eq!(ocr_family(&key), OcrFamily::MiniCpmOcr { quant_bits: bits });
+            assert!(ensure_native_ocr(&key).is_ok());
+        }
+    }
+
+    #[test]
     fn ocr_aliases_and_precision() {
         assert_eq!(
             resolve_mlx_ocr_model(None, None).unwrap(),
@@ -393,7 +450,7 @@ mod tests {
             assert!(err.message.starts_with("Unsupported MLX VLM OCR model"));
             assert!(err.message.ends_with(
                 "Supported models: unlimited-ocr-2 (default), unlimited-ocr, pp-ocrv6, paddleocr-vl, \
-                 or an explicit mlx-community/Unlimited-OCR{,-2}-{4bit,6bit,8bit,bf16} Hugging \
+                 minicpm-ocr, or an explicit mlx-community/Unlimited-OCR{,-2}-{4bit,6bit,8bit,bf16} Hugging \
                  Face model ID."
             ));
         }

@@ -448,6 +448,32 @@ mod ffi {
             out_scales: *mut *mut AimdMlxArray,
             out_biases: *mut *mut AimdMlxArray,
         ) -> i32;
+        pub fn mlx_gated_delta_gates(
+            a: *mut AimdMlxArray,
+            b: *mut AimdMlxArray,
+            a_log: *mut AimdMlxArray,
+            dt_bias: *mut AimdMlxArray,
+            out_g: *mut *mut AimdMlxArray,
+            out_beta: *mut *mut AimdMlxArray,
+        ) -> i32;
+        pub fn mlx_gated_delta(
+            q: *mut AimdMlxArray,
+            k: *mut AimdMlxArray,
+            v: *mut AimdMlxArray,
+            g: *mut AimdMlxArray,
+            beta: *mut AimdMlxArray,
+            state: *mut AimdMlxArray,
+            out_y: *mut *mut AimdMlxArray,
+            out_state: *mut *mut AimdMlxArray,
+        ) -> i32;
+        pub fn mlx_conv1d(
+            input: *mut AimdMlxArray,
+            weight: *mut AimdMlxArray,
+            stride: i32,
+            padding: i32,
+            dilation: i32,
+            groups: i32,
+        ) -> *mut AimdMlxArray;
     }
 }
 
@@ -1475,6 +1501,96 @@ impl MlxArray {
         Self::from_handle(ptr, "mlx_sdpa_decode")
     }
 
+    /// Gated DeltaNet gates (mlx-vlm `gated_delta_update`): `self` is the
+    /// `a` projection, `b` the beta projection. Returns `(g, beta)` with
+    /// `g = exp(-exp(A_log) * softplus(a + dt_bias))` in f32 and
+    /// `beta = sigmoid(b)`.
+    pub fn gated_delta_gates(
+        &self,
+        b: &Self,
+        a_log: &Self,
+        dt_bias: &Self,
+    ) -> Result<(Self, Self), MlxError> {
+        let mut g = std::ptr::null_mut();
+        let mut beta = std::ptr::null_mut();
+        let status = unsafe {
+            ffi::mlx_gated_delta_gates(
+                self.ptr.as_ptr(),
+                b.ptr.as_ptr(),
+                a_log.ptr.as_ptr(),
+                dt_bias.ptr.as_ptr(),
+                &mut g,
+                &mut beta,
+            )
+        };
+        if status != 0 {
+            return Err(op_failed("mlx_gated_delta_gates"));
+        }
+        Ok((
+            Self::from_handle(g, "mlx_gated_delta_gates")?,
+            Self::from_handle(beta, "mlx_gated_delta_gates")?,
+        ))
+    }
+
+    /// Gated delta rule over T steps: `self` is q `[B, T, Hk, Dk]`, then k
+    /// (same shape), v `[B, T, Hv, Dv]`, g and beta `[B, T, Hv]`, and the
+    /// f32 recurrent state `[B, Hv, Dv, Dk]`. Returns `(y [B, T, Hv, Dv],
+    /// state)`. Metal runs mlx-vlm's `gated_delta_step` kernel; other
+    /// devices run the stock-op step loop.
+    pub fn gated_delta(
+        &self,
+        k: &Self,
+        v: &Self,
+        g: &Self,
+        beta: &Self,
+        state: &Self,
+    ) -> Result<(Self, Self), MlxError> {
+        let mut y = std::ptr::null_mut();
+        let mut new_state = std::ptr::null_mut();
+        let status = unsafe {
+            ffi::mlx_gated_delta(
+                self.ptr.as_ptr(),
+                k.ptr.as_ptr(),
+                v.ptr.as_ptr(),
+                g.ptr.as_ptr(),
+                beta.ptr.as_ptr(),
+                state.ptr.as_ptr(),
+                &mut y,
+                &mut new_state,
+            )
+        };
+        if status != 0 {
+            return Err(op_failed("mlx_gated_delta"));
+        }
+        Ok((
+            Self::from_handle(y, "mlx_gated_delta")?,
+            Self::from_handle(new_state, "mlx_gated_delta")?,
+        ))
+    }
+
+    /// Grouped 1-D convolution, channels last: `self` `[N, L, C]`, weight
+    /// `[O, K, C / groups]` (`mx.conv1d`).
+    pub fn conv1d(
+        &self,
+        weight: &Self,
+        stride: usize,
+        padding: usize,
+        dilation: usize,
+        groups: usize,
+    ) -> Result<Self, MlxError> {
+        let ptr = unsafe {
+            ffi::mlx_conv1d(
+                self.ptr.as_ptr(),
+                weight.ptr.as_ptr(),
+                stride as i32,
+                padding as i32,
+                dilation as i32,
+                groups as i32,
+            )
+        };
+        Self::from_handle(ptr, "mlx_conv1d")
+    }
+
     /// Fused single-token MoE router (`MoEGate`, softmax + greedy top-k):
     /// `self` is `[D]`, `gate_w` the row-major `[E, D]` gate weight. Returns
     /// `(inds [k] u32, scores [k])`, bit-identical to `x @ gate_w.T`,
@@ -1671,3 +1787,6 @@ mod tests {
         assert_eq!(MlxDtype::U8.size_bytes(), 1);
     }
 }
+
+// Bilinear grid sampling (spec 009 WS-04): `MlxArray::grid_sample`.
+mod grid_sample;
