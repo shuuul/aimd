@@ -321,6 +321,71 @@ checkpoints: 72/72 clips and 5/5 pages identical to the reference. The
 same holds for PaddleOCR-VL-1.6 (bf16 and 4bit) and PP-OCRv6 medium: 5/5
 pages identical.
 
+## OCR model comparison (OmniDocBench, 2026-10-28)
+
+The golden corpus above checks parity with each model's reference
+implementation, so every model scores 1.0 there. To compare the models
+against ground truth, `uv run scripts/omnidoc_build.py OMNIDOC_DIR OUT_DIR`
+draws 66 pages from [OmniDocBench](https://huggingface.co/datasets/opendatalab/OmniDocBench)
+(4 en + 4 zh per source, seed 0; 9 sources from slides to newspapers),
+with the reading-order text of the human-labeled content blocks as the
+reference. `corpus_gate OUT_DIR --only ocr --ocr-model M` runs a model,
+and `uv run scripts/omnidoc_score.py OUT_DIR out-*.json` scores the
+outputs. Formulas and markup are dropped on both sides. `sim` is
+1 - character edit distance over the whole page, so reading order counts;
+`F1` is an order-free token-bag score. Defaults throughout (Unlimited-OCR
+1/2 4bit, PaddleOCR-VL bf16).
+
+| Model | sim | F1 | finish=stop | M2 Pro s/page | M2 Pro MLX peak / footprint | RTX 5090 s/page | RTX 5090 MLX peak |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Unlimited-OCR-2 | 0.857 | 0.903 | 65-66/66 | 11.2 | 4.5 / 6.7 GB | 5.1 | 4.8 GB |
+| Unlimited-OCR | 0.851 | 0.903 | 66/66 | 8.2 | 5.7 / 8.1 GB | 1.7 | 6.0 GB |
+| PaddleOCR-VL-1.6 bf16 | 0.65-0.71 | 0.77-0.78 | 56-57/66 | 10.6 | 2.4 / 3.9 GB | 1.3 | 2.5 GB |
+| PaddleOCR-VL-1.6 4bit | 0.62 | 0.66 | 47/66 | — | — | 1.5 | 1.4 GB |
+| PP-OCRv6 medium | 0.577 | 0.851 | 66/66 | 2.2 | 7.8 / 7.8 GB | 0.37 | 10.7 GB |
+
+Seconds per page are wall time over the 66 pages including one model load.
+Per source:
+
+- **Unlimited-OCR 1 and 2** are tied overall (en identical; v2 +0.01 zh,
+  +0.05 on research reports, -0.02 on magazines). v2 costs 1.4x the time on
+  Metal and 3x on CUDA, where DASH runs as mlx gathers without the custom
+  kernels.
+- **PaddleOCR-VL** reads a whole page with no layout stage. It falls apart
+  on dense multi-column pages (newspapers: sim 0.24-0.28, F1 0.33-0.38) and
+  loops to the token limit on 9-10 pages (19 at 4bit).
+- **PP-OCRv6** recognizes text well (F1 0.85; 0.95 on newspapers) but
+  emits lines without layout, tables or formulas, so its order-sensitive
+  score is low (newspapers 0.15). Its detector keeps the page at full
+  resolution up to a 4000 px long side (`limit_type=min`, 960), which is
+  where the 8-11 GB peak on large scans comes from.
+
+For reference, MiniCPM-OCR 1.0 (tag `minicpm-ocr-last`, removed since)
+scored 0.878 / 0.913 on the same pages on CUDA.
+
+## Memory
+
+mlx keeps freed buffers in a cache and holds a command buffer's
+temporaries until the buffer completes; both are bounded automatically
+(see "Buffer memory" in `AGENTS.md`). Peak memory on the four dense
+arXiv pages of the paper benchmark, before and after the 2026-10-28 fixes
+(1 GB cache cap, cache cleared after every model call, 30 MB command
+buffers on every backend):
+
+| Model | M2 Pro footprint before / after | M2 Pro MLX peak after | RTX 5090 MLX peak before / after |
+| --- | --- | --- | --- |
+| Unlimited-OCR-2 | — / 4.7 GB | 3.72 GB | 11.0 / 3.96 GB |
+| Unlimited-OCR | — / 4.7 GB | 3.71 GB | 10.95 / 3.96 GB |
+| PaddleOCR-VL-1.6 bf16 | — / 3.2 GB | 2.34 GB | 9.75 / 2.51 GB |
+| PP-OCRv6 medium | 25.6 / 3.0 GB | 1.76 GB | 4.04 / 2.21 GB |
+| Qwen3-ASR-1.7B-4bit (corpus clips) | 8.3 / 3.5 GB | 2.40 GB | 3.18 / 2.65 GB |
+
+Speed did not change: 30 MB command buffers on CUDA ran within 2% of
+mlx's default (Unlimited-OCR-2 16.3 vs 16.6 s on the four pages). A
+long-lived MCP process settles at about 0.5 GB on macOS (the weights; Metal
+returns freed pages a few seconds later) and 0.65-1.1 GB of VRAM on CUDA
+between requests. `corpus_gate` prints each model's MLX peak.
+
 ## Linux, mlx CUDA backend
 
 metacube: RTX 5090 32 GB, Arch Linux, CUDA 13.4, cuDNN 9.27, NCCL 2.32,
