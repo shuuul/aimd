@@ -582,7 +582,8 @@ bool decode_kernel_supported(const Params& p, int heads, int head_dim, int index
   (void)heads;
   const int n = p.topk * p.block_size + p.local_window();
   return metal_gpu() && n % 32 == 0 && n <= 1024 && head_dim % 32 == 0 &&
-      index_dim % 32 == 0 && std::min(p.topm, cap) >= p.topk && cap <= kMaxCapacity;
+      index_dim % 32 == 0 && std::min(p.topm, cap) >= p.topk && std::min(p.topm, cap) <= 32 &&
+      cap <= kMaxCapacity;
 }
 
 const char* kPrefillSource = R"METAL(
@@ -868,45 +869,31 @@ const char* kDecodeSource = R"METAL(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // 3. 1.5-entmax prior over the sorted top scores and the block bias.
-    if (tid == 0) {
-        float xv[TOPM];
-        float tau[TOPM];
-        float x0 = xs[top[0]];
-        float cs = 0.0f, cs2 = 0.0f;
-        for (int i = 0; i < TOPM; i++) {
-            float x = (xs[top[i]] - x0) / 2.0f;
-            xv[i] = x;
-            cs += x;
-            cs2 += x * x;
-            float rho = float(i + 1);
-            float mean = cs / rho;
-            float mean_sq = cs2 / rho;
-            float ss = rho * (mean_sq - mean * mean);
-            float delta = (1.0f - ss) / rho;
-            tau[i] = mean - metal::sqrt(metal::max(delta, 0.0f));
-        }
-        int support = 0;
-        for (int i = 0; i < TOPM; i++) {
-            support += tau[i] <= xv[i] ? 1 : 0;
-        }
-        float ts = tau[metal::max(support, 1) - 1];
-        float fl = consts[1];
-        float logp[K];
-        float sum = 0.0f;
-        int cnt = 0;
-        for (int i = 0; i < K; i++) {
-            float pr = metal::max(xv[i] - ts, 0.0f);
-            logp[i] = metal::log(metal::max(pr * pr, fl));
-            bool v = sel[top[i]];
-            valid_s[i] = v;
-            sum += v ? logp[i] : 0.0f;
-            cnt += v ? 1 : 0;
-        }
+    // 3. 1.5-entmax prior over the sorted top scores and the block bias,
+    // lane i of simdgroup 0 owning sorted score i (prefix sums in order).
+    if (sg == 0) {
+        int i = lane;
+        float x = i < TOPM ? (xs[top[i]] - xs[top[0]]) / 2.0f : 0.0f;
+        float cs = simd_prefix_inclusive_sum(x);
+        float cs2 = simd_prefix_inclusive_sum(x * x);
+        float rho = float(i + 1);
+        float mean = cs / rho;
+        float mean_sq = cs2 / rho;
+        float ss = rho * (mean_sq - mean * mean);
+        float delta = (1.0f - ss) / rho;
+        float tau = mean - metal::sqrt(metal::max(delta, 0.0f));
+        int support = int(simd_sum(i < TOPM && tau <= x ? 1u : 0u));
+        float ts = simd_shuffle(tau, ushort(metal::max(support, 1) - 1));
+        float pr = metal::max(x - ts, 0.0f);
+        float logp = metal::log(metal::max(pr * pr, consts[1]));
+        bool v = i < K && sel[top[metal::min(i, K - 1)]];
+        float sum = simd_sum(v ? logp : 0.0f);
+        int cnt = int(simd_sum(v ? 1u : 0u));
         float mu = sum / float(metal::max(cnt, 1));
-        for (int i = 0; i < K; i++) {
+        if (i < K) {
+            valid_s[i] = v;
             // The reference adds the bias through a mask in the query dtype.
-            float bv = valid_s[i] ? (logp[i] - mu) * consts[4] : 0.0f;
+            float bv = v ? (logp - mu) * consts[4] : 0.0f;
             bias_s[i] = static_cast<float>(static_cast<T>(bv));
         }
     }

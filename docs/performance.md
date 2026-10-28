@@ -263,25 +263,37 @@ decode kernel, and each kernel runs only 10 threadgroups (one per head).
 
 | Op (µs per call, M2 Pro) | Before | After |
 | --- | --- | --- |
-| `dash_decode` (routing + 512 gathered keys) | 104.9 | 49-51 |
+| `dash_decode` (routing + 512 gathered keys) | 104.9 | 37-41 |
 | q/k rope + router index q/k | 2 x 12 + ~60 | 16 (`dash_decode_prologue`) |
 | `sdpa_decode`, v1 over 1801 keys (reference) | 38-42 | — |
 
 - Decode kernel: one key per lane instead of a simdgroup streaming its 32
   keys one at a time. Each lane scores its key with `float4` loads against
   a threadgroup copy of q. The values are summed with the weights
-  broadcast by `simd_shuffle`.
+  broadcast by `simd_shuffle`. The 1.5-entmax prior runs on one
+  simdgroup (lane i owns sorted score i, `simd_prefix_inclusive_sum` for
+  the running sums); a single thread with stack arrays took 13 µs of the
+  ~16 µs routing. Kernel floor (empty kernel in the chain): 8.6 µs.
 - Prologue: one launch ropes every q and k head and computes the router
   index q/k (matvec, Gemma norm with the fp32 clamps, page2d rope) in two
   more threadgroups. It rounds to bf16 wherever the mlx graph materializes
   bf16. The rope outputs match the compiled mlx trace exactly; the router
   matvec sums in a different order (test bound: 2% of the row max).
 - End to end (`bench_ocr --repo Unlimited-OCR-2-4bit`, two corpus pages,
-  same tokens): decode 5.7-6.3 -> 3.9-4.4 ms/token (v1 3.7-4.1). Corpus
+  same tokens): decode 5.7-6.3 -> 3.5-3.6 ms/token (v1 3.7-4.1). Corpus
   gate PASS, similarity 1.000 on all four pages.
 - Not done (each under ~1% of a step): compiling the per-token `decode_ctx`
   graph, and a fixed pending index-key buffer in place of the per-token
   concat.
+- Tried, not kept:
+  - Two lanes per key in 1024-thread groups: 44 µs, slower.
+  - Splitting each head's keys over 2 or 4 threadgroups plus a merge
+    kernel: 1-3 µs gained, within noise once the merge dispatch is paid.
+- Vision tower (same pages, 12 crops + global view, ~1.5 s): eight window
+  blocks ~80 ms and four global blocks ~105 ms over the crops, crop CLIP
+  185 ms, global view ~350 ms. The GEMMs run at ~3.5 TFLOPS. Chunking the
+  global attention by crop, so its ~740 MB rel-pos bias fits the buffer
+  cache, was within noise (<= 3%).
 - Metal pitfall hit here: writing one component of a `threadgroup float4`
   from several threads is a read-modify-write race (wrong output at
   head dim 128, not at 64). Each thread must store whole vectors.
@@ -338,7 +350,7 @@ comparison (tag `paddleocr-vl-last`).
 
 | Model | sim | F1 | finish=stop | M2 Pro s/page | M2 Pro MLX peak / footprint | RTX 5090 s/page | RTX 5090 MLX peak |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Unlimited-OCR-2 | 0.857-0.860 | 0.903-0.905 | 65-66/66 | 7.2 (11.2 before the 2026-10-29 decode kernels) | 4.5 / 6.8 GB | 5.1 | 4.8 GB |
+| Unlimited-OCR-2 | 0.857-0.860 | 0.903-0.905 | 65-66/66 | 7.2 (11.2 before the 2026-10-29 decode kernels, measured before the entmax change) | 4.5 / 6.8 GB | 5.1 | 4.8 GB |
 | Unlimited-OCR | 0.851 | 0.903 | 66/66 | 8.2 | 5.7 / 8.1 GB | 1.7 | 6.0 GB |
 | PaddleOCR-VL-1.6 bf16 (removed) | 0.65-0.71 | 0.77-0.78 | 56-57/66 | 10.6 | 2.4 / 3.9 GB | 1.3 | 2.5 GB |
 | PaddleOCR-VL-1.6 4bit (removed) | 0.62 | 0.66 | 47/66 | — | — | 1.5 | 1.4 GB |

@@ -348,6 +348,19 @@ cargo xtask check-specs
   pending index-key buffer.
 - Next action: commit.
 
+### 2026-10-29 — Claude — WS-02 (decode routing, vision profile)
+
+- Changed: the decode kernel's 1.5-entmax prior runs on one simdgroup
+  (prefix sums via `simd_prefix_inclusive_sum`) instead of one thread with
+  stack arrays; the kernel gate requires `min(topm, cap) <= 32`.
+- Evidence (M2 Pro): `dash_decode` 49-52 -> 37-41 µs per layer; v2 decode
+  3.9-4.4 -> 3.5-3.6 ms/token, same tokens; `mlx_dash` and `unlimited_ocr`
+  checkpoint tests pass; corpus gate PASS; gates clean.
+- Tried, not kept: two lanes per key (slower), key split over 2-4
+  threadgroups plus merge (within noise), chunked global SAM attention
+  (within noise; vision is GEMM-bound at ~3.5 TFLOPS).
+- Next action: commit.
+
 ## Completion summary
 
 Pending.
