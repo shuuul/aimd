@@ -52,7 +52,7 @@ items = json.load(open(corpus / "manifest.json"))["ocr"]
 rows = []
 for path in sys.argv[2:]:
     native = json.load(open(path))
-    (key, docs), = native.items()
+    ((key, docs),) = native.items()
     name = Path(path).stem.removeprefix("out-")
     groups = defaultdict(list)
     stops = 0
@@ -75,6 +75,13 @@ for c in cols:
     cells = []
     for _, g, _ in rows:
         v = g[c]
-        cells.append(f"{sum(s for s, _ in v) / len(v):.3f} / {sum(f for _, f in v) / len(v):.3f}")
-    print(f"{c + f' ({len(rows[0][1][c])})':{width + 5}}" + " ".join(f"{x:>16}" for x in cells))
-print(f"{'stop':{width + 5}}" + " ".join(f"{f'{s}/{len(items)}':>16}" for _, _, s in rows))
+        cells.append(
+            f"{sum(s for s, _ in v) / len(v):.3f} / {sum(f for _, f in v) / len(v):.3f}"
+        )
+    print(
+        f"{c + f' ({len(rows[0][1][c])})':{width + 5}}"
+        + " ".join(f"{x:>16}" for x in cells)
+    )
+print(
+    f"{'stop':{width + 5}}" + " ".join(f"{f'{s}/{len(items)}':>16}" for _, _, s in rows)
+)

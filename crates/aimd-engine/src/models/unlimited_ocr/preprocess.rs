@@ -54,51 +54,8 @@ pub(crate) fn bfr(x: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
-// PIL-exact bicubic / Lanczos resize (Pillow Resample.c, 8bpc fixed point)
+// PIL-exact bicubic resize (Pillow Resample.c, 8bpc fixed point)
 // ---------------------------------------------------------------------------
-
-/// Pillow resampling filters ported here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PilFilter {
-    /// `Image.BICUBIC` (`a = -0.5`, support 2).
-    Bicubic,
-    /// `Image.LANCZOS` (3-lobe windowed sinc, support 3).
-    Lanczos,
-}
-
-impl PilFilter {
-    fn support(self) -> f64 {
-        match self {
-            PilFilter::Bicubic => 2.0,
-            PilFilter::Lanczos => 3.0,
-        }
-    }
-
-    fn eval(self, x: f64) -> f64 {
-        match self {
-            PilFilter::Bicubic => bicubic_filter(x),
-            PilFilter::Lanczos => lanczos_filter(x),
-        }
-    }
-}
-
-/// Pillow `sinc_filter`.
-fn sinc_filter(x: f64) -> f64 {
-    if x == 0.0 {
-        return 1.0;
-    }
-    let x = x * std::f64::consts::PI;
-    x.sin() / x
-}
-
-/// Pillow `lanczos_filter` (truncated sinc, `-3 <= x < 3`).
-fn lanczos_filter(x: f64) -> f64 {
-    if (-3.0..3.0).contains(&x) {
-        sinc_filter(x) * sinc_filter(x / 3.0)
-    } else {
-        0.0
-    }
-}
 
 /// Pillow's bicubic filter (`a = -0.5`), double precision.
 fn bicubic_filter(x: f64) -> f64 {
@@ -123,14 +80,14 @@ struct ResizeCoeffs {
 
 impl ResizeCoeffs {
     /// Pillow `precompute_coeffs` (same double-precision op order).
-    fn new(in_size: usize, out_size: usize, filter: PilFilter) -> Result<Self, PreprocessError> {
+    fn new(in_size: usize, out_size: usize) -> Result<Self, PreprocessError> {
         if in_size == 0 || out_size == 0 {
             return Err(PreprocessError::Layout("resize axis of size 0".to_string()));
         }
         let scale = in_size as f64 / out_size as f64;
         let filterscale = scale.max(1.0);
         let ss = 1.0 / filterscale;
-        let support = filter.support() * filterscale;
+        let support = 2.0 * filterscale;
         let ksize = (support.ceil() as usize) * 2 + 1;
         let mut kk = vec![0f64; out_size * ksize];
         let mut bounds = vec![0i32; out_size * 2];
@@ -152,7 +109,7 @@ impl ResizeCoeffs {
             let count = (xmax - xmin) as usize;
             let mut ww = 0f64;
             for (i, k) in slot.iter_mut().take(count).enumerate() {
-                let w = filter.eval(((i as i64 + xmin) as f64 - center + 0.5) * ss);
+                let w = bicubic_filter(((i as i64 + xmin) as f64 - center + 0.5) * ss);
                 *k = w;
                 ww += w;
             }
@@ -192,7 +149,9 @@ fn clip8(v: i32) -> u8 {
     v.clamp(0, 255) as u8
 }
 
-/// Pillow `Image.resize(.., BICUBIC)` on an RGB8 HWC image.
+/// Pillow `Image.resize(.., BICUBIC)` on an RGB8 HWC image: two separable
+/// fixed-point passes (horizontal, then vertical, as Pillow <= 12.x) through
+/// a uint8 intermediate exactly like `ImagingResampleInner`.
 pub(crate) fn resize_bicubic_pil(
     src: &[u8],
     in_w: usize,
@@ -200,58 +159,13 @@ pub(crate) fn resize_bicubic_pil(
     out_w: usize,
     out_h: usize,
 ) -> Result<Vec<u8>, PreprocessError> {
-    resize_pil(
-        src,
-        in_w,
-        in_h,
-        out_w,
-        out_h,
-        PilFilter::Bicubic,
-        PassOrder::Pillow12,
-    )
-}
-
-/// Which Pillow release's separable pass order to reproduce. The order
-/// changes the uint8 intermediate, so it must follow the reference oracle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PassOrder {
-    /// Pillow <= 12.x: always horizontal, then vertical.
-    Pillow12,
-    /// Pillow 13: vertical first when the height shrinks by more than twice
-    /// the width (`horizontal_first` in `ImagingResampleInner`).
-    Pillow13,
-}
-
-/// Pillow `Image.resize` on an RGB8 HWC image, two separable fixed-point
-/// passes through a uint8 intermediate exactly like `ImagingResampleInner`,
-/// in the pass order of the given Pillow release.
-pub(crate) fn resize_pil(
-    src: &[u8],
-    in_w: usize,
-    in_h: usize,
-    out_w: usize,
-    out_h: usize,
-    filter: PilFilter,
-    order: PassOrder,
-) -> Result<Vec<u8>, PreprocessError> {
     debug_assert_eq!(src.len(), in_w * in_h * 3);
-    let (dh, dw) = (in_h as i64 - out_h as i64, in_w as i64 - out_w as i64);
-    let horizontal_first = order == PassOrder::Pillow12 || !(dh > 0 && dh > dw * 2);
     let mut cur = src.to_vec();
-    if horizontal_first {
-        if out_w != in_w {
-            cur = resize_horizontal(&cur, in_w, in_h, out_w, filter)?;
-        }
-        if out_h != in_h {
-            cur = resize_vertical(&cur, out_w, in_h, out_h, filter)?;
-        }
-    } else {
-        if out_h != in_h {
-            cur = resize_vertical(&cur, in_w, in_h, out_h, filter)?;
-        }
-        if out_w != in_w {
-            cur = resize_horizontal(&cur, in_w, out_h, out_w, filter)?;
-        }
+    if out_w != in_w {
+        cur = resize_horizontal(&cur, in_w, in_h, out_w)?;
+    }
+    if out_h != in_h {
+        cur = resize_vertical(&cur, out_w, in_h, out_h)?;
     }
     Ok(cur)
 }
@@ -264,9 +178,8 @@ fn resize_horizontal(
     w: usize,
     h: usize,
     out_w: usize,
-    filter: PilFilter,
 ) -> Result<Vec<u8>, PreprocessError> {
-    let co = ResizeCoeffs::new(w, out_w, filter)?;
+    let co = ResizeCoeffs::new(w, out_w)?;
     let kf = co.fixed_point();
     let mut out = vec![0u8; h * out_w * 3];
     crate::parallel::for_row_bands(&mut out, out_w * 3, 16, |first, band| {
@@ -299,9 +212,8 @@ fn resize_vertical(
     w: usize,
     h: usize,
     out_h: usize,
-    filter: PilFilter,
 ) -> Result<Vec<u8>, PreprocessError> {
-    let co = ResizeCoeffs::new(h, out_h, filter)?;
+    let co = ResizeCoeffs::new(h, out_h)?;
     let kf = co.fixed_point();
     let row_len = w * 3;
     let mut out = vec![0u8; out_h * row_len];

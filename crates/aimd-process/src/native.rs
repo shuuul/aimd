@@ -7,9 +7,6 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use aimd_core::{AimdError, Result, Segment, anchors, log_info, log_warn};
-use aimd_engine::models::paddleocr_vl::pipeline::{
-    PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest, VlTask, load_rgb8,
-};
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpPipelineError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_aligner::pipeline::ForcedAlignerPipeline;
 use aimd_engine::models::qwen3_asr::pipeline::{
@@ -19,7 +16,7 @@ use aimd_engine::models::unlimited_ocr::pipeline::{
     OcrRequest, PipelineError as OcrPipelineError, UnlimitedOcrPipeline,
 };
 
-use crate::models::{OcrFamily, PADDLEOCR_VL_REPO, ocr_family};
+use crate::models::{OcrFamily, ocr_family};
 use crate::{
     AlignedTranscript, AsrFailure, AsrModel, CommandOutput, LocalModality, LocatedOcr, OcrFailure,
     OcrModel, Runtime,
@@ -106,18 +103,7 @@ impl Runtime for NativeRuntime {
                 );
                 let pipeline =
                     UnlimitedOcrPipeline::load(&dir).map_err(|e| load_err(e.to_string()))?;
-                Arc::new(Released(NativeOcr::Unlimited(pipeline)))
-            }
-            OcrFamily::PaddleOcrVl { quant_bits } => {
-                let dir = crate::hf::resolve_checkpoint(PADDLEOCR_VL_REPO, &|k| self.env(k))?;
-                log_info!(
-                    "Loading {} checkpoint {model_id} from {}",
-                    family.name(),
-                    dir.display()
-                );
-                let pipeline = PaddleOcrVlPipeline::load(&dir, quant_bits)
-                    .map_err(|e| load_err(e.to_string()))?;
-                Arc::new(Released(NativeOcr::PaddleVl(pipeline)))
+                Arc::new(Released(NativeOcr::Unlimited(Box::new(pipeline))))
             }
             OcrFamily::PpOcrV6 => {
                 let det =
@@ -136,7 +122,7 @@ impl Runtime for NativeRuntime {
                 );
                 let pipeline =
                     PpOcrV6Pipeline::load(&det, &rec).map_err(|e| load_err(e.to_string()))?;
-                Arc::new(Released(NativeOcr::PpOcr(pipeline)))
+                Arc::new(Released(NativeOcr::PpOcr(Box::new(pipeline))))
             }
         };
         cache.insert(model_id.to_string(), model.clone());
@@ -185,12 +171,8 @@ impl<M: OcrModel> OcrModel for Released<M> {
         self.call(|m| m.recognize(image_path))
     }
 
-    fn recognize_located(
-        &self,
-        image_path: &Path,
-        spotting: bool,
-    ) -> std::result::Result<LocatedOcr, OcrFailure> {
-        self.call(|m| m.recognize_located(image_path, spotting))
+    fn recognize_located(&self, image_path: &Path) -> std::result::Result<LocatedOcr, OcrFailure> {
+        self.call(|m| m.recognize_located(image_path))
     }
 
     fn pages_per_request(&self) -> usize {
@@ -300,15 +282,13 @@ impl AsrModel for NativeAsr {
 }
 
 enum NativeOcr {
-    Unlimited(UnlimitedOcrPipeline),
-    PaddleVl(PaddleOcrVlPipeline),
-    PpOcr(PpOcrV6Pipeline),
+    Unlimited(Box<UnlimitedOcrPipeline>),
+    PpOcr(Box<PpOcrV6Pipeline>),
 }
 
 impl OcrModel for NativeOcr {
     fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure> {
-        self.recognize_located(image_path, false)
-            .map(|ocr| ocr.markdown)
+        self.recognize_located(image_path).map(|ocr| ocr.markdown)
     }
 
     fn pages_per_request(&self) -> usize {
@@ -354,11 +334,7 @@ impl OcrModel for NativeOcr {
             .collect())
     }
 
-    fn recognize_located(
-        &self,
-        image_path: &Path,
-        spotting: bool,
-    ) -> std::result::Result<LocatedOcr, OcrFailure> {
+    fn recognize_located(&self, image_path: &Path) -> std::result::Result<LocatedOcr, OcrFailure> {
         let segment = |text: &str, kind: &str| Segment {
             text: text.to_string(),
             kind: Some(kind.into()),
@@ -383,49 +359,6 @@ impl OcrModel for NativeOcr {
                 Err(OcrPipelineError::EmptyContent) => Err(OcrFailure::Empty),
                 Err(e) => Err(OcrFailure::Other(e.to_string())),
             },
-            Self::PaddleVl(p) => {
-                // Both passes share one decode of the page image.
-                let (rgb, w, h) =
-                    load_rgb8(image_path).map_err(|e| OcrFailure::Other(e.to_string()))?;
-                let run = |task| match p.recognize_rgb8(
-                    &rgb,
-                    w,
-                    h,
-                    VlRequest {
-                        task,
-                        ..VlRequest::default()
-                    },
-                ) {
-                    Ok(result) => Ok(result),
-                    Err(VlPipelineError::EmptyContent) => Err(OcrFailure::Empty),
-                    Err(e) => Err(OcrFailure::Other(e.to_string())),
-                };
-                let markdown = run(VlTask::Ocr)?.markdown;
-                // Spotting loses tables/structure, so it only adds line
-                // positions; an empty spotting pass is not an error.
-                let lines = match spotting {
-                    true => match run(VlTask::Spotting) {
-                        Ok(out) => Some(
-                            out.spots
-                                .iter()
-                                .map(|s| Segment {
-                                    quad: Some(s.quad),
-                                    bbox: Some(anchors::quad_bbox(&s.quad)),
-                                    ..segment(&s.text, "line")
-                                })
-                                .collect(),
-                        ),
-                        Err(OcrFailure::Empty) => None,
-                        Err(e) => return Err(e),
-                    },
-                    false => None,
-                };
-                Ok(LocatedOcr {
-                    markdown,
-                    blocks: None,
-                    lines,
-                })
-            }
             Self::PpOcr(p) => match p.recognize_path(image_path) {
                 Ok(result) => {
                     let (w, h) = (result.width.max(1) as f32, result.height.max(1) as f32);

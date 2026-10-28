@@ -109,15 +109,8 @@ pub trait OcrModel: Send + Sync {
     /// Recognize one image file; returns normalized Markdown.
     fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure>;
 
-    /// [`Self::recognize`] plus positions (spec 005). `spotting` asks for
-    /// extra line positions that cost another pass (PaddleOCR-VL
-    /// `Spotting:`). The default has none.
-    fn recognize_located(
-        &self,
-        image_path: &Path,
-        spotting: bool,
-    ) -> std::result::Result<LocatedOcr, OcrFailure> {
-        let _ = spotting;
+    /// [`Self::recognize`] plus positions (spec 005). The default has none.
+    fn recognize_located(&self, image_path: &Path) -> std::result::Result<LocatedOcr, OcrFailure> {
         self.recognize(image_path).map(|markdown| LocatedOcr {
             markdown,
             ..LocatedOcr::default()

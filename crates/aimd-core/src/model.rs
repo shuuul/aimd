@@ -94,8 +94,7 @@ pub struct ProcessInput {
     /// transcript paragraphs (default `false`).
     pub anchors: bool,
     /// The caller returns `segments` (MCP `include_segments`, CLI
-    /// `--format json`): enables extra passes such as PaddleOCR-VL
-    /// `Spotting:` line positions (default `false`).
+    /// `--format json`; default `false`).
     pub include_segments: bool,
 }
 

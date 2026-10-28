@@ -8,7 +8,7 @@
 
 `aimd` is a native Rust context-preparation toolkit for LLM workflows. It turns URLs,
 audio/video, and documents into Markdown plus a chunked text context. Local ASR
-(Qwen3-ASR) and OCR (Unlimited-OCR, Unlimited-OCR-2, PaddleOCR-VL-1.6, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
+(Qwen3-ASR) and OCR (Unlimited-OCR, Unlimited-OCR-2, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
 runtime.
 
 Interfaces (one binary each):
@@ -37,7 +37,7 @@ gitignored.
 crates/
 ├── aimd-weights/   # safetensors mmap; MLX affine 4/8-bit unpack (test-only bit-exact oracle); tests/golden/quant
 ├── aimd-mlx/       # C-ABI shim over MLX C++ (build.rs + shim/); device selection; needs brew mlx
-├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6})
+├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,qwen3_aligner,unlimited_ocr,pp_ocrv6})
 ├── aimd-core/      # models, AimdError/ErrorKind, ProcessHooks, text shaping, precision, remote config,
 │                   # extension tables, output persistence + shared help texts, logging; no heavy deps
 ├── aimd-doc/       # Pandoc conversion, EPUB (hand-written zip + OPF/spine), cleanup, pdf-inspector PDFs
@@ -73,7 +73,7 @@ flowchart TD
     Asr["aimd-process::asr\nffmpeg decode/segment, retry"]
     Ocr["aimd-process::ocr\nimages + mutool-rendered PDFs"]
     Remote["aimd-process::remote\nOpenAI-compatible ASR/OCR"]
-    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR 1/2,\nPaddleOCR-VL, PP-OCRv6"]
+    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR 1/2,\nPP-OCRv6"]
     Mlx["aimd-mlx\nMLX C++ shim (Metal)"]
 
     CLI --> Core
@@ -119,9 +119,9 @@ flowchart TD
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
 | Document conversion | `crates/aimd-doc/src/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
 | URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
-| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,paddleocr_vl,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
+| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
 | MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. |
-| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. |
+| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. `scripts/omnidoc_{build,score}.py`: OmniDocBench subset for comparing OCR models against ground truth (`docs/performance.md`). |
 | Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
 
 ## CONVENTIONS
@@ -170,8 +170,7 @@ flowchart TD
   (remote ASR, unsupported language, failed alignment) spreads its sentences over the
   segment span instead of failing. JSON segment coordinates round to 3 decimals, times
   to ms. `include_segments` (MCP; CLI `--format json`)
-  returns `segments` and enables the PaddleOCR-VL `Spotting:` pass. MCP response fields
-  are additive (`segments` last).
+  returns `segments`. MCP response fields are additive (`segments` last).
 - **Wire compatibility**: MCP JSON field names, error bodies, and tool
   schemas match the frozen Python contract. Change them only with an explicit decision.
 - **Fail-fast preflight**: resolve the model and check the backend (MLX GPU device,
@@ -185,16 +184,19 @@ flowchart TD
   then audio download + ASR. If both produce no text, the request is a processing
   failure. Stale-extractor yt-dlp stderr gets the `brew upgrade yt-dlp` hint.
 - **Model naming**: user-facing aliases are kebab-case: `qwen3-asr-1.7b` (default),
-  `qwen3-asr-0.6b`, `unlimited-ocr-2` (OCR default), `unlimited-ocr`, `paddleocr-vl`, and `pp-ocrv6`. Legacy underscore aliases and explicit
+  `qwen3-asr-0.6b`, `unlimited-ocr-2` (OCR default), `unlimited-ocr`, and `pp-ocrv6`. Legacy underscore aliases and explicit
   `mlx-community/*` ids remain compatibility inputs but must not be the canonical names in
   docs or help text. GLM-OCR and Transformers/`Qwen/*` ids are not supported and must
-  not reappear in help text.
+  not reappear in help text. PaddleOCR-VL-1.6 and MiniCPM-OCR 1.0 were removed (tags
+  `paddleocr-vl-last`, `minicpm-ocr-last`); PaddleOCR-VL trailed Unlimited-OCR on
+  OmniDocBench (similarity 0.65-0.71 vs 0.85) and looped on dense pages
+  (`docs/performance.md`).
 - **Precision separation**: model family/size goes through `model`; quantization goes
   through the separate `precision` option. The parser accepts `4bit`, `6bit`, `8bit`, and
   `bf16` (dash/space/case variants normalized in `aimd_core::precision`). The native
   engine runs Qwen3-ASR and Unlimited-OCR (1 and 2) at `4bit` (default), `6bit`, and `8bit`;
-  `bf16` is rejected for them as `BackendUnavailable`. PaddleOCR-VL defaults to
-  dense bf16 and quantizes at load; PP-OCRv6 ignores precision with one warning. A precision that conflicts
+  `bf16` is rejected for them as `BackendUnavailable`. PP-OCRv6 ignores precision
+  with one warning. A precision that conflicts
   with an explicit checkpoint id is an error.
 - **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI,
   MCP, URL audio fallback, local ASR, and OCR.
@@ -220,7 +222,7 @@ flowchart TD
   kernels are gated on `aimd_mlx::metal_kernels_available()`; other GPU backends use
   the stock mlx ops.
 - **Fused elementwise ops**: shapeless compiled shim ops (`swiglu`, `gelu`,
-  `gelu_tanh`, `rope_half_split`, `bias_act`) run on every backend and must match
+  `bias_act`) run on every backend and must match
   the unfused graph value for value (tested in `aimd-mlx/tests`). Do not
   compile whole models shape-keyed: every new page/clip shape would retrace
   (spec 006).
@@ -369,12 +371,6 @@ Supported model families are intentionally narrow:
   it, 20000 tokens per page) and widens the n-gram window to 1024 for multi-page
   requests. `markdown2::render_unlimited_ocr2` turns the 0..999 page-relative boxes
   into per-page located items.
-- **PaddleOCR-VL**: `paddleocr-vl` (`paddleocr-vl-1.6`) always loads the official
-  `PaddlePaddle/PaddleOCR-VL-1.6` bf16 checkpoint. Omitted precision = dense bf16;
-  `4bit`/`6bit`/`8bit` quantize at load (affine, group 64, mlx-vlm convert rule: every
-  module with `in_dim % 64 == 0`; vision `fc2` stays dense), bit-exact with
-  `mlx-community/PaddleOCR-VL-1.6-4bit`. Model key: the repo id, plus `:<precision>`
-  when quantized. Full-page `OCR:` prompt, image pixels 112896..1003520, 4096 tokens.
 - **PP-OCRv6**: `pp-ocrv6` (`pp-ocrv6-medium`), medium tier only. Model key
   `PaddlePaddle/PP-OCRv6_medium` names the `_det_safetensors` / `_rec_safetensors`
   repo pair. The HF rec checkpoint's `head.encoder.conv_block.{0,1}` are Paddle's
@@ -412,7 +408,7 @@ Tests are lean by rule; weights are the expensive resource.
   4. Golden-corpus gate (accuracy): `scripts/build_corpus.py` builds labeled
      `say` clips and rendered pages from `scripts/corpus/`,
      `scripts/corpus_baseline.py` records mlx-audio / mlx-vlm outputs
-     (`corpus_baseline_paddle.py` for PaddleOCR-VL / PP-OCRv6), and the
+     (`corpus_baseline_paddle.py` for PP-OCRv6), and the
      `corpus_gate` example scores both (ASR WER/CER <= baseline + 1%, OCR
      similarity >= baseline - 2%, stop rate no lower). Run it after any change
      that can move model outputs or when adding a model/precision.
@@ -424,7 +420,7 @@ Tests are lean by rule; weights are the expensive resource.
   `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-weights` (`aimd-mlx` reads it
   via `../aimd-weights/tests/golden/quant`). `mel`, `tokenizer`, `asr_encoder`,
   `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `ocr2_decoder`,
-  `ocr2_markdown`, `paddleocr_vl`, and `ppocrv6` belong to `aimd-engine`.
+  `ocr2_markdown`, and `ppocrv6` belong to `aimd-engine`.
   `ocr2_decoder` comes from the shuuul/mlx-vlm port (`export_ocr2_decoder_reference.py`).
   `ocr_vision` comes from Baidu's `deepencoder.py` in torch f32 (its bounds measure the
   bf16 port against f32 truth). Every mlx-vlm-based Unlimited-OCR exporter and corpus
@@ -446,8 +442,7 @@ Tests are lean by rule; weights are the expensive resource.
 - **Backend-specific bounds**: the Unlimited-OCR vision stage/final-feature goldens
   pin Metal mlx rounding (the tower amplifies any rounding change past them), so they
   are enforced only when `metal_kernels_available()`; on CUDA they print the drift and
-  the corpus gate is the accuracy check. The same applies to the PaddleOCR-VL vision
-  stages. The Unlimited-OCR v1 prefill logits golden gets a noise bound off
+  the corpus gate is the accuracy check. The Unlimited-OCR v1 prefill logits golden gets a noise bound off
   Metal; its forced greedy stream must still match. PP-OCRv6 is f32, so mlx's default TF32 convs/matmuls on CUDA move its
   probability maps; off Metal its checkpoint test uses noise bounds and requires
   exact text. Run the checkpoint tier and the corpus gate on

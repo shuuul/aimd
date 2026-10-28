@@ -3,33 +3,26 @@
 # requires-python = ">=3.12,<3.14"
 # dependencies = [
 #     "mlx==0.32.4",
-#     "mlx-vlm==0.7.10",
 #     "mlx4ocr==0.1.2",
 #     "opencv-python-headless==4.13.0.92",
 #     "pillow==12.2.0",
 #     "pyclipper==1.4.0",
 #     "pyyaml==6.0.3",
 #     "shapely==2.1.2",
-#     "transformers==5.20.2",
 # ]
 # ///
-"""Corpus baseline for the spec 004 OCR models (PaddleOCR-VL-1.6, PP-OCRv6).
+"""Corpus baseline for PP-OCRv6 medium (spec 004).
 
-Usage: uv run scripts/corpus_baseline_paddle.py [CORPUS_DIR] [--only vl|pp]
+Usage: uv run scripts/corpus_baseline_paddle.py [CORPUS_DIR]
 
-Separate from ``corpus_baseline.py`` because these references need newer
-mlx / mlx-vlm pins than the Unlimited-OCR baseline. Adds to
-``CORPUS_DIR/baseline.json`` (other keys are kept):
+Separate from ``corpus_baseline.py`` because mlx4ocr needs a newer mlx pin
+than the Unlimited-OCR baseline. Adds ``ocr_pp_ocrv6`` to
+``CORPUS_DIR/baseline.json`` (other keys are kept): mlx4ocr medium det + rec
+(``compile_models=False``), with the HF rec head convs swapped back exactly
+as the Rust loader does.
 
-- ``ocr_paddleocr_vl``: official bf16 ``PaddlePaddle/PaddleOCR-VL-1.6``.
-- ``ocr_paddleocr_vl_4bit``: ``mlx-community/PaddleOCR-VL-1.6-4bit`` (the
-  native ``--ocr-bits 4`` quantizes the bf16 checkpoint bit-identically).
-- ``ocr_pp_ocrv6``: mlx4ocr medium det + rec (``compile_models=False``), with
-  the HF rec head convs swapped back exactly as the Rust loader does.
-
-mlx-vlm runs ``OCR:`` greedily with 4096 max tokens, the native settings.
 Models load from the local HF cache only. Score with
-``cargo run --release -p aimd-engine --example corpus_gate -- --ocr-model ...``.
+``cargo run --release -p aimd-engine --example corpus_gate -- --ocr-model pp-ocrv6``.
 """
 
 from __future__ import annotations
@@ -40,44 +33,6 @@ import os
 from pathlib import Path
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
-VL_REPOS = {
-    "ocr_paddleocr_vl": "PaddlePaddle/PaddleOCR-VL-1.6",
-    "ocr_paddleocr_vl_4bit": "mlx-community/PaddleOCR-VL-1.6-4bit",
-}
-VL_MAX_TOKENS = 4096
-
-
-def run_vl(corpus: Path, items: list[dict], repo: str) -> dict[str, dict]:
-    from mlx_vlm import load, stream_generate
-    from mlx_vlm.prompt_utils import apply_chat_template
-
-    model, processor = load(repo)
-    prompt = apply_chat_template(processor, model.config, "OCR:", num_images=1)
-    out = {}
-    for item in items:
-        pages = []
-        for page in item["pages"]:
-            model.language_model._position_ids = None
-            model.language_model._rope_deltas = None
-            text, last = "", None
-            for last in stream_generate(
-                model,
-                processor,
-                prompt,
-                image=[str(corpus / page)],
-                max_tokens=VL_MAX_TOKENS,
-                temperature=0.0,
-            ):
-                text += last.text
-            pages.append(
-                {
-                    "markdown": text.strip(),
-                    "finish": last.finish_reason if last else "error",
-                }
-            )
-        out[item["id"]] = {"pages": pages}
-    return out
 
 
 def swap_head_convs(variant, tensors):
@@ -135,17 +90,12 @@ def run_pp(corpus: Path, items: list[dict]) -> dict[str, dict]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("corpus", nargs="?", default="target/corpus")
-    ap.add_argument("--only", choices=["vl", "pp"])
     args = ap.parse_args()
     corpus = Path(args.corpus).resolve()
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
     path = corpus / "baseline.json"
     baseline = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    if args.only in (None, "vl"):
-        for key, repo in VL_REPOS.items():
-            baseline[key] = run_vl(corpus, manifest["ocr"], repo)
-    if args.only in (None, "pp"):
-        baseline["ocr_pp_ocrv6"] = run_pp(corpus, manifest["ocr"])
+    baseline["ocr_pp_ocrv6"] = run_pp(corpus, manifest["ocr"])
     path.write_text(
         json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

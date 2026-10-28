@@ -17,9 +17,19 @@ import sys
 from pathlib import Path
 
 KEEP = {
-    "text_block", "title", "figure_caption", "table_caption", "table_footnote",
-    "figure_footnote", "page_footnote", "equation_caption", "reference",
-    "code_txt", "code_txt_caption", "list_group", "table",
+    "text_block",
+    "title",
+    "figure_caption",
+    "table_caption",
+    "table_footnote",
+    "figure_footnote",
+    "page_footnote",
+    "equation_caption",
+    "reference",
+    "code_txt",
+    "code_txt_caption",
+    "list_group",
+    "table",
 }
 
 src, out = Path(sys.argv[1]), Path(sys.argv[2])
@@ -53,29 +63,47 @@ def block_text(d):
 items = []
 for (source, lang), p in chosen:
     dets = [
-        d for d in p["layout_dets"]
-        if d["category_type"] in KEEP and not d.get("ignore") and d.get("order") is not None
+        d
+        for d in p["layout_dets"]
+        if d["category_type"] in KEEP
+        and not d.get("ignore")
+        and d.get("order") is not None
     ]
     dets.sort(key=lambda d: d["order"])
     ref = "\n\n".join(t for t in map(block_text, dets) if t.strip())
     name = p["page_info"]["image_path"]
-    items.append({
-        "id": f"{source}-{lang}-{Path(name).stem[-8:]}",
-        "pages": [f"images/{name}"],
-        "reference": ref,
-        "source": source,
-        "lang": lang,
-    })
+    items.append(
+        {
+            "id": f"{source}-{lang}-{Path(name).stem[-8:]}",
+            "pages": [f"images/{name}"],
+            "reference": ref,
+            "source": source,
+            "lang": lang,
+        }
+    )
 
 out.mkdir(parents=True, exist_ok=True)
 need = [i["pages"][0] for i in items if not (out / i["pages"][0]).exists()]
 if need:
-    cmd = ["uvx", "hf", "download", "opendatalab/OmniDocBench", "--repo-type", "dataset",
-           "--local-dir", str(out)]
+    cmd = [
+        "uvx",
+        "hf",
+        "download",
+        "opendatalab/OmniDocBench",
+        "--repo-type",
+        "dataset",
+        "--local-dir",
+        str(out),
+    ]
     for n in need:
         cmd += ["--include", n]
     subprocess.run(cmd, check=True)
 missing = [i["id"] for i in items if not (out / i["pages"][0]).exists()]
 assert not missing, missing
-json.dump({"asr": [], "ocr": items}, open(out / "manifest.json", "w"), ensure_ascii=False, indent=1)
+json.dump(
+    {"asr": [], "ocr": items},
+    open(out / "manifest.json", "w"),
+    ensure_ascii=False,
+    indent=1,
+)
 print(len(items), "pages")

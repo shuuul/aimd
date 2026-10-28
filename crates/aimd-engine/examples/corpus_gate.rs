@@ -1,23 +1,20 @@
 //! Golden-corpus accuracy gate (tier 3): runs the native Qwen3-ASR and
-//! OCR (Unlimited-OCR, PaddleOCR-VL-1.6, or PP-OCRv6) pipelines over the labeled corpus built by
+//! OCR (Unlimited-OCR 1/2 or PP-OCRv6) pipelines over the labeled corpus built by
 //! `uv run scripts/build_corpus.py`, scores them against the labels, and
 //! compares with the mlx-audio / mlx-vlm baseline written by
 //! `uv run scripts/corpus_baseline.py` (Unlimited-OCR) or
-//! `uv run scripts/corpus_baseline_paddle.py` (mlx-vlm PaddleOCR-VL, mlx4ocr
-//! PP-OCRv6) when `baseline.json` is present.
+//! `uv run scripts/corpus_baseline_paddle.py` (mlx4ocr PP-OCRv6) when `baseline.json` is present.
 //!
 //! Usage: cargo run --release -p aimd-engine --example corpus_gate -- \
 //!            [CORPUS_DIR] [--only asr|ocr] [--asr-repo ID] [--ocr-repo ID]
-//!            [--ocr-model unlimited-ocr|unlimited-ocr-2|paddleocr-vl|pp-ocrv6]
-//!            [--ocr-bits 4|6|8]
+//!            [--ocr-model unlimited-ocr|unlimited-ocr-2|pp-ocrv6]
 //!
 //! `unlimited-ocr-2` sends each document as one multi-page request (as aimd
 //! sends a PDF window) and scores it against `ocr_unlimited_ocr2` from
 //! `uv run scripts/corpus_baseline_ocr2.py`, whose raw output goes through the
 //! same Markdown port; its stop rate counts requests, not pages.
-//! `--ocr-bits` applies to paddleocr-vl (load-time quantization of the bf16
-//! checkpoint). Each OCR model is scored against its own baseline key
-//! (`ocr`, `ocr_paddleocr_vl[_4bit]`, `ocr_pp_ocrv6`). PP-OCRv6 has no
+//! Each OCR model is scored against its own baseline key
+//! (`ocr`, `ocr_unlimited_ocr2`, `ocr_pp_ocrv6`). PP-OCRv6 has no
 //! generation, so its pages count as `stop` unless empty.
 //!
 //! Metrics: ASR WER (English, words) and CER (Chinese, characters) over the
@@ -30,8 +27,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use aimd_engine::models::paddleocr_vl::generate::FinishReason as VlFinish;
-use aimd_engine::models::paddleocr_vl::pipeline::{PaddleOcrVlPipeline, VlRequest};
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_asr::pipeline::{Qwen3AsrPipeline, TranscriptionRequest};
 use aimd_engine::models::unlimited_ocr::markdown2::render_unlimited_ocr2;
@@ -150,7 +145,6 @@ fn run_asr(corpus: &Path, items: &[Value], repo: &str) -> Value {
 enum Ocr {
     Unlimited(UnlimitedOcrPipeline),
     Unlimited2(UnlimitedOcrPipeline),
-    PaddleVl(PaddleOcrVlPipeline),
     PpOcrV6(PpOcrV6Pipeline),
 }
 
@@ -166,16 +160,6 @@ impl Ocr {
                     .recognize_path(path, OcrRequest::default())
                     .unwrap_or_else(|e| fail(path, &e));
                 (r.markdown, r.finish_reason.to_string())
-            }
-            Self::PaddleVl(p) => {
-                let (r, stats) = p
-                    .recognize_path_with_stats(path, VlRequest::default())
-                    .unwrap_or_else(|e| fail(path, &e));
-                let finish = match stats.finish_reason {
-                    VlFinish::Stop => "stop",
-                    VlFinish::Length => "length",
-                };
-                (r.markdown, finish.to_string())
             }
             Self::PpOcrV6(p) => match p.recognize_path(path) {
                 Ok(r) => (r.markdown.trim_end().to_string(), "stop".to_string()),
@@ -299,7 +283,6 @@ fn main() {
     } else {
         "mlx-community/Unlimited-OCR-2-4bit".to_string()
     };
-    let ocr_bits: Option<u32> = flag("--ocr-bits").map(|b| b.parse().expect("--ocr-bits"));
     let corpus = PathBuf::from(args.first().map_or("target/corpus", String::as_str));
     let manifest: Value = serde_json::from_str(
         &std::fs::read_to_string(corpus.join("manifest.json"))
@@ -363,20 +346,6 @@ fn main() {
                     repo.clone(),
                     "ocr_unlimited_ocr2".to_string(),
                     Ocr::Unlimited2(UnlimitedOcrPipeline::load(&snapshot(&repo)).expect("OCR-2")),
-                )
-            }
-            "paddleocr-vl" => {
-                let repo = "PaddlePaddle/PaddleOCR-VL-1.6";
-                let pipe = PaddleOcrVlPipeline::load(&snapshot(repo), ocr_bits).expect("VL");
-                let suffix = ocr_bits.map_or(String::new(), |b| format!("_{b}bit"));
-                let label = format!(
-                    "{repo}{}",
-                    ocr_bits.map_or(String::new(), |b| format!(":{b}bit"))
-                );
-                (
-                    label,
-                    format!("ocr_paddleocr_vl{suffix}"),
-                    Ocr::PaddleVl(pipe),
                 )
             }
             "pp-ocrv6" => {

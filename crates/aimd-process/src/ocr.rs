@@ -173,7 +173,6 @@ pub fn recognize_file(
     };
 
     let suffix = suffix_lower(path);
-    let spotting = request.include_segments;
     let anchored = request.anchors;
     let mut segments = request.wants_positions().then(Vec::new);
     // Page text, anchored when requested (`page` is 1-based).
@@ -187,7 +186,7 @@ pub fn recognize_file(
         None => ocr.markdown,
     };
     let pages = if IMAGE_FILE_EXTENSIONS.contains(&suffix.as_str()) {
-        let ocr = recognize_one(rt, &engine, path, false, spotting)?;
+        let ocr = recognize_one(rt, &engine, path, false)?;
         hooks.progress("ocr", Some(1), Some(1), Some("Processed OCR page 1 of 1"));
         vec![OcrPage {
             page_index: None,
@@ -274,7 +273,7 @@ pub fn recognize_file(
             if i > 0 && hooks.is_cancelled() {
                 return Err(AimdError::cancelled("OCR cancelled between pages"));
             }
-            let ocr = recognize_one(rt, &engine, image, true, spotting)?;
+            let ocr = recognize_one(rt, &engine, image, true)?;
             let text = place(page_index + 1, ocr);
             hooks.progress(
                 "ocr",
@@ -320,7 +319,6 @@ fn recognize_one(
     engine: &Engine,
     image: &Path,
     multi_page: bool,
-    spotting: bool,
 ) -> Result<LocatedOcr> {
     match engine {
         Engine::Remote(config) => Ok(LocatedOcr {
@@ -330,7 +328,7 @@ fn recognize_one(
         Engine::Local(model_id) => {
             let model = rt.load_ocr(model_id)?;
             let family = ocr_family(model_id).name();
-            match model.recognize_located(image, spotting) {
+            match model.recognize_located(image) {
                 Ok(ocr) if !ocr.markdown.trim().is_empty() => Ok(ocr),
                 Ok(_) | Err(OcrFailure::Empty) => Err(AimdError::failed(format!(
                     "{family} produced empty content"

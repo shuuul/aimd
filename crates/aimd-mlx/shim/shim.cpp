@@ -2668,7 +2668,7 @@ AimdMlxArray* mlx_sdpa_decode(
 }
 
 // ---------------------------------------------------------------------------
-// Ops for the PP-OCRv6 conv nets and the PaddleOCR-VL graph (spec 004).
+// Ops for the PP-OCRv6 conv nets and load-time quantization (spec 004).
 // ---------------------------------------------------------------------------
 
 /// `conv2d` with dilation and groups (depthwise when groups == channels).
@@ -2795,74 +2795,6 @@ AimdMlxArray* mlx_clip(AimdMlxArray* a, float lo, float hi) {
     require({a});
     const array& x = as_array(a);
     return wrap(mlx::core::clip(x, array(lo, x.dtype()), array(hi, x.dtype())));
-  });
-}
-
-/// Tanh-approximate GELU (`gelu_pytorch_tanh` / `mlx.nn.gelu_approx`),
-/// compiled into one kernel.
-AimdMlxArray* mlx_gelu_tanh(AimdMlxArray* x) {
-  return guarded([&]() -> AimdMlxArray* {
-    require({x});
-    // mlx.nn.gelu_approx: 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
-    static const auto compiled = mlx::core::compile(
-        [](const std::vector<array>& inputs) -> std::vector<array> {
-          const array& x = inputs[0];
-          const Dtype t = x.dtype();
-          array inner = mlx::core::multiply(
-              array(std::sqrt(2.0 / M_PI), t),
-              mlx::core::add(
-                  x,
-                  mlx::core::multiply(
-                      array(0.044715, t), mlx::core::power(x, array(3, t)))));
-          return {mlx::core::multiply(
-              mlx::core::multiply(array(0.5, t), x),
-              mlx::core::add(array(1.0, t), mlx::core::tanh(inner)))};
-        },
-        true);
-    return wrap(compiled({as_array(x)})[0]);
-  });
-}
-
-/// Half-split rotary `astype(x * cos + rotate_half(x) * sin, x.dtype)` with
-/// `rotate_half(x) = [-x2, x1]`, as one fused elementwise kernel. `cos` and
-/// `sin_signed` broadcast against `x` (last axis `D`); their halves must be
-/// equal (`[c, c]`, and `[-s, s]` for `sin_signed`). Then
-/// `rotate_half(x) * sin == x_rev * sin_signed` exactly, where `x_rev` is a
-/// strided view of `x` with the halves swapped, so no slice/negate/concat
-/// copies are needed and every product and sum keeps the unfused dtypes.
-AimdMlxArray* mlx_rope_half_split(
-    AimdMlxArray* x, AimdMlxArray* cos, AimdMlxArray* sin_signed) {
-  return guarded([&]() -> AimdMlxArray* {
-    require({x, cos, sin_signed});
-    static const auto compiled = mlx::core::compile(
-        [](const std::vector<array>& in) -> std::vector<array> {
-          array sum = mlx::core::add(
-              mlx::core::multiply(in[0], in[2]),
-              mlx::core::multiply(in[1], in[3]));
-          return {mlx::core::astype(sum, in[0].dtype())};
-        },
-        true);
-    auto halves = [](const array& a) {
-      Shape s = a.shape();
-      const int d = s.back();
-      if (d % 2 != 0) {
-        throw std::invalid_argument("[aimd_mlx] rope_half_split: odd last axis");
-      }
-      s.back() = 2;
-      s.push_back(d / 2);
-      return mlx::core::reshape(a, s);
-    };
-    const array& xa = as_array(x);
-    array xr = halves(xa);
-    const int n = static_cast<int>(xr.ndim());
-    Shape start(n, 0), stop = xr.shape(), strides(n, 1);
-    start[n - 2] = 1;
-    stop[n - 2] = -3; // normalizes to -1: indices 1, 0
-    strides[n - 2] = -1;
-    array xf = mlx::core::slice(xr, start, stop, strides);
-    array out = compiled(
-        {xr, xf, halves(as_array(cos)), halves(as_array(sin_signed))})[0];
-    return wrap(mlx::core::reshape(out, xa.shape()));
   });
 }
 

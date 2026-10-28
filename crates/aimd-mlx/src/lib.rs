@@ -429,17 +429,11 @@ mod ffi {
             y: *mut AimdMlxArray,
         ) -> *mut AimdMlxArray;
         pub fn mlx_clip(a: *mut AimdMlxArray, lo: f32, hi: f32) -> *mut AimdMlxArray;
-        pub fn mlx_gelu_tanh(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
         pub fn mlx_bias_act(
             y: *mut AimdMlxArray,
             bias: *mut AimdMlxArray,
             residual: *mut AimdMlxArray,
             act: i32,
-        ) -> *mut AimdMlxArray;
-        pub fn mlx_rope_half_split(
-            x: *mut AimdMlxArray,
-            cos: *mut AimdMlxArray,
-            sin_signed: *mut AimdMlxArray,
         ) -> *mut AimdMlxArray;
         pub fn mlx_quantize(
             w: *mut AimdMlxArray,
@@ -1028,13 +1022,6 @@ impl MlxArray {
         Self::from_handle(ptr, "mlx_clip")
     }
 
-    /// Tanh-approximate GELU (`gelu_pytorch_tanh`, `mlx.nn.gelu_approx`),
-    /// one compiled kernel.
-    pub fn gelu_tanh(&self) -> Result<Self, MlxError> {
-        let ptr = unsafe { ffi::mlx_gelu_tanh(self.ptr.as_ptr()) };
-        Self::from_handle(ptr, "mlx_gelu_tanh")
-    }
-
     /// `act(self + bias) + residual` as one compiled elementwise kernel
     /// (bias and residual optional), matching the unfused ops value for
     /// value.
@@ -1048,17 +1035,6 @@ impl MlxArray {
         let ptr =
             unsafe { ffi::mlx_bias_act(self.ptr.as_ptr(), raw(bias), raw(residual), act as i32) };
         Self::from_handle(ptr, "mlx_bias_act")
-    }
-
-    /// Half-split rotary `astype(self * cos + rotate_half(self) * sin)` in
-    /// one fused kernel (`rotate_half(x) = [-x2, x1]`). `cos` / `sin_signed`
-    /// broadcast against `self`, with equal halves: `[c, c]` and `[-s, s]`.
-    /// Matches the unfused slice / negate / concat graph value for value.
-    pub fn rope_half_split(&self, cos: &Self, sin_signed: &Self) -> Result<Self, MlxError> {
-        let ptr = unsafe {
-            ffi::mlx_rope_half_split(self.ptr.as_ptr(), cos.ptr.as_ptr(), sin_signed.ptr.as_ptr())
-        };
-        Self::from_handle(ptr, "mlx_rope_half_split")
     }
 
     /// Affine `quantize` along the last axis -> `(packed, scales, biases)`,
