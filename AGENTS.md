@@ -226,8 +226,8 @@ flowchart TD
   (spec 006).
 - **Host/GPU overlap** (spec 007): decode loops submit step k+1
   (`async_eval`) before reading token k back, like mlx-lm `generate_step`.
-  On Apple the shim defaults `MLX_MAX_MB_PER_BUFFER` to 30 (a user value
-  wins). Larger Metal command buffers keep the previous step's KV arrays
+  The shim defaults `MLX_MAX_MB_PER_BUFFER` to 30 on every backend (a user
+  value wins). Larger Metal command buffers keep the previous step's KV arrays
   alive, so `slice_update` copies the cache instead of donating it (MoE
   Unlimited-OCR lost 15%). Host-side image work threads through
   `aimd_engine::parallel` (`for_row_bands`, ordered `map`), computing each
@@ -236,8 +236,11 @@ flowchart TD
   at most two pages ahead.
 - **Buffer memory**: mlx keeps freed buffers for reuse and reuses one only
   for a similar size, so shape-varying calls (PP-OCRv6 rec batch widths,
-  image crops) used to grow the cache to 25 GB. Two automatic layers bound
-  it; models must not depend on hand-placed `clear_cache` calls: the shim
+  image crops) used to grow the cache to 25 GB. Three automatic layers bound
+  memory; models must not depend on hand-placed `clear_cache` calls: the
+  30 MB `MLX_MAX_MB_PER_BUFFER` above also bounds the temporaries a pending
+  buffer holds (mlx's CUDA default held a whole vision tower: 11 GB per
+  Unlimited-OCR page, 4 GB at 30 MB, same speed), the shim
   caps the cache at 1 GB on every device (`set_cache_limit` at device
   selection), and `aimd-process` wraps every native model in `Released`,
   which clears the cache after each call so a long-lived MCP process keeps

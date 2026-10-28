@@ -151,19 +151,19 @@ constexpr size_t kCacheLimitBytes = size_t{1} << 30;
 const mlx::core::Device& selected_device() {
   static std::once_flag once;
   std::call_once(once, [] {
-#if defined(__APPLE__)
-    // mlx commits a Metal command buffer once its ops' inputs pass
-    // MLX_MAX_MB_PER_BUFFER (default 40-50 MB). A buffer holds its inputs
-    // until it completes, and a held KV cache cannot be donated, so
-    // `slice_update` copies the whole cache. Unlimited-OCR's MoE expert
-    // weights fill a buffer per op: with the next decode step submitted
-    // early, the previous step's buffers are still running and every layer
-    // copies its cache (223 vs 241 tok/s). At 30 MB, mlx's in-flight cap
-    // keeps the host far enough behind that the cache is free again
-    // (272 tok/s). The value only changes buffer boundaries, not the
-    // results. A user-set value wins. Must precede the Metal device.
+    // mlx commits a command buffer (Metal) / graph (CUDA) once its ops'
+    // inputs pass MLX_MAX_MB_PER_BUFFER, and a buffer keeps every
+    // temporary it touched alive until it completes. Metal: a held KV
+    // cache cannot be donated, so `slice_update` copies the whole cache;
+    // Unlimited-OCR's MoE expert weights fill a buffer per op, and with the
+    // next decode step submitted early every layer copied its cache (223 vs
+    // 241 tok/s); at 30 MB the in-flight cap keeps the host far enough
+    // behind that the cache is free again (272 tok/s). CUDA: mlx's larger
+    // default held a whole vision tower's temporaries, so one Unlimited-OCR
+    // page peaked at 11 GB (4 GB at 30 MB) and PaddleOCR-VL at 9.8 GB
+    // (2.5 GB), at the same speed. The value only changes buffer boundaries,
+    // not the results. A user-set value wins. Must precede the device.
     setenv("MLX_MAX_MB_PER_BUFFER", "30", 0);
-#endif
 #if defined(__linux__)
     auto has_include = [](const char* root) {
       return std::filesystem::exists(std::filesystem::path(root) / "include" / "cuda.h");
