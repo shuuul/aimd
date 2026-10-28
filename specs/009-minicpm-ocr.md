@@ -152,6 +152,8 @@ Not in scope:
 | 2026-10-28 | The n-gram guard scans generated tokens only (transformers `no_repeat_ngram_size` also sees the prompt ids). | A 100-gram from the prompt never recurs in practice; scanning the prompt costs time on every step. | WS-03 |
 | 2026-10-28 | The corpus gate needs no Python baseline for MiniCPM-OCR: the native pipeline scores similarity 1.0000 on every corpus document (stop 5/5) at bf16 and 4bit, so any reference baseline (<= 1.0) is met; `corpus_baseline_minicpm.py` is dropped. | A transformers CPU baseline of the full region pipeline takes hours for no extra signal. | WS-07 |
 | 2026-10-28 | The region goldens (`tests/golden/minicpm_regions/`) come from the SDK at commit `458718f80d7684230b8ff5a090a27ca1d895ee9a` via `scripts/export_minicpm_regions_reference.py`. They compare exact strings and FNV-1a hashes of crop pixels, with `emit_image_placeholder = true` (SDK behaviour); aimd runs with `false`. | Pins the SDK revision the port matches. | WS-05 |
+| 2026-10-28 | A page's VLM blocks run as region batches (`recognize_batch_rgb8`, `regions::recognize_page_batch`): blocks sorted by prompt length, up to 16 per batch while padding stays <= 1/3. Rows are left-padded with zero embeddings (exact: zeros stay zero through every layer and leave the DeltaNet state zero), masks hide padding, RoPE positions count each row's own columns. Without a drafter decode is one batched step per token; with one, DSpark drafts and verifies every row in one forward per round, rows accept different prefixes, caches keep the longest (`rollback_rows` masks each row's extra DeltaNet steps) and the shorter rows' rejected columns stay as masked holes. A batch of one runs the serial path. | Per-region decode is launch-bound (CUDA) or small-M gemm-bound (Metal, where B=2..8 steps cost 35-39 ms vs 14 ms at B=1); batched DSpark amortizes both. Batched kernels round differently, so near-ties may resolve differently from the serial path (as batched verify already does). | WS-09 |
+| 2026-10-28 | Vision stays per crop (no batched SigLIP). | Crops differ in shape; on Metal the tower is compute-bound (~270 ms/crop) and on CUDA it is ~24 ms/crop, so batching gains little for the padding and bookkeeping it needs. | WS-09 |
 
 ## Workstreams
 
@@ -167,6 +169,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-06 | `aimd-process` integration: aliases, precision, `OcrFamily`, `load_ocr`, HF download of both repos, help/MCP text | shuuul/Claude | Done | WS-05 | `models.rs` unit tests; fake-runtime routing tests |
 | WS-08 | DSpark speculative decoding: draft loader (`d2t`, reduced-vocab `lm_head`, Markov head), target feature capture, verify + walk + cache rollback, pipeline default | shuuul/Claude | Done | WS-03 | e2e fixtures: DSpark text == plain greedy text (bf16, 4-bit); acceptance logged |
 | WS-07 | Exporters (`scripts/export_minicpm_ocr_reference.py`, `export_pp_doclayout_v3_reference.py`), corpus baseline, gate runs (Metal + metacube), docs/AGENTS sync | shuuul/Claude | In progress | WS-02..WS-06 | corpus gate within bounds; docs reviewed |
+| WS-09 | Region batching: batched prefill/decode with per-row DeltaNet state, batched DSpark draft + verify, page-level batch in `MiniCpmDocument` | shuuul/Claude | Done | WS-05, WS-08 | e2e: batch text == serial text on the fixtures (plain + DSpark, bf16 + 4bit, Metal + CUDA); profile pages timed |
 
 ## Verification
 
@@ -264,6 +267,14 @@ Append entries rather than rewriting another worker's record.
 - Remaining: CUDA (metacube) checkpoint tier and corpus gate; spec closeout after that.
 - Blockers: none.
 - Next action: metacube run.
+
+### 2026-10-28 — shuuul/Claude — WS-09 region batching
+
+- Changed: `generate::{prefill_batch, greedy_batch, speculative_batch, batch_stream}`; `decoder`: batch-aware attention/DeltaNet/RoPE, `rope_rows`, array masks in `forward_capture`, `validity_mask`, `rollback_rows`, `select_rows`; `dspark::{draft_batch, DraftBatch}`; `KvCache::select_rows`; `pipeline::recognize_batch_rgb8` (clears the MLX buffer cache after each image's vision pass: without it, 20 differently shaped crops ran a 32 GB card out of memory); `regions::recognize_page_batch`; `MiniCpmDocument::recognize` uses them. The e2e test checks a 3-image batch against the serial texts.
+- Evidence (5 profile pages, 58 regions, warm pages 1-4): CUDA (metacube) DSpark 38.2 -> 20.7 s, greedy 42.1 -> 24.4 s; Metal (M2 Pro) DSpark 54.1 -> 48.2 s, greedy 95.4 -> 88.4 s. 57/58 regions identical to serial; the rest diverge at near-ties (a newline vs a space; a formula that continues past the serial EOS). `AIMD_E2E=1` e2e passes on Metal and CUDA; hermetic tier, fmt, clippy `-D warnings` pass.
+- Remaining: prefill on CUDA is still dominated by the stock-op `gated_delta` loop (WS-07 follow-up).
+- Blockers: none.
+- Next action: WS-07 closeout.
 
 ## Completion summary
 

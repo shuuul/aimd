@@ -384,6 +384,10 @@ Supported model families are intentionally narrow:
   DSpark speculative decoding (`openbmb/MiniCPM-OCR-1.0-DSpark`, vLLM `dspark`
   semantics, 15 proposals per round, greedy verification) loads with the
   recogniser and is on by default; `aimd-process` downloads all three repos.
+  A page's regions decode as batches (`recognize_batch_rgb8`: up to 16 rows,
+  left-padded with zero embeddings, padding <= 1/3; DSpark drafts and verifies
+  every row per round, rows keep their own accepted prefix). Vision stays per
+  crop, and the MLX buffer cache is cleared after each crop's vision pass.
 - **PP-OCRv6**: `pp-ocrv6` (`pp-ocrv6-medium`), medium tier only. Model key
   `PaddlePaddle/PP-OCRv6_medium` names the `_det_safetensors` / `_rec_safetensors`
   repo pair. The HF rec checkpoint's `head.encoder.conv_block.{0,1}` are Paddle's

@@ -16,7 +16,7 @@
 //!   4, 3-row conv state; single-token steps use an f32 multiply-sum),
 //!   `silu`, q/k `l2norm` and the query's `128^-0.5` scale in f32, the
 //!   gate `g` in f32, the gated delta recurrence on an f32
-//!   `[1, 16, 128, 128]` state ([`MlxArray::gated_delta`]),
+//!   `[B, 16, 128, 128]` state ([`MlxArray::gated_delta`]),
 //!   `rms_norm(y, w) * silu(z)` in f32, `out_proj`.
 //!
 //! Quantization (`Some(4 | 6 | 8)`) touches only the full-attention
@@ -83,14 +83,29 @@ struct DecoderLayer {
 pub(crate) enum LayerCache {
     Kv(KvCache),
     Delta {
-        /// Last `K - 1` conv inputs `[1, K - 1, C]`.
+        /// Last `K - 1` conv inputs `[B, K - 1, C]`.
         conv: Option<MlxArray>,
-        /// Recurrent state `[1, Hv, Dv, Dk]` f32.
+        /// Recurrent state `[B, Hv, Dv, Dk]` f32.
         state: Option<MlxArray>,
     },
 }
 
 impl LayerCache {
+    /// Keeps batch rows `rows` (u32 indices).
+    pub(crate) fn select_rows(&mut self, rows: &MlxArray) -> Result<(), MlxError> {
+        match self {
+            LayerCache::Kv(c) => c.select_rows(rows),
+            LayerCache::Delta { conv, state } => {
+                for a in [conv, state] {
+                    if let Some(x) = a.take() {
+                        *a = Some(x.take(rows, 0)?);
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Arrays to evaluate after a prefill chunk.
     pub(crate) fn state(&self) -> Result<Vec<MlxArray>, MlxError> {
         match self {
@@ -104,8 +119,9 @@ impl LayerCache {
     }
 }
 
-/// Partial-rotary tables, bf16 `[1, 1, L, rotary_dim]`: `cos = [c, c]`,
-/// `sin_signed = [-s, s]` (transformers' `cos.to(x.dtype)`).
+/// Partial-rotary tables, bf16 `[B, 1, L, rotary_dim]` (`B = 1` for a
+/// shared range): `cos = [c, c]`, `sin_signed = [-s, s]` (transformers'
+/// `cos.to(x.dtype)`).
 pub struct Rope {
     cos: MlxArray,
     sin_signed: MlxArray,
@@ -115,14 +131,38 @@ impl Rope {
     /// Position `i` (one decode step) of a sequential range.
     pub fn row(&self, i: usize) -> Result<Self, MlxError> {
         let row = |t: &MlxArray| {
-            let r = t.dim(3)?;
-            t.slice(&[0, 0, i, 0], &[1, 1, i + 1, r], &[1, 1, 1, 1])
+            let s = t.shape()?;
+            t.slice(&[0, 0, i, 0], &[s[0], 1, i + 1, s[3]], &[1, 1, 1, 1])
         };
         Ok(Self {
             cos: row(&self.cos)?,
             sin_signed: row(&self.sin_signed)?,
         })
     }
+
+    /// Keeps batch rows `rows` (u32 indices) of per-row tables.
+    pub(crate) fn select_rows(&self, rows: &MlxArray) -> Result<Self, MlxError> {
+        Ok(Self {
+            cos: self.cos.take(rows, 0)?,
+            sin_signed: self.sin_signed.take(rows, 0)?,
+        })
+    }
+}
+
+/// Additive bf16 mask `[B, 1, 1, L + extra]` from per-row column validity
+/// (`valid[b]` holds `L` flags); the `extra` trailing columns are valid.
+pub(crate) fn validity_mask(valid: &[Vec<bool>], extra: usize) -> Result<MlxArray, MlxError> {
+    let l = valid.first().map_or(0, Vec::len);
+    let mut bits = Vec::with_capacity(valid.len() * (l + extra));
+    for row in valid {
+        debug_assert_eq!(row.len(), l);
+        bits.extend(row.iter().map(|&v| !v));
+        bits.extend(std::iter::repeat_n(false, extra));
+    }
+    MlxArray::from_bool(&[valid.len(), 1, 1, l + extra], &bits)?.where_(
+        &MlxArray::scalar_bf16(f32::NEG_INFINITY)?,
+        &MlxArray::scalar_bf16(0.0)?,
+    )
 }
 
 /// Captured hidden states (`stage`, `[1, L, hidden]`) for parity tests.
@@ -132,7 +172,7 @@ pub type Taps = Vec<(String, MlxArray)>;
 /// verify block, enough to rebuild its caches for any accepted prefix.
 pub(crate) struct DeltaRecord {
     layer: usize,
-    /// Conv window `[1, K - 1 + L, C]` (previous state + the block).
+    /// Conv window `[B, K - 1 + L, C]` (previous state + the block).
     conv_in: MlxArray,
     /// Recurrent state before the block.
     state: MlxArray,
@@ -346,15 +386,25 @@ impl MiniCpmDecoder {
 
     /// Rotary positions `start..start + len`.
     pub fn rope(&self, start: usize, len: usize) -> Result<Rope, DecoderError> {
-        if len == 0 {
+        self.rope_rows(&[start as i64], len)
+    }
+
+    /// Per-row rotary positions `starts[b]..starts[b] + len` (`[B, 1, len,
+    /// r]`); negative positions belong to left padding.
+    pub(crate) fn rope_rows(&self, starts: &[i64], len: usize) -> Result<Rope, DecoderError> {
+        if len == 0 || starts.is_empty() {
             return Err(DecoderError::Layout("empty rope range".into()));
         }
         // freqs = positions.float() * inv_freq (f32), accurate cos/sin,
         // then cast to bf16 like transformers' rotary embedding.
         let r = self.cfg.rotary_dim();
-        let pos: Vec<f32> = (start..start + len).map(|p| p as f32).collect();
-        let freqs =
-            MlxArray::from_f32(&[len, 1], &pos)?.multiply(&self.inv_freq.reshape(&[1, r / 2])?)?;
+        let b = starts.len();
+        let pos: Vec<f32> = starts
+            .iter()
+            .flat_map(|&s| (s..s + len as i64).map(|p| p as f32))
+            .collect();
+        let freqs = MlxArray::from_f32(&[b * len, 1], &pos)?
+            .multiply(&self.inv_freq.reshape(&[1, r / 2])?)?;
         let table = |half: MlxArray, signed: bool| -> Result<MlxArray, MlxError> {
             let half = half.astype(MlxDtype::Bf16)?;
             let first = if signed {
@@ -362,7 +412,7 @@ impl MiniCpmDecoder {
             } else {
                 half.try_clone()?
             };
-            MlxArray::concatenate(&[&first, &half], 1)?.reshape(&[1, 1, len, r])
+            MlxArray::concatenate(&[&first, &half], 1)?.reshape(&[b, 1, len, r])
         };
         Ok(Rope {
             cos: table(freqs.unary(UnaryOp::Cos)?, false)?,
@@ -370,15 +420,15 @@ impl MiniCpmDecoder {
         })
     }
 
-    /// Rotates the first `rotary_dim` dims of `x` (`[1, H, L, head_dim]`):
+    /// Rotates the first `rotary_dim` dims of `x` (`[B, H, L, head_dim]`):
     /// `x * cos + rotate_half(x) * sin` with every product and the sum
     /// rounded to bf16, as transformers' `apply_rotary_pos_emb`.
     fn apply_rope(&self, x: &MlxArray, rope: &Rope) -> Result<MlxArray, MlxError> {
         let s = x.shape()?;
-        let (h, l, d) = (s[1], s[2], s[3]);
+        let (b, h, l, d) = (s[0], s[1], s[2], s[3]);
         let r = self.cfg.rotary_dim();
-        let rot = x.slice(&[0, 0, 0, 0], &[1, h, l, r], &[1, 1, 1, 1])?;
-        let pass = x.slice(&[0, 0, 0, r], &[1, h, l, d], &[1, 1, 1, 1])?;
+        let rot = x.slice(&[0, 0, 0, 0], &[b, h, l, r], &[1, 1, 1, 1])?;
+        let pass = x.slice(&[0, 0, 0, r], &[b, h, l, d], &[1, 1, 1, 1])?;
         let rot = rot.rope_half_split(&rope.cos, &rope.sin_signed)?;
         MlxArray::concatenate(&[&rot, &pass], 3)
     }
@@ -388,46 +438,49 @@ impl MiniCpmDecoder {
         a: &FullAttention,
         x: &MlxArray,
         rope: &Rope,
+        mask: Option<&MlxArray>,
         cache: &mut KvCache,
     ) -> Result<MlxArray, MlxError> {
-        let l = x.dim(1)?;
+        let (b, l) = (x.dim(0)?, x.dim(1)?);
         let (nq, nkv, hd) = (
             self.cfg.num_attention_heads,
             self.cfg.num_key_value_heads,
             self.cfg.head_dim,
         );
         let eps = self.cfg.rms_norm_eps;
-        let qg = a.q.forward(x)?.reshape(&[1, l, nq, 2 * hd])?;
-        let q = qg.slice(&[0, 0, 0, 0], &[1, l, nq, hd], &[1, 1, 1, 1])?;
+        let qg = a.q.forward(x)?.reshape(&[b, l, nq, 2 * hd])?;
+        let q = qg.slice(&[0, 0, 0, 0], &[b, l, nq, hd], &[1, 1, 1, 1])?;
         let gate = qg
-            .slice(&[0, 0, 0, hd], &[1, l, nq, 2 * hd], &[1, 1, 1, 1])?
-            .reshape(&[1, l, nq * hd])?;
+            .slice(&[0, 0, 0, hd], &[b, l, nq, 2 * hd], &[1, 1, 1, 1])?
+            .reshape(&[b, l, nq * hd])?;
         let q = q
             .rms_norm(Some(&a.q_norm), eps)?
             .astype(MlxDtype::Bf16)?
             .transpose(&[0, 2, 1, 3])?;
         let k =
             a.k.forward(x)?
-                .reshape(&[1, l, nkv, hd])?
+                .reshape(&[b, l, nkv, hd])?
                 .rms_norm(Some(&a.k_norm), eps)?
                 .astype(MlxDtype::Bf16)?
                 .transpose(&[0, 2, 1, 3])?;
         let v =
             a.v.forward(x)?
-                .reshape(&[1, l, nkv, hd])?
+                .reshape(&[b, l, nkv, hd])?
                 .transpose(&[0, 2, 1, 3])?;
         let q = self.apply_rope(&q, rope)?;
         let k = self.apply_rope(&k, rope)?;
         let (k, v) = cache.update_and_fetch(&k, &v)?;
         let scale = (hd as f64).powf(-0.5) as f32;
-        let o = if l > 1 {
+        let o = if let Some(m) = mask {
+            q.scaled_dot_product_attention(&k, &v, scale, SdpaMask::Array(m))?
+        } else if l > 1 {
             q.scaled_dot_product_attention(&k, &v, scale, SdpaMask::Causal)?
         } else if self.sdpa_decode {
             q.sdpa_decode(&k, &v, scale)?
         } else {
             q.scaled_dot_product_attention(&k, &v, scale, SdpaMask::None)?
         };
-        let o = o.transpose(&[0, 2, 1, 3])?.reshape(&[1, l, nq * hd])?;
+        let o = o.transpose(&[0, 2, 1, 3])?.reshape(&[b, l, nq * hd])?;
         a.o.forward(&o.multiply(&gate.sigmoid()?)?)
     }
 
@@ -440,30 +493,30 @@ impl MiniCpmDecoder {
         record: Option<(usize, &mut Vec<DeltaRecord>)>,
     ) -> Result<MlxArray, MlxError> {
         let t = &self.cfg;
-        let l = x.dim(1)?;
+        let (bs, l) = (x.dim(0)?, x.dim(1)?);
         let (hk, dk) = (t.linear_num_key_heads, t.linear_key_head_dim);
         let (hv, dv) = (t.linear_num_value_heads, t.linear_value_head_dim);
         let (kd, vd, kk) = (hk * dk, hv * dv, t.linear_conv_kernel_dim);
         let c = 2 * kd + vd;
         let mixed = n.in_qkv.forward(x)?;
-        let z = n.in_z.forward(x)?.reshape(&[1, l, hv, dv])?;
+        let z = n.in_z.forward(x)?.reshape(&[bs, l, hv, dv])?;
         let b = n.in_b.forward(x)?;
         let a = n.in_a.forward(x)?;
 
         let prev = match conv_state.take() {
             Some(s) => s,
-            None => MlxArray::zeros(&[1, kk - 1, c], mixed.dtype()?)?,
+            None => MlxArray::zeros(&[bs, kk - 1, c], mixed.dtype()?)?,
         };
         let conv_in = MlxArray::concatenate(&[&prev, &mixed], 1)?;
         let total = l + kk - 1;
-        *conv_state = Some(conv_in.slice(&[0, l, 0], &[1, total, c], &[1, 1, 1])?);
+        *conv_state = Some(conv_in.slice(&[0, l, 0], &[bs, total, c], &[1, 1, 1])?);
         let conv_out = if l == 1 {
             conv_in
                 .astype(MlxDtype::F32)?
                 .multiply(&n.conv_w_step)?
                 .sum_axis(1, false)?
                 .astype(conv_in.dtype()?)?
-                .reshape(&[1, 1, c])?
+                .reshape(&[bs, 1, c])?
         } else {
             conv_in.conv1d(&n.conv_w, 1, 0, 1, c)?
         };
@@ -472,8 +525,8 @@ impl MiniCpmDecoder {
 
         let part = |lo: usize, hi: usize, heads: usize, dim: usize| {
             conv_out
-                .slice(&[0, 0, lo], &[1, l, hi], &[1, 1, 1])?
-                .reshape(&[1, l, heads, dim])
+                .slice(&[0, 0, lo], &[bs, l, hi], &[1, 1, 1])?
+                .reshape(&[bs, l, heads, dim])
         };
         // transformers' `l2norm(x, eps=1e-6)` in f32 (the epsilon on the
         // sum of squares, as an RMSNorm whose epsilon is divided by the head
@@ -496,7 +549,7 @@ impl MiniCpmDecoder {
             .gated_delta_gates(&b, &n.a_log, &n.dt_bias)?;
         let state = match rec_state.take() {
             Some(s) => s,
-            None => MlxArray::zeros(&[1, hv, dv, dk], MlxDtype::F32)?,
+            None => MlxArray::zeros(&[bs, hv, dv, dk], MlxDtype::F32)?,
         };
         let (y, new_state) = q.gated_delta(&k, &v, &g, &beta, &state)?;
         let y = y.astype(MlxDtype::Bf16)?;
@@ -523,13 +576,13 @@ impl MiniCpmDecoder {
             .silu()?
             .multiply(&normed)?
             .astype(dtype)?
-            .reshape(&[1, l, vd])?;
+            .reshape(&[bs, l, vd])?;
         n.out.forward(&out)
     }
 
-    /// Runs the blocks over `h` (`[1, L, hidden]`) at positions
-    /// `cache offset..`, updating `caches`; returns the final-norm hidden
-    /// state. With `taps`, records `layer_{i}` and `final_norm`.
+    /// Runs the blocks over `h` (`[B, L, hidden]`) at the `rope` positions,
+    /// updating `caches`; returns the final-norm hidden state. With `taps`,
+    /// records `layer_{i}` and `final_norm`.
     pub(crate) fn forward(
         &self,
         h: &MlxArray,
@@ -537,20 +590,23 @@ impl MiniCpmDecoder {
         caches: &mut [LayerCache],
         taps: Option<&mut Taps>,
     ) -> Result<MlxArray, DecoderError> {
-        self.forward_capture(h, rope, caches, taps, None)
+        self.forward_capture(h, rope, None, caches, taps, None)
     }
 
-    /// [`Self::forward`] that also fills `capture`.
+    /// [`Self::forward`] that also fills `capture`. `mask` (additive,
+    /// broadcast against `[B, heads, L, kv]`) replaces the full-attention
+    /// causal / unmasked modes, for left-padded batches.
     pub(crate) fn forward_capture(
         &self,
         h: &MlxArray,
         rope: &Rope,
+        mask: Option<&MlxArray>,
         caches: &mut [LayerCache],
         mut taps: Option<&mut Taps>,
         mut capture: Option<&mut Capture<'_>>,
     ) -> Result<MlxArray, DecoderError> {
         let s = h.shape()?;
-        if s.len() != 3 || s[0] != 1 || s[2] != self.cfg.hidden_size {
+        if s.len() != 3 || s[2] != self.cfg.hidden_size {
             return Err(DecoderError::Layout(format!("hidden {s:?}")));
         }
         if caches.len() != self.layers.len() {
@@ -563,7 +619,9 @@ impl MiniCpmDecoder {
                 .rms_norm(Some(&layer.in_norm), eps)?
                 .astype(MlxDtype::Bf16)?;
             let r = match (&layer.mixer, cache) {
-                (Mixer::Full(a), LayerCache::Kv(c)) => self.full_attention(a, &xn, rope, c)?,
+                (Mixer::Full(a), LayerCache::Kv(c)) => {
+                    self.full_attention(a, &xn, rope, mask, c)?
+                }
                 (Mixer::Linear(n), LayerCache::Delta { conv, state }) => {
                     let record = capture
                         .as_deref_mut()
@@ -645,10 +703,82 @@ impl MiniCpmDecoder {
                 &r.state,
             )?;
             *state = Some(st);
+            let s = r.conv_in.shape()?;
+            *conv = Some(r.conv_in.slice(
+                &[0, keep, 0],
+                &[s[0], keep + kk - 1, s[2]],
+                &[1, 1, 1],
+            )?);
+        }
+        Ok(())
+    }
+
+    /// Batched [`Self::rollback`]: row `b` keeps the first `kept[b]` of the
+    /// `total` positions. KV caches keep the first `max(kept)` (a shorter
+    /// row's extra columns become holes its caller masks); each DeltaNet
+    /// layer replays its recurrence over that prefix with every step past a
+    /// row's own `kept` neutral (`g = 1`, `beta = 0`, which leave the state
+    /// unchanged) and takes each row's conv window at its own end.
+    pub(crate) fn rollback_rows(
+        &self,
+        caches: &mut [LayerCache],
+        records: Vec<DeltaRecord>,
+        kept: &[usize],
+        total: usize,
+    ) -> Result<(), DecoderError> {
+        let keep = kept.iter().copied().max().unwrap_or(0);
+        if kept.contains(&0) || keep > total {
+            return Err(DecoderError::Layout(format!(
+                "rollback keep {kept:?} of {total}"
+            )));
+        }
+        if kept.iter().all(|&k| k == keep) {
+            return self.rollback(caches, records, keep, total);
+        }
+        for cache in caches.iter_mut() {
+            if let LayerCache::Kv(c) = cache {
+                c.trim(total - keep);
+            }
+        }
+        let b = kept.len();
+        let kk = self.cfg.linear_conv_kernel_dim;
+        let live: Vec<bool> = kept
+            .iter()
+            .flat_map(|&k| (0..keep).map(move |t| t < k))
+            .collect();
+        let live = MlxArray::from_bool(&[b, keep, 1], &live)?;
+        let ends: Vec<u32> = kept
+            .iter()
+            .flat_map(|&k| (0..kk - 1).map(move |j| (k + j) as u32))
+            .collect();
+        let ends = MlxArray::from_u32(&[b, kk - 1, 1], &ends)?;
+        for r in records {
+            let LayerCache::Delta { conv, state } = &mut caches[r.layer] else {
+                return Err(DecoderError::Layout(format!(
+                    "record for layer {}",
+                    r.layer
+                )));
+            };
+            let prefix = |x: &MlxArray| -> Result<MlxArray, MlxError> {
+                let s = x.shape()?;
+                let mut stop = s.clone();
+                stop[1] = keep;
+                x.slice(&vec![0; s.len()], &stop, &vec![1; s.len()])
+            };
+            let scalar = |v: f32, like: &MlxArray| -> Result<MlxArray, MlxError> {
+                MlxArray::scalar_f32(v)?.astype(like.dtype()?)
+            };
+            let g = prefix(&r.g)?;
+            let beta = prefix(&r.beta)?;
+            let g = live.where_(&g, &scalar(1.0, &g)?)?;
+            let beta = live.where_(&beta, &scalar(0.0, &beta)?)?;
+            let (_, st) =
+                prefix(&r.q)?.gated_delta(&prefix(&r.k)?, &prefix(&r.v)?, &g, &beta, &r.state)?;
+            *state = Some(st);
             let c = r.conv_in.dim(2)?;
             *conv = Some(
                 r.conv_in
-                    .slice(&[0, keep, 0], &[1, keep + kk - 1, c], &[1, 1, 1])?,
+                    .take_along_axis(&ends.broadcast_to(&[b, kk - 1, c])?, 1)?,
             );
         }
         Ok(())

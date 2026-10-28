@@ -9,7 +9,7 @@ use aimd_mlx::MlxDtype;
 
 use super::config::PreprocessorConfig;
 use super::generate::greedy_stream;
-use super::pipeline::{OcrRequest, TEXT_TASK};
+use super::pipeline::{BatchImage, OcrRequest, TEXT_TASK};
 use super::preprocess::{
     build_prompt_text, crop_tokens, crops_rgb8, image_placeholder, patch_rows, pixel_lut,
     position_boundaries, position_buckets, slice_plan,
@@ -372,7 +372,7 @@ fn minicpm_ocr_4bit_quantizes_attention_and_mlp_only() {
 }
 
 /// Tier 3: full greedy generation equals transformers (tokens and text) for
-/// both fixtures in bf16 and 4-bit.
+/// both fixtures in bf16 and 4-bit, serially and as one region batch.
 #[test]
 fn minicpm_ocr_e2e_greedy_matches_transformers() {
     if !e2e_enabled() {
@@ -385,6 +385,7 @@ fn minicpm_ocr_e2e_greedy_matches_transformers() {
             return;
         };
         let prec = prec_key(bits);
+        let mut texts: Vec<String> = Vec::new();
         for fx in ["small_text", "page_text"] {
             let g = &m[prec]["fixtures"][fx]["greedy"];
             let mut want = u32s(&g["tokens"]);
@@ -420,6 +421,7 @@ fn minicpm_ocr_e2e_greedy_matches_transformers() {
                 g["markdown"].as_str().unwrap(),
                 "{prec} {fx} text"
             );
+            texts.push(out.text.clone());
 
             // DSpark: the same greedy text, faster.
             if !p.has_drafter() {
@@ -441,6 +443,31 @@ fn minicpm_ocr_e2e_greedy_matches_transformers() {
                 spec.tokens.saturating_sub(1) as f64 / acc.rounds.max(1) as f64,
             );
             assert_eq!(spec.text, out.text, "{prec} {fx} DSpark text");
+        }
+
+        // Region batching: left-padded rows, rows of equal length, and
+        // (with a drafter) batched DSpark verification give the same text.
+        let images: Vec<_> = ["small_text", "page_text", "small_text"]
+            .map(fixture_image)
+            .into_iter()
+            .collect();
+        let want = [&texts[0], &texts[1], &texts[0]];
+        for speculative in [false, true] {
+            let req = OcrRequest {
+                speculative,
+                ..OcrRequest::default()
+            };
+            let batch: Vec<BatchImage<'_>> = images
+                .iter()
+                .map(|(rgb, w, h)| (rgb.as_slice(), *w, *h, req))
+                .collect();
+            let got = p.recognize_batch_rgb8(&batch).unwrap();
+            for (k, ((out, _), want)) in got.iter().zip(want).enumerate() {
+                assert_eq!(
+                    &out.text, want,
+                    "{prec} batch[{k}] speculative={speculative}"
+                );
+            }
         }
     }
 }

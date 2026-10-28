@@ -589,3 +589,31 @@ pub fn recognize_page<E>(
     }
     Ok(finish_page(&jobs, &raw, options))
 }
+
+/// A block that reaches the VLM: its job and recipe.
+pub type VlmBlock<'a> = (&'a RegionJob, &'a ElementRecipe);
+
+/// [`recognize_page`] with one recogniser call for the whole page:
+/// `recognise` gets every block that reaches the VLM (reading order) and
+/// returns their texts in the same order, so it can batch them.
+pub fn recognize_page_batch<E, F>(
+    layout: &[LayoutRegion],
+    page: &RgbImage,
+    options: &RegionOptions,
+    recognise: F,
+) -> Result<PageOutput, E>
+where
+    F: FnOnce(&[VlmBlock<'_>]) -> Result<Vec<String>, E>,
+{
+    let jobs = plan_page(layout, page);
+    let todo: Vec<VlmBlock<'_>> = jobs
+        .iter()
+        .filter_map(|j| j.recipe.as_ref().map(|r| (j, r)))
+        .collect();
+    let mut texts = recognise(&todo)?.into_iter();
+    let raw: Vec<Option<String>> = jobs
+        .iter()
+        .map(|j| j.recipe.as_ref().and_then(|_| texts.next()))
+        .collect();
+    Ok(finish_page(&jobs, &raw, options))
+}

@@ -30,7 +30,7 @@ use aimd_mlx::{MlxArray, MlxDtype, MlxError, SdpaMask};
 use aimd_weights::{WeightsError, load_checkpoint};
 use serde::Deserialize;
 
-use super::decoder::MiniCpmDecoder;
+use super::decoder::{MiniCpmDecoder, validity_mask};
 use crate::models::kv_cache::KvCache;
 use crate::models::paddleocr_vl::weights::{Emb, Lin, Loader};
 use crate::models::unlimited_ocr::mlx_weights::LoadError;
@@ -271,9 +271,9 @@ impl DSparkDrafter {
     }
 
     fn heads(&self, x: &MlxArray, lin: &Lin, heads: usize) -> Result<MlxArray, MlxError> {
-        let l = x.dim(1)?;
+        let (b, l) = (x.dim(0)?, x.dim(1)?);
         lin.forward(x)?
-            .reshape(&[1, l, heads, self.cfg.head_dim])?
+            .reshape(&[b, l, heads, self.cfg.head_dim])?
             .transpose(&[0, 2, 1, 3])
     }
 
@@ -284,6 +284,113 @@ impl DSparkDrafter {
             1.0,
             offset as i32,
         )
+    }
+
+    /// [`Self::rope`] with row `b` of `x` (`[B, H, L, D]`) starting at
+    /// `offsets[b]`.
+    fn rope_rows(&self, x: &MlxArray, offsets: &[usize]) -> Result<MlxArray, MlxError> {
+        if offsets.iter().all(|&o| o == offsets[0]) {
+            return self.rope(x, offsets[0]);
+        }
+        let s = x.shape()?;
+        let rows: Vec<MlxArray> = offsets
+            .iter()
+            .enumerate()
+            .map(|(b, &o)| {
+                let row = x.slice(&[b, 0, 0, 0], &[b + 1, s[1], s[2], s[3]], &[1, 1, 1, 1])?;
+                self.rope(&row, o)
+            })
+            .collect::<Result<_, _>>()?;
+        let refs: Vec<&MlxArray> = rows.iter().collect();
+        MlxArray::concatenate(&refs, 0)
+    }
+
+    /// Batched [`Self::draft`]: row `b` drafts after `anchors[b]`, and the
+    /// first `fresh[b]` columns of its `context` row (`[B, S, features]`)
+    /// are new context (the rest are holes, masked from then on).
+    pub(crate) fn draft_batch(
+        &self,
+        target: &MiniCpmDecoder,
+        anchors: &[u32],
+        context: &MlxArray,
+        fresh: &[usize],
+        state: &mut DraftBatch,
+    ) -> Result<MlxArray, MlxError> {
+        let cfg = &self.cfg;
+        let (nq, nkv, hd) = (
+            cfg.num_attention_heads,
+            cfg.num_key_value_heads,
+            cfg.head_dim,
+        );
+        let eps = cfg.rms_norm_eps;
+        let n = cfg.block_size;
+        let b = anchors.len();
+        let s = context.dim(1)?;
+        let starts = state.lens.clone();
+        for ((len, valid), &f) in state.lens.iter_mut().zip(&mut state.valid).zip(fresh) {
+            *len += f;
+            valid.extend((0..s).map(|c| c < f));
+        }
+        let mask = validity_mask(&state.valid, n)?;
+
+        let h_ctx = self
+            .fc
+            .forward(context)?
+            .rms_norm(Some(&self.hidden_norm), eps)?;
+        let mut ids = vec![cfg.dflash_config.mask_token_id; b * n];
+        for (i, &a) in anchors.iter().enumerate() {
+            ids[i * n] = a;
+        }
+        let mut x = target.embed_ids(&MlxArray::from_u32(&[b, n], &ids)?)?;
+        let scale = (hd as f64).powf(-0.5) as f32;
+        for (layer, c) in self.layers.iter().zip(state.caches.iter_mut()) {
+            let ck = self
+                .heads(&h_ctx, &layer.k, nkv)?
+                .rms_norm(Some(&layer.k_norm), eps)?;
+            let cv = self.heads(&h_ctx, &layer.v, nkv)?;
+            let (keys, values) = c.update_and_fetch(&self.rope_rows(&ck, &starts)?, &cv)?;
+
+            let xn = x.rms_norm(Some(&layer.in_norm), eps)?;
+            let q = self
+                .heads(&xn, &layer.q, nq)?
+                .rms_norm(Some(&layer.q_norm), eps)?;
+            let bk = self
+                .heads(&xn, &layer.k, nkv)?
+                .rms_norm(Some(&layer.k_norm), eps)?;
+            let bv = self.heads(&xn, &layer.v, nkv)?;
+            let q = self.rope_rows(&q, &state.lens)?;
+            let keys = MlxArray::concatenate(&[&keys, &self.rope_rows(&bk, &state.lens)?], 2)?;
+            let values = MlxArray::concatenate(&[&values, &bv], 2)?;
+            let o = q
+                .scaled_dot_product_attention(&keys, &values, scale, SdpaMask::Array(&mask))?
+                .transpose(&[0, 2, 1, 3])?
+                .reshape(&[b, n, nq * hd])?;
+            let h = x.add(&layer.o.forward(&o)?)?;
+            let hn = h.rms_norm(Some(&layer.post_norm), eps)?;
+            x = h.add(
+                &layer
+                    .down
+                    .forward(&layer.gate.forward(&hn)?.swiglu(&layer.up.forward(&hn)?)?)?,
+            )?;
+        }
+        let base = self.lm_head.forward(&x.rms_norm(Some(&self.norm), eps)?)?;
+        let dv = cfg.draft_vocab_size;
+        let base = base.reshape(&[b, n, dv])?;
+
+        let mut prev = MlxArray::from_u32(&[b], anchors)?;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let bias = self.markov_w2.forward(&self.markov_w1.embed(&prev)?)?;
+            let logits = base
+                .slice(&[0, i, 0], &[b, i + 1, dv], &[1, 1, 1])?
+                .reshape(&[b, dv])?
+                .add(&bias)?;
+            let draft = logits.argmax(-1, false)?;
+            prev = self.d2t.take(&draft, 0)?;
+            out.push(prev.reshape(&[b, 1])?);
+        }
+        let refs: Vec<&MlxArray> = out.iter().collect();
+        MlxArray::concatenate(&refs, 1)?.astype(MlxDtype::U32)
     }
 
     /// Drafts `block_size` target ids after `anchor`. `context` holds the
@@ -362,6 +469,38 @@ impl DSparkDrafter {
         }
         let refs: Vec<&MlxArray> = out.iter().collect();
         MlxArray::concatenate(&refs, 0)?.astype(MlxDtype::U32)
+    }
+}
+
+/// Drafter state of a batch: the context caches (one row per sequence)
+/// and, per row, the context positions consumed and each cache column's
+/// validity (holes: rejected draft positions).
+pub(crate) struct DraftBatch {
+    pub(crate) caches: Vec<KvCache>,
+    pub(crate) lens: Vec<usize>,
+    pub(crate) valid: Vec<Vec<bool>>,
+}
+
+impl DraftBatch {
+    pub(crate) fn new(drafter: &DSparkDrafter, rows: usize) -> Self {
+        Self {
+            caches: drafter.make_cache(),
+            lens: vec![0; rows],
+            valid: vec![Vec::new(); rows],
+        }
+    }
+
+    /// Keeps rows `keep` (batch indices, ascending; `idx` the same as u32).
+    pub(crate) fn select_rows(&mut self, keep: &[usize], idx: &MlxArray) -> Result<(), MlxError> {
+        for c in &mut self.caches {
+            c.select_rows(idx)?;
+        }
+        self.lens = keep.iter().map(|&j| self.lens[j]).collect();
+        self.valid = keep
+            .iter()
+            .map(|&j| std::mem::take(&mut self.valid[j]))
+            .collect();
+        Ok(())
     }
 }
 

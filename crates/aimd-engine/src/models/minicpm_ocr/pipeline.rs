@@ -22,8 +22,8 @@ use super::config::{
 use super::decoder::{DecoderError, MiniCpmDecoder};
 use super::dspark::{DSparkDrafter, DSparkError};
 use super::generate::{
-    DEFAULT_MAX_TOKENS, FinishReason, GenerateError, GreedyStream, NO_REPEAT_NGRAM_SIZE, SpecStats,
-    greedy_stream, speculative_stream,
+    BatchPrompt, DEFAULT_MAX_TOKENS, FinishReason, GenerateError, GreedyStream,
+    NO_REPEAT_NGRAM_SIZE, SpecStats, batch_stream, greedy_stream, speculative_stream,
 };
 use super::preprocess::{
     Crop, IMAGE_PAD, build_prompt_text, crop_tokens, crops_rgb8, image_placeholder, patch_rows,
@@ -37,6 +37,17 @@ use crate::tokenizer::{Tokenizer, TokenizerError};
 
 /// The SDK's plain text-recognition prompt.
 pub const TEXT_TASK: &str = "Text Recognition:";
+
+/// Most prompts one [`MiniCpmOcrPipeline::recognize_batch_rgb8`] decode
+/// batch holds.
+pub const MAX_BATCH: usize = 16;
+
+/// Largest share of a batch's prompt columns that may be left padding.
+const MAX_PAD_FRACTION: f64 = 1.0 / 3.0;
+
+/// One image of a [`MiniCpmOcrPipeline::recognize_batch_rgb8`] call: RGB8
+/// HWC pixels, width, height and its request.
+pub type BatchImage<'a> = (&'a [u8], usize, usize, OcrRequest<'a>);
 
 /// Pipeline failures.
 #[derive(Debug, thiserror::Error)]
@@ -292,6 +303,99 @@ impl MiniCpmOcrPipeline {
             },
             stats,
         ))
+    }
+
+    /// Recognizes several images, decoding prompts of similar length
+    /// together ([`batch_stream`]): sorted by prompt length, a batch grows
+    /// up to [`MAX_BATCH`] rows while at most a third of its prompt columns
+    /// are padding; requests with different guard / speculative flags never
+    /// share a batch. With a drafter, a batch's last unfinished row
+    /// continues with DSpark. Outputs keep the input order; `vision` is
+    /// each image's own preprocessing and vision time, `prefill` / `decode`
+    /// its batch's prefill and its own decode span.
+    pub fn recognize_batch_rgb8(
+        &self,
+        images: &[BatchImage<'_>],
+    ) -> Result<Vec<(OcrOutput, OcrStats)>, PipelineError> {
+        let mut prepared = Vec::with_capacity(images.len());
+        for &(rgb, w, h, request) in images {
+            let t = Instant::now();
+            let prompt = self.prepare(rgb, w, h, request.task, request.max_slices)?;
+            let features = self.crop_features(&prompt)?;
+            let embeds = self.splice(&prompt, &features)?;
+            embeds.eval()?;
+            // Crop shapes differ per image; drop their buffers before the next.
+            drop(features);
+            aimd_mlx::clear_cache()?;
+            prepared.push((prompt, embeds, t.elapsed()));
+        }
+        let flags = |i: usize| {
+            let r = &images[i].3;
+            (r.no_repeat_ngram, r.speculative && self.drafter.is_some())
+        };
+        let mut order: Vec<usize> = (0..images.len()).collect();
+        order.sort_by_key(|&i| (flags(i), prepared[i].0.ids.len()));
+        let mut out: Vec<Option<(OcrOutput, OcrStats)>> = vec![None; images.len()];
+        let mut at = 0;
+        while at < order.len() {
+            let mut end = at + 1;
+            let mut sum = prepared[order[at]].0.ids.len();
+            while end < order.len() && end - at < MAX_BATCH && flags(order[end]) == flags(order[at])
+            {
+                let len = prepared[order[end]].0.ids.len();
+                let cols = (len * (end - at + 1)) as f64;
+                if (cols - (sum + len) as f64) > MAX_PAD_FRACTION * cols {
+                    break;
+                }
+                sum += len;
+                end += 1;
+            }
+            let group = &order[at..end];
+            let (ngram, spec) = flags(group[0]);
+            let prompts: Vec<BatchPrompt<'_>> = group
+                .iter()
+                .map(|&i| BatchPrompt {
+                    embeds: &prepared[i].1,
+                    max_tokens: images[i].3.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+                })
+                .collect();
+            let streams = batch_stream(
+                &self.decoder,
+                self.drafter.as_ref().filter(|_| spec),
+                &prompts,
+                &self.eos_ids,
+                ngram.then_some(NO_REPEAT_NGRAM_SIZE),
+            )?;
+            for (&i, (stream, spec)) in group.iter().zip(streams) {
+                let (prompt, _, vision) = &prepared[i];
+                let text = self
+                    .tokenizer
+                    .decode(&stream.tokens, true)?
+                    .trim()
+                    .to_string();
+                out[i] = Some((
+                    OcrOutput {
+                        text,
+                        tokens: stream.tokens.len(),
+                        finish_reason: stream.finish_reason,
+                    },
+                    OcrStats {
+                        prompt_tokens: prompt.ids.len(),
+                        image_tokens: prompt.spans.iter().map(|(s, e)| e - s).sum(),
+                        crops: prompt.crops.len(),
+                        vision: *vision,
+                        prefill: stream.prefill,
+                        decode: stream.decode,
+                        speculative: spec,
+                    },
+                ));
+            }
+            at = end;
+        }
+        Ok(out
+            .into_iter()
+            .map(|o| o.expect("every image decoded"))
+            .collect())
     }
 
     /// Slicing + prompt ids + image spans for one image.

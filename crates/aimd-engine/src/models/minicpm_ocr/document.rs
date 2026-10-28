@@ -7,8 +7,8 @@ use std::path::Path;
 use image::RgbImage;
 
 use super::generate::FinishReason;
-use super::pipeline::{MiniCpmOcrPipeline, OcrRequest, PipelineError};
-use super::regions::{PageOutput, RegionOptions, recognize_page};
+use super::pipeline::{BatchImage, MiniCpmOcrPipeline, OcrRequest, PipelineError};
+use super::regions::{PageOutput, RegionOptions, recognize_page_batch};
 use crate::models::pp_doclayout_v3::pipeline::{PipelineError as LayoutError, PpDocLayoutV3};
 
 #[derive(Debug, thiserror::Error)]
@@ -55,21 +55,20 @@ impl MiniCpmDocument {
         self.recognize(&rgb)
     }
 
-    /// Layout regions in reading order, one recogniser call per region that
-    /// reaches the VLM (the SDK's per-label prompt, token budget and slice
-    /// cap), then the SDK's page assembly. Image regions emit nothing.
+    /// Layout regions in reading order, every region that reaches the VLM
+    /// recognised in length-sorted batches (the SDK's per-label prompt,
+    /// token budget and slice cap), then the SDK's page assembly. Image
+    /// regions emit nothing.
     pub fn recognize(&self, rgb: &RgbImage) -> Result<DocumentPage, DocumentError> {
         let layout = self.layout.detect(rgb)?;
         let mut truncated_regions = 0;
-        let page = recognize_page(
-            &layout,
-            rgb,
-            &RegionOptions::default(),
-            &mut |job, recipe| {
-                let img = &job.image;
-                self.ocr
-                    .recognize_rgb8(
-                        img.as_raw(),
+        let page = recognize_page_batch(&layout, rgb, &RegionOptions::default(), |todo| {
+            let images: Vec<BatchImage<'_>> = todo
+                .iter()
+                .map(|(job, recipe)| {
+                    let img = &job.image;
+                    (
+                        img.as_raw().as_slice(),
                         img.width() as usize,
                         img.height() as usize,
                         OcrRequest {
@@ -79,12 +78,18 @@ impl MiniCpmDocument {
                             ..OcrRequest::default()
                         },
                     )
-                    .map(|o| {
+                })
+                .collect();
+            let outs = self.ocr.recognize_batch_rgb8(&images)?;
+            Ok::<_, PipelineError>(
+                outs.into_iter()
+                    .map(|(o, _)| {
                         truncated_regions += usize::from(o.finish_reason != FinishReason::Stop);
                         o.text
                     })
-            },
-        )?;
+                    .collect(),
+            )
+        })?;
         if page.markdown.trim().is_empty() {
             return Err(DocumentError::EmptyContent);
         }
