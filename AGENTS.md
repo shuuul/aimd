@@ -230,7 +230,10 @@ flowchart TD
   On Apple the shim defaults `MLX_MAX_MB_PER_BUFFER` to 30 (a user value
   wins). Larger Metal command buffers keep the previous step's KV arrays
   alive, so `slice_update` copies the cache instead of donating it (MoE
-  Unlimited-OCR lost 15%). Host-side image work threads through
+  Unlimited-OCR lost 15%). On every GPU backend the shim caps mlx's buffer
+  cache at 1 GB (`set_cache_limit`): mlx reuses a cached buffer only for a
+  similar size, so shape-varying calls (PP-OCRv6 rec batches) otherwise grew
+  the cache to 25 GB. Host-side image work threads through
   `aimd_engine::parallel` (`for_row_bands`, ordered `map`), computing each
   element exactly as one thread would. PDF OCR renders pages on a
   background thread (`PdfRenderJob`, PPM for local engines, PNG for remote)

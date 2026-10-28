@@ -197,6 +197,14 @@ const mlx::core::Device& selected_device() {
       }
     }
 #endif
+    // mlx keeps freed buffers for reuse up to its memory limit and reuses a
+    // buffer only for a similar size. Inputs whose shapes vary call to call
+    // (PP-OCRv6 recognition batches, one width per batch) then grow the cache
+    // by gigabytes per call: 25.6 GB peak for four pages. A 1 GB cap keeps
+    // the peak near the live working set at no measured speed cost.
+    if (!use_cpu) {
+      mlx::core::set_cache_limit(size_t{1} << 30);
+    }
   });
   return mlx::core::default_device();
 }
