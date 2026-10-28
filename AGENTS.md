@@ -447,7 +447,8 @@ Tests are lean by rule; weights are the expensive resource.
   pin Metal mlx rounding (the tower amplifies any rounding change past them), so they
   are enforced only when `metal_kernels_available()`; on CUDA they print the drift and
   the corpus gate is the accuracy check. The same applies to the PaddleOCR-VL vision
-  stages. PP-OCRv6 is f32, so mlx's default TF32 convs/matmuls on CUDA move its
+  stages. The Unlimited-OCR v1 prefill logits golden gets a noise bound off
+  Metal; its forced greedy stream must still match. PP-OCRv6 is f32, so mlx's default TF32 convs/matmuls on CUDA move its
   probability maps; off Metal its checkpoint test uses noise bounds and requires
   exact text. Run the checkpoint tier and the corpus gate on
   a Linux GPU box (metacube, dspark) after changes that can move CUDA outputs.

@@ -786,6 +786,20 @@ mod tests {
         rel_rms: 0.03,
         max_frac: 0.05,
     };
+    /// Prefill logits bound. `LOGITS` holds Metal mlx rounding; mlx's CUDA
+    /// kernels round the 4-bit prefill differently (RTX 5090: rel rms
+    /// 3.8e-2, max 3.1% of max |ref|), so off Metal this is a noise bound
+    /// and the forced greedy stream must still match exactly.
+    fn prefill_logits_bound() -> Parity {
+        if aimd_mlx::metal_kernels_available().unwrap_or(false) {
+            LOGITS
+        } else {
+            Parity {
+                rel_rms: 0.06,
+                max_frac: 0.08,
+            }
+        }
+    }
     /// Layer-0 key rows (one RMSNorm + q-proj + RoPE from the embeddings).
     const KEYS: Parity = Parity {
         rel_rms: 0.01,
@@ -849,7 +863,7 @@ mod tests {
             vocab,
             &kept,
             &want,
-            LOGITS,
+            prefill_logits_bound(),
             &mut fails,
         );
         assert!(fails.is_empty(), "{}", fails.join("\n"));
