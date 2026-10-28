@@ -1,7 +1,7 @@
 ---
 id: "009"
 title: "MiniCPM-OCR 1.0 with the PP-DocLayoutV3 region pipeline"
-status: Active
+status: Completed
 created: 2026-10-28
 updated: 2026-10-28
 coordinator: "shuuul"
@@ -154,6 +154,7 @@ Not in scope:
 | 2026-10-28 | The region goldens (`tests/golden/minicpm_regions/`) come from the SDK at commit `458718f80d7684230b8ff5a090a27ca1d895ee9a` via `scripts/export_minicpm_regions_reference.py`. They compare exact strings and FNV-1a hashes of crop pixels, with `emit_image_placeholder = true` (SDK behaviour); aimd runs with `false`. | Pins the SDK revision the port matches. | WS-05 |
 | 2026-10-28 | A page's VLM blocks run as region batches (`recognize_batch_rgb8`, `regions::recognize_page_batch`): blocks sorted by prompt length, up to 16 per batch while padding stays <= 1/3. Rows are left-padded with zero embeddings (exact: zeros stay zero through every layer and leave the DeltaNet state zero), masks hide padding, RoPE positions count each row's own columns. Without a drafter decode is one batched step per token; with one, DSpark drafts and verifies every row in one forward per round, rows accept different prefixes, caches keep the longest (`rollback_rows` masks each row's extra DeltaNet steps) and the shorter rows' rejected columns stay as masked holes. A batch of one runs the serial path. | Per-region decode is launch-bound (CUDA) or small-M gemm-bound (Metal, where B=2..8 steps cost 35-39 ms vs 14 ms at B=1); batched DSpark amortizes both. Batched kernels round differently, so near-ties may resolve differently from the serial path (as batched verify already does). | WS-09 |
 | 2026-10-28 | Vision stays per crop (no batched SigLIP). | Crops differ in shape; on Metal the tower is compute-bound (~270 ms/crop) and on CUDA it is ~24 ms/crop, so batching gains little for the padding and bookkeeping it needs. | WS-09 |
+| 2026-10-28 | Remove MiniCPM-OCR, PP-DocLayoutV3, DSpark and their shim ops from aimd; the last commit with them is tagged `minicpm-ocr-last`. | User decision. aimd is a run-and-exit CLI: on an M2 Pro MiniCPM-OCR takes ~13 s per dense page (vision is compute-bound near the GEMM roof, 4-bit does not help) against 9.3 s for Unlimited-OCR-2 and 6.6 s for Unlimited-OCR at the same text accuracy; on CUDA it runs 0.18 pages/s vs the official vLLM stack's 1.16. | All |
 
 ## Workstreams
 
@@ -168,7 +169,7 @@ Use `Pending`, `Claimed`, `In progress`, `Blocked`, or `Done`.
 | WS-05 | Region pipeline: crops, prompt map, Markdown assembly, OTSL -> HTML, anchors | shuuul/Claude | Done | WS-02, WS-03, WS-04 | hermetic assembly/OTSL goldens from SDK functions; checkpoint e2e page |
 | WS-06 | `aimd-process` integration: aliases, precision, `OcrFamily`, `load_ocr`, HF download of both repos, help/MCP text | shuuul/Claude | Done | WS-05 | `models.rs` unit tests; fake-runtime routing tests |
 | WS-08 | DSpark speculative decoding: draft loader (`d2t`, reduced-vocab `lm_head`, Markov head), target feature capture, verify + walk + cache rollback, pipeline default | shuuul/Claude | Done | WS-03 | e2e fixtures: DSpark text == plain greedy text (bf16, 4-bit); acceptance logged |
-| WS-07 | Exporters (`scripts/export_minicpm_ocr_reference.py`, `export_pp_doclayout_v3_reference.py`), corpus baseline, gate runs (Metal + metacube), docs/AGENTS sync | shuuul/Claude | In progress | WS-02..WS-06 | corpus gate within bounds; docs reviewed |
+| WS-07 | Exporters (`scripts/export_minicpm_ocr_reference.py`, `export_pp_doclayout_v3_reference.py`), corpus baseline, gate runs (Metal + metacube), docs/AGENTS sync | shuuul/Claude | Done | WS-02..WS-06 | corpus gate within bounds; docs reviewed |
 | WS-09 | Region batching: batched prefill/decode with per-row DeltaNet state, batched DSpark draft + verify, page-level batch in `MiniCpmDocument` | shuuul/Claude | Done | WS-05, WS-08 | e2e: batch text == serial text on the fixtures (plain + DSpark, bf16 + 4bit, Metal + CUDA); profile pages timed |
 
 ## Verification
@@ -276,6 +277,22 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: WS-07 closeout.
 
+### 2026-10-28 — shuuul/Claude — WS-07 closeout: removal
+
+- Changed: tagged `minicpm-ocr-last`, then reverted `a792716` and `809058e`; spec archived.
+- Evidence: macOS (M2 Pro) on four dense arXiv pages, cold CLI-style runs: minicpm-ocr bf16 51.9 s / 7.6 GB / sim 0.996, 4bit 57.7 s; unlimited-ocr-2 37.1 s / 5.5 GB / 0.998; unlimited-ocr 26.3 s / 5.3 GB / 0.996; paddleocr-vl 43.4 s / 3.1 GB / 0.999. CUDA (RTX 5090) OmniDocBench 66 pages: official SDK + vLLM + DSpark 56.8 s, aimd batched 359 s, accuracy at parity.
+- Remaining: none.
+- Blockers: none.
+- Next action: none.
+
 ## Completion summary
 
-Not complete.
+Closed by removal (decision 2026-10-28). The port reached parity with the
+original implementation (transformers bf16 goldens, SDK region goldens; on
+OmniDocBench 66 pages, similarity 0.878 / F1 0.913 vs the official stack's
+0.873 / 0.912) and region batching made it 2.8x faster on CUDA, but it stayed
+the slowest OCR model on macOS and 6.3x slower than vLLM on CUDA, which does
+not fit a run-and-exit CLI. The code, goldens, exporters and the gated-delta,
+conv1d and `grid_sample` shim ops were reverted; tag `minicpm-ocr-last`
+(on top of the region-batching commit `809058e`) keeps them recoverable.
+The mlx buffer-cache cap found while benchmarking (commit `282ba1a`) stays.

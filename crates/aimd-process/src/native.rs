@@ -7,13 +7,9 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use aimd_core::{AimdError, Result, Segment, anchors, log_info, log_warn};
-use aimd_engine::models::minicpm_ocr::document::{DocumentError as MiniCpmError, MiniCpmDocument};
-use aimd_engine::models::minicpm_ocr::dspark::DSPARK_REPO;
-use aimd_engine::models::minicpm_ocr::pipeline::MiniCpmOcrPipeline;
 use aimd_engine::models::paddleocr_vl::pipeline::{
     PaddleOcrVlPipeline, PipelineError as VlPipelineError, VlRequest, VlTask, load_rgb8,
 };
-use aimd_engine::models::pp_doclayout_v3::pipeline::PpDocLayoutV3;
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpPipelineError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_aligner::pipeline::ForcedAlignerPipeline;
 use aimd_engine::models::qwen3_asr::pipeline::{
@@ -23,9 +19,7 @@ use aimd_engine::models::unlimited_ocr::pipeline::{
     OcrRequest, PipelineError as OcrPipelineError, UnlimitedOcrPipeline,
 };
 
-use crate::models::{
-    MINICPM_OCR_REPO, OcrFamily, PADDLEOCR_VL_REPO, PP_DOCLAYOUT_V3_REPO, ocr_family,
-};
+use crate::models::{OcrFamily, PADDLEOCR_VL_REPO, ocr_family};
 use crate::{
     AlignedTranscript, AsrFailure, AsrModel, CommandOutput, LocalModality, LocatedOcr, OcrFailure,
     OcrModel, Runtime,
@@ -144,29 +138,6 @@ impl Runtime for NativeRuntime {
                     PpOcrV6Pipeline::load(&det, &rec).map_err(|e| load_err(e.to_string()))?;
                 Arc::new(NativeOcr::PpOcr(pipeline))
             }
-            OcrFamily::MiniCpmOcr { quant_bits } => {
-                let resolve = |repo: &str| crate::hf::resolve_checkpoint(repo, &|k| self.env(k));
-                let (dir, draft, layout) = (
-                    resolve(MINICPM_OCR_REPO)?,
-                    resolve(DSPARK_REPO)?,
-                    resolve(PP_DOCLAYOUT_V3_REPO)?,
-                );
-                log_info!(
-                    "Loading {} checkpoint {model_id} from {} (DSpark draft {}, layout {})",
-                    family.name(),
-                    dir.display(),
-                    draft.display(),
-                    layout.display()
-                );
-                let mut ocr = MiniCpmOcrPipeline::load(&dir, quant_bits)
-                    .map_err(|e| load_err(e.to_string()))?;
-                ocr.attach_drafter(&draft)
-                    .map_err(|e| load_err(e.to_string()))?;
-                let layout = PpDocLayoutV3::load(&layout).map_err(|e| load_err(e.to_string()))?;
-                Arc::new(NativeOcr::MiniCpm(Box::new(MiniCpmDocument::new(
-                    layout, ocr,
-                ))))
-            }
         };
         cache.insert(model_id.to_string(), model.clone());
         Ok(model)
@@ -274,7 +245,6 @@ enum NativeOcr {
     Unlimited(UnlimitedOcrPipeline),
     PaddleVl(PaddleOcrVlPipeline),
     PpOcr(PpOcrV6Pipeline),
-    MiniCpm(Box<MiniCpmDocument>),
 }
 
 impl OcrModel for NativeOcr {
@@ -423,32 +393,6 @@ impl OcrModel for NativeOcr {
                     })
                 }
                 Err(PpPipelineError::EmptyContent) => Err(OcrFailure::Empty),
-                Err(e) => Err(OcrFailure::Other(e.to_string())),
-            },
-            Self::MiniCpm(d) => match d.recognize_path(image_path) {
-                Ok(out) => {
-                    let (w, h) = (out.width.max(1) as f32, out.height.max(1) as f32);
-                    let blocks = out
-                        .page
-                        .blocks
-                        .iter()
-                        .filter_map(|b| {
-                            let text = b.markdown.as_deref()?;
-                            let [x0, y0, x1, y1] = b.bbox.map(|v| v as f32);
-                            let bbox = [x0 / w, y0 / h, x1 / w, y1 / h].map(|v| v.clamp(0.0, 1.0));
-                            Some(Segment {
-                                bbox: Some(bbox),
-                                ..segment(text, b.label)
-                            })
-                        })
-                        .collect();
-                    Ok(LocatedOcr {
-                        markdown: out.page.markdown,
-                        blocks: Some(blocks),
-                        lines: None,
-                    })
-                }
-                Err(MiniCpmError::EmptyContent) => Err(OcrFailure::Empty),
                 Err(e) => Err(OcrFailure::Other(e.to_string())),
             },
         }

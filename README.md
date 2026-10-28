@@ -33,9 +33,8 @@ no Transformers.
 - **Local ASR** with [Qwen3-ASR](#models) (1.7B or 0.6B), with automatic
   language detection and context biasing from page metadata.
 - **Local OCR** for images and scanned PDFs: [Unlimited-OCR-2](#models)
-  (default), [PaddleOCR-VL-1.6](#models), [MiniCPM-OCR 1.0](#models) on
-  PP-DocLayoutV3 regions, or the fast [PP-OCRv6](#models) line detector and
-  recognizer.
+  (default), [PaddleOCR-VL-1.6](#models), or the fast [PP-OCRv6](#models)
+  line detector and recognizer.
 - **Document conversion** through Pandoc. EPUB keeps spine order and extracts
   chapters and images. Text-layer PDFs are converted by
   [pdf-inspector](https://github.com/firecrawl/pdf-inspector) without OCR.
@@ -307,7 +306,6 @@ aimd scan.pdf --task ocr           # force OCR
 aimd scan.pdf --precision 8bit     # Unlimited-OCR-2 8-bit checkpoint
 aimd scan.pdf --model unlimited-ocr  # Unlimited-OCR v1, 5-page requests
 aimd scan.pdf --model paddleocr-vl  # PaddleOCR-VL-1.6
-aimd scan.pdf --model minicpm-ocr  # MiniCPM-OCR 1.0 per layout region
 aimd photo.jpg --model pp-ocrv6    # PP-OCRv6: fast plain text lines
 aimd scan.pdf --start 0 --end 2    # 0-based inclusive page range
 ```
@@ -320,8 +318,8 @@ request (gundam tiles per page; progress and cancellation between
 requests) and single images in gundam mode. Unlimited-OCR v1 reads PDFs 5
 pages per request (one 1024 base view per page) and single images in gundam mode
 (`document parsing.` prompt), with a sliding-window no-repeat n-gram guard
-(n=35, window 128) and at most 8192 tokens per page. PaddleOCR-VL,
-MiniCPM-OCR and PP-OCRv6 run one page at a time.
+(n=35, window 128) and at most 8192 tokens per page. PaddleOCR-VL and PP-OCRv6
+run one page at a time.
 
 Which OCR model to use:
 
@@ -331,13 +329,6 @@ Which OCR model to use:
 - `unlimited-ocr`: Unlimited-OCR v1, the same Markdown in 5-page requests.
 - `paddleocr-vl`: PaddleOCR-VL-1.6 (0.9B) with its full-page `OCR:` prompt.
   A smaller model that still produces layout-aware Markdown.
-- `minicpm-ocr`: MiniCPM-OCR 1.0 (SigLIP + Qwen3.5 0.8B) following the official
-  SDK. PP-DocLayoutV3 finds the regions of each page in reading order, every
-  region is recognised with its own prompt (text, table, formula, chart,
-  seal), and the results are assembled into Markdown with HTML tables and
-  `$$` formulas. Headers, footers, page numbers and side notes are left out,
-  and image regions produce no output. Decoding uses the official DSpark
-  draft model for speculative decoding (about 2.5x faster, same text).
 - `pp-ocrv6`: PP-OCRv6 medium text detection + recognition. Well under a
   second per page, multilingual, but it outputs plain text lines in reading
   order with no tables or formatting. Good for photos, screenshots, and
@@ -367,7 +358,7 @@ it; `chunk_list` keeps it. `page` is 1-based and `bbox` is
 Revenue grew 12% year over year...
 ```
 
-Unlimited-OCR, Unlimited-OCR-2 and MiniCPM-OCR anchor each layout block. PaddleOCR-VL, PP-OCRv6, and remote
+Unlimited-OCR and Unlimited-OCR-2 anchor each layout block. PaddleOCR-VL, PP-OCRv6, and remote
 OCR anchor the whole page. PP-OCRv6 line boxes, and PaddleOCR-VL line boxes
 from its `Spotting:` pass (run only with `--format json` or MCP
 `include_segments`), appear in the JSON `segments`.
@@ -412,7 +403,6 @@ aimd downloads these checkpoints from Hugging Face on first use:
 | Unlimited-OCR | OCR | `unlimited-ocr` | [4bit](https://huggingface.co/mlx-community/Unlimited-OCR-4bit), [6bit](https://huggingface.co/mlx-community/Unlimited-OCR-6bit), [8bit](https://huggingface.co/mlx-community/Unlimited-OCR-8bit) | [baidu/Unlimited-OCR](https://huggingface.co/baidu/Unlimited-OCR) |
 | Unlimited-OCR-2 | OCR (default, multi-page) | `unlimited-ocr-2` | [4bit](https://huggingface.co/mlx-community/Unlimited-OCR-2-4bit), [6bit](https://huggingface.co/mlx-community/Unlimited-OCR-2-6bit), [8bit](https://huggingface.co/mlx-community/Unlimited-OCR-2-8bit) | [baidu/Unlimited-OCR-2](https://huggingface.co/baidu/Unlimited-OCR-2) |
 | PaddleOCR-VL-1.6 | OCR | `paddleocr-vl` | [bf16](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6), quantized to 4/6/8-bit at load | [PaddlePaddle/PaddleOCR-VL-1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6) |
-| MiniCPM-OCR 1.0 | OCR (layout regions) | `minicpm-ocr` | [bf16](https://huggingface.co/openbmb/MiniCPM-OCR-1.0), quantized to 4/6/8-bit at load; layout: [PP-DocLayoutV3](https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_safetensors) (f32) | [openbmb/MiniCPM-OCR-1.0](https://huggingface.co/openbmb/MiniCPM-OCR-1.0) |
 | PP-OCRv6 medium | OCR (plain text lines) | `pp-ocrv6` | [det](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det_safetensors) + [rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec_safetensors) | PaddlePaddle |
 
 ### Precision
@@ -423,14 +413,13 @@ The model (`--model`) and the precision (`--precision`) are separate options.
 |-----------|------------|---------|
 | `qwen3-asr-1.7b`, `qwen3-asr-0.6b` | `4bit`, `6bit`, `8bit` | `4bit` |
 | `unlimited-ocr`, `unlimited-ocr-2` | `4bit`, `6bit`, `8bit` | `4bit` |
-| `paddleocr-vl`, `minicpm-ocr` | `bf16`, `4bit`, `6bit`, `8bit` | `bf16` |
+| `paddleocr-vl` | `bf16`, `4bit`, `6bit`, `8bit` | `bf16` |
 | `pp-ocrv6` | none (ignored with a warning) | - |
 
 ```bash
 aimd audio.wav --model qwen3-asr-1.7b --precision 4bit
 aimd scan.pdf --model unlimited-ocr --precision 8bit
 aimd scan.pdf --model paddleocr-vl --precision 4bit
-aimd scan.pdf --model minicpm-ocr --precision 4bit
 ```
 
 Explicit `mlx-community/Qwen3-ASR-*` and `mlx-community/Unlimited-OCR{,-2}-*`

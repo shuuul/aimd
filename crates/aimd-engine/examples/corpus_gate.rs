@@ -1,5 +1,5 @@
 //! Golden-corpus accuracy gate (tier 3): runs the native Qwen3-ASR and
-//! OCR (Unlimited-OCR, PaddleOCR-VL-1.6, MiniCPM-OCR, or PP-OCRv6) pipelines over the labeled corpus built by
+//! OCR (Unlimited-OCR, PaddleOCR-VL-1.6, or PP-OCRv6) pipelines over the labeled corpus built by
 //! `uv run scripts/build_corpus.py`, scores them against the labels, and
 //! compares with the mlx-audio / mlx-vlm baseline written by
 //! `uv run scripts/corpus_baseline.py` (Unlimited-OCR) or
@@ -8,18 +8,16 @@
 //!
 //! Usage: cargo run --release -p aimd-engine --example corpus_gate -- \
 //!            [CORPUS_DIR] [--only asr|ocr] [--asr-repo ID] [--ocr-repo ID]
-//!            [--ocr-model unlimited-ocr|unlimited-ocr-2|paddleocr-vl|minicpm-ocr|pp-ocrv6]
+//!            [--ocr-model unlimited-ocr|unlimited-ocr-2|paddleocr-vl|pp-ocrv6]
 //!            [--ocr-bits 4|6|8]
 //!
 //! `unlimited-ocr-2` sends each document as one multi-page request (as aimd
 //! sends a PDF window) and scores it against `ocr_unlimited_ocr2` from
 //! `uv run scripts/corpus_baseline_ocr2.py`, whose raw output goes through the
 //! same Markdown port; its stop rate counts requests, not pages.
-//! `--ocr-bits` applies to paddleocr-vl and minicpm-ocr (load-time quantization of the bf16
+//! `--ocr-bits` applies to paddleocr-vl (load-time quantization of the bf16
 //! checkpoint). Each OCR model is scored against its own baseline key
-//! (`ocr`, `ocr_paddleocr_vl[_4bit]`, `ocr_minicpm_ocr[_4bit]`, `ocr_pp_ocrv6`).
-//! MiniCPM-OCR runs PP-DocLayoutV3 regions with the DSpark drafter attached; a
-//! page counts as `stop` unless a region hit its token budget. PP-OCRv6 has no
+//! (`ocr`, `ocr_paddleocr_vl[_4bit]`, `ocr_pp_ocrv6`). PP-OCRv6 has no
 //! generation, so its pages count as `stop` unless empty.
 //!
 //! Metrics: ASR WER (English, words) and CER (Chinese, characters) over the
@@ -32,12 +30,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use aimd_engine::models::minicpm_ocr::document::{DocumentError, MiniCpmDocument};
-use aimd_engine::models::minicpm_ocr::dspark::DSPARK_REPO;
-use aimd_engine::models::minicpm_ocr::pipeline::MiniCpmOcrPipeline;
 use aimd_engine::models::paddleocr_vl::generate::FinishReason as VlFinish;
 use aimd_engine::models::paddleocr_vl::pipeline::{PaddleOcrVlPipeline, VlRequest};
-use aimd_engine::models::pp_doclayout_v3::pipeline::PpDocLayoutV3;
 use aimd_engine::models::pp_ocrv6::pipeline::{PipelineError as PpError, PpOcrV6Pipeline};
 use aimd_engine::models::qwen3_asr::pipeline::{Qwen3AsrPipeline, TranscriptionRequest};
 use aimd_engine::models::unlimited_ocr::markdown2::render_unlimited_ocr2;
@@ -158,7 +152,6 @@ enum Ocr {
     Unlimited2(UnlimitedOcrPipeline),
     PaddleVl(PaddleOcrVlPipeline),
     PpOcrV6(PpOcrV6Pipeline),
-    MiniCpm(Box<MiniCpmDocument>),
 }
 
 impl Ocr {
@@ -187,18 +180,6 @@ impl Ocr {
             Self::PpOcrV6(p) => match p.recognize_path(path) {
                 Ok(r) => (r.markdown.trim_end().to_string(), "stop".to_string()),
                 Err(PpError::EmptyContent) => (String::new(), "empty".to_string()),
-                Err(e) => fail(path, &e),
-            },
-            Self::MiniCpm(d) => match d.recognize_path(path) {
-                Ok(r) => {
-                    let finish = if r.truncated_regions == 0 {
-                        "stop"
-                    } else {
-                        "length"
-                    };
-                    (r.page.markdown.trim_end().to_string(), finish.to_string())
-                }
-                Err(DocumentError::EmptyContent) => (String::new(), "empty".to_string()),
                 Err(e) => fail(path, &e),
             },
         }
@@ -395,24 +376,6 @@ fn main() {
                     "PaddlePaddle/PP-OCRv6_medium".into(),
                     "ocr_pp_ocrv6".into(),
                     Ocr::PpOcrV6(pipe),
-                )
-            }
-            "minicpm-ocr" => {
-                let repo = "openbmb/MiniCPM-OCR-1.0";
-                let mut ocr = MiniCpmOcrPipeline::load(&snapshot(repo), ocr_bits).expect("MiniCPM");
-                ocr.attach_drafter(&snapshot(DSPARK_REPO)).expect("DSpark");
-                let layout =
-                    PpDocLayoutV3::load(&snapshot("PaddlePaddle/PP-DocLayoutV3_safetensors"))
-                        .expect("PP-DocLayoutV3");
-                let suffix = ocr_bits.map_or(String::new(), |b| format!("_{b}bit"));
-                let label = format!(
-                    "{repo}{}",
-                    ocr_bits.map_or(String::new(), |b| format!(":{b}bit"))
-                );
-                (
-                    label,
-                    format!("ocr_minicpm_ocr{suffix}"),
-                    Ocr::MiniCpm(Box::new(MiniCpmDocument::new(layout, ocr))),
                 )
             }
             other => panic!("unknown --ocr-model {other}"),

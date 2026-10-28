@@ -53,24 +53,6 @@ impl KvCache {
         self.offset
     }
 
-    /// Drops the last `n` positions of a plain cache (mlx-lm
-    /// `KVCache.trim`): the rows stay allocated and the next update
-    /// overwrites them.
-    pub(crate) fn trim(&mut self, n: usize) {
-        debug_assert!(self.window.is_none(), "trim on a ring cache");
-        self.offset -= n.min(self.offset);
-    }
-
-    /// Keeps batch rows `rows` (u32 indices) of a plain cache.
-    pub(crate) fn select_rows(&mut self, rows: &MlxArray) -> Result<(), MlxError> {
-        debug_assert!(self.window.is_none(), "select_rows on a ring cache");
-        if let (Some(k), Some(v)) = (self.keys.take(), self.values.take()) {
-            self.keys = Some(k.take(rows, 0)?);
-            self.values = Some(v.take(rows, 0)?);
-        }
-        Ok(())
-    }
-
     #[cfg(test)]
     pub(crate) fn prefill_length(&self) -> Option<usize> {
         self.prefill_length

@@ -13,7 +13,6 @@ Copy [000-template.md](000-template.md) to start a spec.
 | Spec | Status | Outcome |
 | --- | --- | --- |
 | [008-unlimited-ocr-2.md](008-unlimited-ocr-2.md) | Active | Unlimited-OCR-2 (DASH decoder) native OCR with 10-page multi-page PDF windows |
-| [009-minicpm-ocr.md](009-minicpm-ocr.md) | Active | MiniCPM-OCR 1.0 (SigLIP + Qwen3.5 Gated DeltaNet) with the PP-DocLayoutV3 region pipeline |
 
 ## Archived specs
 
@@ -26,6 +25,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 | [005-source-anchors.md](archive/005-source-anchors.md) | 2026-10-26 | Source anchors: OCR positions, ForcedAligner ASR timestamps, JSON/SRT/VTT output |
 | [006-new-model-fast-paths.md](archive/006-new-model-fast-paths.md) | 2026-10-26 | Bit-identical fast paths: PaddleOCR-VL fused rotary (+12% 4-bit decode), PP-OCRv6 fused conv epilogues, threaded mel (aligner ahead of mlx-audio) |
 | [007-pipeline-throughput.md](archive/007-pipeline-throughput.md) | 2026-10-26 | Early-submit decode with a 30 MB Metal buffer cap (Unlimited-OCR +15%, PaddleOCR-VL 4-bit +10-20%), background PPM PDF rendering, threaded host preprocessing; batched decoding measured and rejected |
+| [009-minicpm-ocr.md](archive/009-minicpm-ocr.md) | 2026-10-28 | MiniCPM-OCR 1.0 + PP-DocLayoutV3 regions + DSpark ported at parity, then removed as too slow for a CLI (tag `minicpm-ocr-last`) |
 
 ## Lifecycle
 
