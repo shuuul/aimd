@@ -272,6 +272,15 @@ fn rate((edits, total): (usize, usize)) -> f64 {
     edits as f64 / total.max(1) as f64
 }
 
+/// MLX's peak memory since the last reset (weights + working set + cache),
+/// then resets it and clears the cache for the next section.
+fn print_peak_memory() {
+    let stats = aimd_mlx::memory_stats();
+    println!("  MLX peak memory {:.2} GB", stats.peak as f64 / 1e9);
+    aimd_mlx::clear_cache().expect("clear mlx cache");
+    aimd_mlx::reset_peak_memory();
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut flag = |name: &str| {
@@ -305,9 +314,11 @@ fn main() {
     let mut failed = false;
 
     if run("asr") {
+        aimd_mlx::reset_peak_memory();
         let items = manifest["asr"].as_array().unwrap();
         let hyps = run_asr(&corpus, items, &asr_repo);
         println!("ASR {asr_repo}: {} clips", items.len());
+        print_peak_memory();
         let ours = asr_errors(items, &hyps);
         let base = baseline.as_ref().map(|b| asr_errors(items, &b["asr"]));
         for (language, counts) in &ours {
@@ -383,6 +394,7 @@ fn main() {
         let hyps = run_ocr(&corpus, items, &ocr);
         let (mean, stops, pages, per_doc) = ocr_scores(items, &hyps);
         println!("OCR {label}: {} documents, {pages} pages", items.len());
+        print_peak_memory();
         let baseline = baseline
             .as_ref()
             .filter(|b| b.get(&key).is_some())

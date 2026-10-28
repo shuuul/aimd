@@ -126,6 +126,9 @@ void clear_last_error() {
   last_error_slot().clear();
 }
 
+// Cap on mlx's buffer cache, set at device selection (see below).
+constexpr size_t kCacheLimitBytes = size_t{1} << 30;
+
 // mlx's default stream is thread-local state: command queues for ordinary
 // streams live in the creating thread, so arrays built on one thread cannot
 // be evaluated on another ("There is no Stream(gpu, N) in current thread").
@@ -199,12 +202,12 @@ const mlx::core::Device& selected_device() {
 #endif
     // mlx keeps freed buffers for reuse up to its memory limit and reuses a
     // buffer only for a similar size. Inputs whose shapes vary call to call
-    // (PP-OCRv6 recognition batches, one width per batch) then grow the cache
-    // by gigabytes per call: 25.6 GB peak for four pages. A 1 GB cap keeps
-    // the peak near the live working set at no measured speed cost.
-    if (!use_cpu) {
-      mlx::core::set_cache_limit(size_t{1} << 30);
-    }
+    // (PP-OCRv6 recognition batches, one width per batch; image crops) then
+    // grow the cache by gigabytes per call: 25.6 GB peak for four pages. A
+    // 1 GB cap keeps the peak near the live working set at no measured speed
+    // cost. It applies to every device (the CPU device shares the allocator
+    // on Apple), so no model has to remember to clear the cache itself.
+    mlx::core::set_cache_limit(kCacheLimitBytes);
   });
   return mlx::core::default_device();
 }
@@ -2475,6 +2478,21 @@ int32_t mlx_metal_kernels_available(void) {
                    mlx::core::metal::is_available()
                ? 1
                : 0;
+  });
+}
+
+/// mlx allocator counters in bytes: 0 active, 1 peak, 2 cache, 3 the cache
+/// cap. 4 resets the peak and returns 0.
+int64_t mlx_memory_stat(int32_t which) {
+  return guarded([&]() -> int64_t {
+    switch (which) {
+      case 0: return static_cast<int64_t>(mlx::core::get_active_memory());
+      case 1: return static_cast<int64_t>(mlx::core::get_peak_memory());
+      case 2: return static_cast<int64_t>(mlx::core::get_cache_memory());
+      case 3: return static_cast<int64_t>(kCacheLimitBytes);
+      case 4: mlx::core::reset_peak_memory(); return 0;
+      default: return -1;
+    }
   });
 }
 

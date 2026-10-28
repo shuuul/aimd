@@ -391,6 +391,7 @@ mod ffi {
         pub fn mlx_device_is_cpu() -> i32;
         pub fn mlx_metal_kernels_available() -> i32;
         pub fn mlx_clear_cache() -> i32;
+        pub fn mlx_memory_stat(which: i32) -> i64;
         pub fn mlx_array_clone(a: *mut AimdMlxArray) -> *mut AimdMlxArray;
         pub fn mlx_conv2d_ex(
             input: *mut AimdMlxArray,
@@ -1569,6 +1570,35 @@ pub fn metal_kernels_available() -> Result<bool, MlxError> {
         0 => Ok(false),
         _ => Err(op_failed("mlx_metal_kernels_available")),
     }
+}
+
+/// mlx allocator counters, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryStats {
+    /// Buffers held by live arrays.
+    pub active: usize,
+    /// Highest `active` since the process started or [`reset_peak_memory`].
+    pub peak: usize,
+    /// Freed buffers kept for reuse.
+    pub cache: usize,
+    /// The cap on `cache` the shim sets at device selection.
+    pub cache_limit: usize,
+}
+
+/// Reads mlx's allocator counters (`mx.get_active_memory` and friends).
+pub fn memory_stats() -> MemoryStats {
+    let stat = |which| unsafe { ffi::mlx_memory_stat(which) }.max(0) as usize;
+    MemoryStats {
+        active: stat(0),
+        peak: stat(1),
+        cache: stat(2),
+        cache_limit: stat(3),
+    }
+}
+
+/// Resets [`MemoryStats::peak`] to the current active memory.
+pub fn reset_peak_memory() {
+    unsafe { ffi::mlx_memory_stat(4) };
 }
 
 /// Releases mlx's cached Metal buffers (`mx.clear_cache`).

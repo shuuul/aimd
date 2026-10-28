@@ -229,14 +229,22 @@ flowchart TD
   On Apple the shim defaults `MLX_MAX_MB_PER_BUFFER` to 30 (a user value
   wins). Larger Metal command buffers keep the previous step's KV arrays
   alive, so `slice_update` copies the cache instead of donating it (MoE
-  Unlimited-OCR lost 15%). On every GPU backend the shim caps mlx's buffer
-  cache at 1 GB (`set_cache_limit`): mlx reuses a cached buffer only for a
-  similar size, so shape-varying calls (PP-OCRv6 rec batches) otherwise grew
-  the cache to 25 GB. Host-side image work threads through
+  Unlimited-OCR lost 15%). Host-side image work threads through
   `aimd_engine::parallel` (`for_row_bands`, ordered `map`), computing each
   element exactly as one thread would. PDF OCR renders pages on a
   background thread (`PdfRenderJob`, PPM for local engines, PNG for remote)
   at most two pages ahead.
+- **Buffer memory**: mlx keeps freed buffers for reuse and reuses one only
+  for a similar size, so shape-varying calls (PP-OCRv6 rec batch widths,
+  image crops) used to grow the cache to 25 GB. Two automatic layers bound
+  it; models must not depend on hand-placed `clear_cache` calls: the shim
+  caps the cache at 1 GB on every device (`set_cache_limit` at device
+  selection), and `aimd-process` wraps every native model in `Released`,
+  which clears the cache after each call so a long-lived MCP process keeps
+  only the weights between requests (Metal hands the pages back a few
+  seconds later). `aimd_mlx::memory_stats()` reads the counters,
+  `aimd-mlx/tests/mlx_memory.rs` guards the cap, and `corpus_gate` prints
+  each model's MLX peak; check it when adding a model.
 - **Linux build**: `aimd-mlx` links `libmlx.so` from `MLX_PREFIX` (brew `mlx-cuda`, or
   an unpacked `mlx-cuda-13` wheel for dev). Cargo applies the shim's rpath only to
   `aimd-mlx`'s own targets, so dev runs of dependents need

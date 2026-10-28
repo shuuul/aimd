@@ -58,7 +58,7 @@ impl Runtime for NativeRuntime {
     }
 
     fn load_asr(&self, model_id: &str) -> Result<Arc<dyn AsrModel>> {
-        static CACHE: OnceLock<Mutex<HashMap<String, Arc<NativeAsr>>>> = OnceLock::new();
+        static CACHE: OnceLock<Mutex<HashMap<String, Arc<Released<NativeAsr>>>>> = OnceLock::new();
         let mut cache = CACHE
             .get_or_init(Default::default)
             .lock()
@@ -76,13 +76,13 @@ impl Runtime for NativeRuntime {
                 "Unable to load MLX ASR model '{model_id}': {e}"
             ))
         })?;
-        let model = Arc::new(NativeAsr(pipeline));
+        let model = Arc::new(Released(NativeAsr(pipeline)));
         cache.insert(model_id.to_string(), model.clone());
         Ok(model)
     }
 
     fn load_ocr(&self, model_id: &str) -> Result<Arc<dyn OcrModel>> {
-        static CACHE: OnceLock<Mutex<HashMap<String, Arc<NativeOcr>>>> = OnceLock::new();
+        static CACHE: OnceLock<Mutex<HashMap<String, Arc<Released<NativeOcr>>>>> = OnceLock::new();
         let mut cache = CACHE
             .get_or_init(Default::default)
             .lock()
@@ -106,7 +106,7 @@ impl Runtime for NativeRuntime {
                 );
                 let pipeline =
                     UnlimitedOcrPipeline::load(&dir).map_err(|e| load_err(e.to_string()))?;
-                Arc::new(NativeOcr::Unlimited(pipeline))
+                Arc::new(Released(NativeOcr::Unlimited(pipeline)))
             }
             OcrFamily::PaddleOcrVl { quant_bits } => {
                 let dir = crate::hf::resolve_checkpoint(PADDLEOCR_VL_REPO, &|k| self.env(k))?;
@@ -117,7 +117,7 @@ impl Runtime for NativeRuntime {
                 );
                 let pipeline = PaddleOcrVlPipeline::load(&dir, quant_bits)
                     .map_err(|e| load_err(e.to_string()))?;
-                Arc::new(NativeOcr::PaddleVl(pipeline))
+                Arc::new(Released(NativeOcr::PaddleVl(pipeline)))
             }
             OcrFamily::PpOcrV6 => {
                 let det =
@@ -136,11 +136,69 @@ impl Runtime for NativeRuntime {
                 );
                 let pipeline =
                     PpOcrV6Pipeline::load(&det, &rec).map_err(|e| load_err(e.to_string()))?;
-                Arc::new(NativeOcr::PpOcr(pipeline))
+                Arc::new(Released(NativeOcr::PpOcr(pipeline)))
             }
         };
         cache.insert(model_id.to_string(), model.clone());
         Ok(model)
+    }
+}
+
+/// A loaded native model whose every call returns mlx's cached buffers
+/// afterwards, so a long-lived process (MCP) holds only the weights between
+/// requests and no model has to release them itself. The shim's cache cap
+/// bounds the cache within a call.
+struct Released<M>(M);
+
+impl<M> Released<M> {
+    fn call<T>(&self, run: impl FnOnce(&M) -> T) -> T {
+        let out = run(&self.0);
+        if let Err(e) = aimd_mlx::clear_cache() {
+            log_warn!("Releasing the MLX buffer cache failed: {e}");
+        }
+        out
+    }
+}
+
+impl<M: AsrModel> AsrModel for Released<M> {
+    fn transcribe(
+        &self,
+        wav_path: &Path,
+        language: Option<&str>,
+        context: Option<&str>,
+    ) -> std::result::Result<String, AsrFailure> {
+        self.call(|m| m.transcribe(wav_path, language, context))
+    }
+
+    fn transcribe_aligned(
+        &self,
+        wav_path: &Path,
+        language: Option<&str>,
+        context: Option<&str>,
+    ) -> std::result::Result<AlignedTranscript, AsrFailure> {
+        self.call(|m| m.transcribe_aligned(wav_path, language, context))
+    }
+}
+
+impl<M: OcrModel> OcrModel for Released<M> {
+    fn recognize(&self, image_path: &Path) -> std::result::Result<String, OcrFailure> {
+        self.call(|m| m.recognize(image_path))
+    }
+
+    fn recognize_located(
+        &self,
+        image_path: &Path,
+        spotting: bool,
+    ) -> std::result::Result<LocatedOcr, OcrFailure> {
+        self.call(|m| m.recognize_located(image_path, spotting))
+    }
+
+    fn pages_per_request(&self) -> usize {
+        self.0.pages_per_request()
+    }
+
+    fn recognize_pages(&self, pages: &[&[u8]]) -> std::result::Result<Vec<LocatedOcr>, OcrFailure> {
+        self.call(|m| m.recognize_pages(pages))
     }
 }
 
@@ -446,4 +504,33 @@ pub(crate) fn pdf_page_count(path: &Path) -> Result<u32> {
     pdf_inspector::detect_pdf(path)
         .map(|r| r.page_count)
         .map_err(|e| AimdError::failed(format!("Cannot open PDF {}: {e}", path.display())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aimd_mlx::{MlxArray, MlxDtype};
+
+    /// Leaves buffers of a fresh size in mlx's cache on every call.
+    struct Churn;
+
+    impl OcrModel for Churn {
+        fn recognize(&self, _: &Path) -> std::result::Result<String, OcrFailure> {
+            let x = MlxArray::zeros(&[777, 1024], MlxDtype::F32).unwrap();
+            x.add(&x).unwrap().eval().unwrap();
+            Ok(String::new())
+        }
+
+        fn pages_per_request(&self) -> usize {
+            7
+        }
+    }
+
+    #[test]
+    fn released_models_return_the_buffer_cache_after_each_call() {
+        let model = Released(Churn);
+        model.recognize(Path::new("page.png")).unwrap();
+        assert_eq!(aimd_mlx::memory_stats().cache, 0);
+        assert_eq!(model.pages_per_request(), 7);
+    }
 }
