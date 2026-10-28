@@ -3,7 +3,7 @@
 //! tok/s), printing the normalized markdown of the first round.
 //!
 //! Usage: cargo run --release -p aimd-engine --example bench_ocr -- \
-//!            [--rounds N] [--quiet] image.png [more...]
+//!            [--rounds N] [--quiet] [--repo Unlimited-OCR-2-4bit] image.png [more...]
 //!
 //! Round 1 includes Metal kernel compilation / first-touch costs; later
 //! rounds are steady state (compare against mlx-vlm's
@@ -14,13 +14,13 @@ use std::time::Instant;
 
 use aimd_engine::models::unlimited_ocr::pipeline::{OcrRequest, UnlimitedOcrPipeline};
 
-fn checkpoint_dir() -> Option<PathBuf> {
+fn checkpoint_dir(repo: &str) -> Option<PathBuf> {
     let cache = std::env::var("AIMD_TEST_HF_CACHE")
         .map(PathBuf::from)
         .or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join(".cache/huggingface/hub")))
         .ok()?;
     let snapshots = cache
-        .join("models--mlx-community--Unlimited-OCR-4bit")
+        .join(format!("models--mlx-community--{repo}"))
         .join("snapshots");
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(snapshots)
         .ok()?
@@ -42,6 +42,11 @@ fn main() {
             .expect("--rounds N");
         args.drain(i..i + 2);
     }
+    let mut repo = "Unlimited-OCR-4bit".to_string();
+    if let Some(i) = args.iter().position(|a| a == "--repo") {
+        repo = args.get(i + 1).expect("--repo NAME").clone();
+        args.drain(i..i + 2);
+    }
     let quiet = if let Some(i) = args.iter().position(|a| a == "--quiet") {
         args.remove(i);
         true
@@ -49,10 +54,10 @@ fn main() {
         false
     };
     if args.is_empty() {
-        eprintln!("usage: bench_ocr [--rounds N] [--quiet] <image>...");
+        eprintln!("usage: bench_ocr [--rounds N] [--quiet] [--repo NAME] <image>...");
         std::process::exit(2);
     }
-    let dir = checkpoint_dir().expect("Unlimited-OCR-4bit snapshot in HF cache");
+    let dir = checkpoint_dir(&repo).expect("mlx-community snapshot in HF cache");
 
     let t0 = Instant::now();
     let pipe = UnlimitedOcrPipeline::load(&dir).expect("pipeline");

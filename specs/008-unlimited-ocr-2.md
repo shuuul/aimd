@@ -326,6 +326,28 @@ cargo xtask check-specs
   (aimd has no KV-cache quantization option).
 - Next action: commit.
 
+### 2026-10-29 — Claude — WS-02 (Metal decode speed)
+
+- Changed: the fused decode kernel scores one key per lane, using `float4`
+  loads against q staged in threadgroup memory, and sums values with
+  `simd_shuffle`-broadcast weights. New `dash_decode_prologue` (shim
+  `mlx_dash_decode_prologue`, `DashRouter::decode_prologue`): one Metal
+  launch for the q/k rope and the router index q/k; it falls back to the
+  compiled mlx traces off Metal. CUDA keeps the mlx-op path (out of scope).
+  `aimd-mlx/examples/bench_dash` times the decode ops; `bench_ocr --repo`
+  selects the checkpoint.
+- Evidence (M2 Pro, 4-bit): decode kernel 104.9 -> 49-51 µs per layer;
+  prologue ~84 -> 16 µs. End-to-end v2 decode 5.7-6.3 -> 3.9-4.4 ms/token
+  (v1 3.7-4.1), same tokens on two corpus pages. `mlx_dash` tests pass on
+  Metal and CPU, including the new prologue parity test. The
+  `unlimited_ocr` checkpoint tests pass (`decoder2_dash_golden`). Corpus
+  gate PASS (similarity 1.000 on 4/4 pages). OmniDocBench subset: 740 ->
+  477 s for 66 pages, sim/F1 0.857/0.903 -> 0.860/0.905, stop 65 -> 66/66.
+  prek, fmt, clippy and the hermetic tier are clean.
+- Skipped (each under ~1% of a step): a compiled `decode_ctx`, a fixed
+  pending index-key buffer.
+- Next action: commit.
+
 ## Completion summary
 
 Pending.

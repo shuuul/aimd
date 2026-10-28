@@ -41,6 +41,22 @@ mod sys {
             out_q: *mut *mut AimdMlxArray,
             out_k: *mut *mut AimdMlxArray,
         ) -> i32;
+        pub fn mlx_dash_decode_prologue(
+            x: *mut AimdMlxArray,
+            q: *mut AimdMlxArray,
+            k: *mut AimdMlxArray,
+            q_w: *mut AimdMlxArray,
+            k_w: *mut AimdMlxArray,
+            q_norm_w: *mut AimdMlxArray,
+            k_norm_w: *mut AimdMlxArray,
+            cos: *mut AimdMlxArray,
+            sin: *mut AimdMlxArray,
+            eps: f32,
+            out_q: *mut *mut AimdMlxArray,
+            out_k: *mut *mut AimdMlxArray,
+            out_iq: *mut *mut AimdMlxArray,
+            out_ik: *mut *mut AimdMlxArray,
+        ) -> i32;
         pub fn mlx_dash_summarize(
             blocks: *mut AimdMlxArray,
             head_cls: *mut AimdMlxArray,
@@ -275,6 +291,47 @@ impl MlxArray {
             Self::from_handle(q, "mlx_dash_index_qk")?,
             Self::from_handle(k, "mlx_dash_index_qk")?,
         ))
+    }
+
+    /// Decode prologue for hidden state `self` `[1, 1, H]`: the roped
+    /// attention `q`/`k` and the router index q/k of [`Self::dash_index_qk`],
+    /// in one Metal launch when it applies. Returns `(q, k, idx_q, idx_k)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn dash_decode_prologue(
+        &self,
+        q: &Self,
+        k: &Self,
+        q_w: &Self,
+        k_w: &Self,
+        q_norm_w: &Self,
+        k_norm_w: &Self,
+        cos: &Self,
+        sin: &Self,
+        eps: f32,
+    ) -> Result<(Self, Self, Self, Self), MlxError> {
+        let mut out = [std::ptr::null_mut(); 4];
+        let [oq, ok, oiq, oik] = &mut out;
+        let code = unsafe {
+            sys::mlx_dash_decode_prologue(
+                self.ptr.as_ptr(),
+                q.ptr.as_ptr(),
+                k.ptr.as_ptr(),
+                q_w.ptr.as_ptr(),
+                k_w.ptr.as_ptr(),
+                q_norm_w.ptr.as_ptr(),
+                k_norm_w.ptr.as_ptr(),
+                cos.ptr.as_ptr(),
+                sin.ptr.as_ptr(),
+                eps,
+                oq,
+                ok,
+                oiq,
+                oik,
+            )
+        };
+        status(code, "mlx_dash_decode_prologue")?;
+        let [q, k, iq, ik] = out.map(|p| Self::from_handle(p, "mlx_dash_decode_prologue"));
+        Ok((q?, k?, iq?, ik?))
     }
 
     /// Block summaries: f32 index keys `[n, bs, d]` -> `[n, d]`.

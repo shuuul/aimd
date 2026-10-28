@@ -155,13 +155,20 @@ impl Attention {
                 .reshape(&[b, l, heads, hd])?
                 .transpose(&[0, 2, 1, 3])
         };
-        let q = proj(&self.q, self.heads)?.dash_apply_rope(&step.cos, &step.sin, decode)?;
-        let k = proj(&self.k, self.kv_heads)?.dash_apply_rope(&step.cos, &step.sin, decode)?;
+        let q = proj(&self.q, self.heads)?;
+        let k = proj(&self.k, self.kv_heads)?;
         let v = proj(&self.v, self.kv_heads)?;
+        let (q, k, idx_q, idx_k) = if decode {
+            router.decode_prologue(x, &q, &k, step, io.eps)?
+        } else {
+            let q = q.dash_apply_rope(&step.cos, &step.sin, false)?;
+            let k = k.dash_apply_rope(&step.cos, &step.sin, false)?;
+            let (idx_q, idx_k) = router.index_qk(x, step, io.eps)?;
+            (q, k, idx_q, idx_k)
+        };
         cache.update_and_fetch(&k, &v)?;
         let (keys, values) = cache.buffers().expect("updated");
 
-        let (idx_q, idx_k) = router.index_qk(x, step, io.eps)?;
         let p = &io.spec.params;
         io.index
             .add_index_keys(&idx_k, router.head_cls(), p.block_size as usize)?;

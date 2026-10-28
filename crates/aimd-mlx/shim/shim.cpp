@@ -803,6 +803,7 @@ const char* kDecodeSource = R"METAL(
     threadgroup float sg_m[NSG];
     threadgroup float sg_l[NSG];
     threadgroup float sg_o[NSG * D];
+    threadgroup float4 qs[D / 4];
 
     uint h = threadgroup_position_in_grid.x;
     uint tid = thread_position_in_threadgroup.x;
@@ -811,6 +812,10 @@ const char* kDecodeSource = R"METAL(
     int p = pos[0];
     int last_remote = p / BS - LB;
 
+    if (tid < D / 4) {
+        auto qr = q + size_t(h) * D + 4 * tid;
+        qs[tid] = float4(float(qr[0]), float(qr[1]), float(qr[2]), float(qr[3])) * consts[2];
+    }
     // 1. Block scores and the candidate set.
     float qi[RI];
     for (int i = 0; i < RI; i++) {
@@ -907,57 +912,54 @@ const char* kDecodeSource = R"METAL(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // 4. Gathered attention: simdgroup sg streams keys [32 sg, 32 sg + 32).
+    // 4. Gathered attention, one key per lane: simdgroup sg scores keys
+    // [32 sg, 32 sg + 32) in parallel, then sums their values with the
+    // weights broadcast lane by lane (lane owns dims [R lane, R lane + R)).
     int S = keys_shape[2];
     auto kh = keys + size_t(h / (HQ / HK)) * S * D;
     auto vh = values + size_t(h / (HQ / HK)) * S * D;
-    float qv[R];
-    for (int i = 0; i < R; i++) {
-        qv[i] = static_cast<float>(q[size_t(h) * D + lane + 32 * i]) * consts[2];
+    int t = sg * 32 + lane;
+    int key;
+    float add;
+    bool ok;
+    if (t < NREM) {
+        int slot = t / BS;
+        key = top[slot] * BS + t % BS;
+        ok = valid_s[slot] && key <= p - LW;
+        add = bias_s[slot];
+    } else {
+        key = p - LW + 1 + (t - NREM);
+        ok = key >= 0;
+        add = 0.0f;
     }
-    float m = -INFINITY, l = 0.0f;
+    key = ok ? key : 0;
+    auto kr = reinterpret_cast<const device vec<T, 4>*>(kh + size_t(key) * D);
+    float acc = 0.0f;
+    for (int i = 0; i < D / 4; i++) {
+        acc += dot(qs[i], float4(kr[i]));
+    }
+    float s = ok ? acc + add : SCORE_NEG;
+    float m = simd_max(s);
+    float e = ok ? metal::fast::exp(s - m) : 0.0f;
+    float l = simd_sum(e);
     float o[R];
     for (int i = 0; i < R; i++) {
         o[i] = 0.0f;
     }
     for (int j = 0; j < 32; j++) {
-        int t = sg * 32 + j;
-        int key;
-        float add;
-        bool ok;
-        if (t < NREM) {
-            int slot = t / BS;
-            key = top[slot] * BS + t % BS;
-            ok = valid_s[slot] && key <= p - LW;
-            add = bias_s[slot];
-        } else {
-            key = p - LW + 1 + (t - NREM);
-            ok = key >= 0;
-            add = 0.0f;
-        }
-        if (!ok) {
-            continue;
-        }
-        float acc = 0.0f;
+        float ej = simd_shuffle(e, ushort(j));
+        int kj = simd_shuffle(key, ushort(j));
+        auto vr = vh + size_t(kj) * D + R * lane;
         for (int i = 0; i < R; i++) {
-            acc += qv[i] * static_cast<float>(kh[size_t(key) * D + lane + 32 * i]);
+            o[i] += ej * static_cast<float>(vr[i]);
         }
-        float s = simd_sum(acc) + add;
-        float mn = metal::max(m, s);
-        float a = metal::fast::exp(m - mn);
-        float e = metal::fast::exp(s - mn);
-        l = l * a + e;
-        for (int i = 0; i < R; i++) {
-            o[i] = o[i] * a + e * static_cast<float>(vh[size_t(key) * D + lane + 32 * i]);
-        }
-        m = mn;
     }
     if (lane == 0) {
-        sg_m[sg] = m;
+        sg_m[sg] = l > 0.0f ? m : -INFINITY;
         sg_l[sg] = l;
     }
     for (int i = 0; i < R; i++) {
-        sg_o[sg * D + lane + 32 * i] = o[i];
+        sg_o[sg * D + R * lane + i] = o[i];
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid < D) {
@@ -1220,6 +1222,131 @@ std::vector<array> decode_select_impl(const std::vector<array>& in, const Params
   array idx = mx::concatenate(
       {mx::minimum(mx::reshape(blk_idx, {-1}), pos), mx::maximum(loc_idx, i32(0))});
   return {idx, mx::concatenate({blk_mask, loc_mask})};
+}
+
+// Decode prologue in one launch: threadgroups 0/1 compute the router index
+// q/k (`_router_qk`: dense matvec, Gemma norm with the fp32 clamps, page2d
+// rope), the rest rope one attention q (then k) head each. Every step
+// rounds to T where the mlx graph materializes a T array.
+const char* kPrologueSource = R"METAL(
+    constexpr int TGS = 1024;
+    constexpr int NSG = TGS / 32;
+    constexpr int HALF = D / 2;
+    constexpr float CLAMP = 1.0e4f;
+    threadgroup float4 xs[H / 4];
+    threadgroup float ys[DI];
+    threadgroup float part[NSG];
+
+    uint g = threadgroup_position_in_grid.x;
+    uint tid = thread_position_in_threadgroup.x;
+    uint lane = thread_index_in_simdgroup;
+    uint sg = simdgroup_index_in_threadgroup;
+    auto finite = [](float v) { return (as_type<uint>(v) & 0x7f800000u) != 0x7f800000u; };
+    auto rope = [&](float x, float rot, int i) {
+        T a = static_cast<T>(x * float(cos[i]));
+        T b = static_cast<T>(rot * float(sin[i]));
+        return static_cast<T>(float(a) + float(b));
+    };
+
+    if (g >= 2) {
+        int r = g - 2;
+        bool isq = r < HQ;
+        auto src = isq ? q + size_t(r) * D : k + size_t(r - HQ) * D;
+        if (tid < D) {
+            int i = tid;
+            float rot = i < HALF ? -float(src[i + HALF]) : float(src[i - HALF]);
+            T o = rope(float(src[i]), rot, i);
+            if (isq) {
+                q_out[size_t(r) * D + i] = o;
+            } else {
+                k_out[size_t(r - HQ) * D + i] = o;
+            }
+        }
+        return;
+    }
+
+    auto w = g == 0 ? q_w : k_w;
+    auto nw = g == 0 ? q_nw : k_nw;
+    for (int j = tid; j < H / 4; j += TGS) {
+        float4 v = float4(reinterpret_cast<const device vec<T, 4>*>(x)[j]);
+        for (int c = 0; c < 4; c++) {
+            v[c] = finite(v[c]) ? v[c] : 0.0f;
+        }
+        xs[j] = v;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (int r = sg; r < DI; r += NSG) {
+        auto wr = reinterpret_cast<const device vec<T, 4>*>(w + size_t(r) * H);
+        float acc = 0.0f;
+        for (int j = lane; j < H / 4; j += 32) {
+            acc += dot(xs[j], float4(wr[j]));
+        }
+        acc = simd_sum(acc);
+        if (lane == 0) {
+            float m = float(static_cast<T>(acc));
+            ys[r] = finite(m) ? m : 0.0f;
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float v = tid < DI ? ys[tid] : 0.0f;
+    float sq = simd_sum(v * v);
+    if (lane == 0) {
+        part[sg] = sq;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (tid < DI) {
+        float tot = 0.0f;
+        for (int i = 0; i < DI / 32; i++) {
+            tot += part[i];
+        }
+        float y = metal::clamp(v * metal::precise::rsqrt(tot / DI + consts[0]), -CLAMP, CLAMP);
+        y = metal::clamp(y * (1.0f + float(nw[tid])), -CLAMP, CLAMP);
+        ys[tid] = float(static_cast<T>(y));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (tid < DI) {
+        int i = tid;
+        float rot = i < HALF ? -ys[i + HALF] : ys[i - HALF];
+        float o = float(rope(ys[i], rot, i));
+        o = finite(o) ? o : 0.0f;
+        if (g == 0) {
+            iq[i] = o;
+        } else {
+            ik[i] = o;
+        }
+    }
+)METAL";
+
+bool prologue_kernel_supported(const array& x, const array& q, const array& q_w, const array& cos) {
+  const int h = x.shape(-1);
+  const int d = q.shape(-1);
+  return metal_gpu() && q.dtype() == x.dtype() && q_w.dtype() == x.dtype() &&
+      cos.dtype() == x.dtype() && x.size() == static_cast<size_t>(h) && q_w.shape(0) == d &&
+      d % 32 == 0 && d <= 1024 && h % 4 == 0 && h <= 4096 && q.shape(2) == 1;
+}
+
+// {q_rot, k_rot, idx_q [1, d] f32, idx_k [1, d] f32}.
+std::vector<array> prologue_kernel(
+    const array& x, const array& q, const array& k, const array& q_w, const array& k_w,
+    const array& q_nw, const array& k_nw, const array& cos, const array& sin, float eps) {
+  static const auto kernel = mx::fast::metal_kernel(
+      "aimd_dash_prologue",
+      {"x", "q", "k", "q_w", "k_w", "q_nw", "k_nw", "cos", "sin", "consts"},
+      {"q_out", "k_out", "iq", "ik"}, kPrologueSource);
+  const int hq = q.shape(1);
+  const int hk = k.shape(1);
+  const int d = q.shape(3);
+  return kernel(
+      {x, q, k, q_w, k_w, q_nw, k_nw, cos, sin, mx::array({eps}, {1}, mx::float32)},
+      {q.shape(), k.shape(), {1, d}, {1, d}}, {q.dtype(), k.dtype(), mx::float32, mx::float32},
+      {(2 + hq + hk) * 1024, 1, 1}, {1024, 1, 1},
+      {{"T", q.dtype()},
+       {"H", static_cast<int>(x.shape(-1))},
+       {"D", d},
+       {"DI", d},
+       {"HQ", hq},
+       {"HK", hk}},
+      std::nullopt, false, {});
 }
 
 using SelectFn = std::function<std::vector<array>(const std::vector<array>&)>;
@@ -2926,6 +3053,54 @@ int32_t mlx_dash_index_qk(
     }
     *out_q = wrap(out[0]);
     *out_k = wrap(out[1]);
+    return 0;
+  });
+}
+
+/// Decode prologue (`L == 1`): rope the attention `q` `[1, HQ, 1, D]` and
+/// `k` `[1, HK, 1, D]` and compute the router index q/k (`mlx_dash_index_qk`)
+/// from `x` `[1, 1, H]`. One Metal launch when the kernel applies, else the
+/// compiled mlx traces.
+int32_t mlx_dash_decode_prologue(
+    AimdMlxArray* x,
+    AimdMlxArray* q,
+    AimdMlxArray* k,
+    AimdMlxArray* q_w,
+    AimdMlxArray* k_w,
+    AimdMlxArray* q_norm_w,
+    AimdMlxArray* k_norm_w,
+    AimdMlxArray* cos,
+    AimdMlxArray* sin,
+    float eps,
+    AimdMlxArray** out_q,
+    AimdMlxArray** out_k,
+    AimdMlxArray** out_iq,
+    AimdMlxArray** out_ik) {
+  return guarded([&]() -> int32_t {
+    require({x, q, k, q_w, k_w, q_norm_w, k_norm_w, cos, sin, out_q, out_k, out_iq, out_ik});
+    namespace mx = mlx::core;
+    const array& xa = as_array(x);
+    const array& qa = as_array(q);
+    const array& wa = as_array(q_w);
+    const array& ca = as_array(cos);
+    std::vector<array> out;
+    if (dash::prologue_kernel_supported(xa, qa, wa, ca) && as_array(q_w).shape(0) == qa.shape(3)) {
+      out = dash::prologue_kernel(
+          xa, qa, as_array(k), wa, as_array(k_w), as_array(q_norm_w), as_array(k_norm_w), ca,
+          as_array(sin), eps);
+    } else {
+      static const auto rope = mx::compile(dash::apply_rope_impl);
+      static const auto router = mx::compile(dash::router_qk_impl);
+      auto idx = router(
+          {xa, wa, as_array(k_w), as_array(q_norm_w), as_array(k_norm_w), ca, as_array(sin),
+           array(eps, mx::float32)});
+      out = {rope({qa, ca, as_array(sin)})[0], rope({as_array(k), ca, as_array(sin)})[0], idx[0],
+             idx[1]};
+    }
+    *out_q = wrap(out[0]);
+    *out_k = wrap(out[1]);
+    *out_iq = wrap(out[2]);
+    *out_ik = wrap(out[3]);
     return 0;
   });
 }

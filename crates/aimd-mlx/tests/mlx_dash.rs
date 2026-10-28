@@ -355,6 +355,51 @@ fn index_qk_and_summaries_match_host() {
 }
 
 #[test]
+fn decode_prologue_matches_separate_ops() {
+    let (h, d) = (256usize, 128usize);
+    let mut r = Rng::new(6);
+    let bf = |shape: &[usize], amp: f32, r: &mut Rng| {
+        let n = shape.iter().product();
+        f32_arr(shape, &r.vec(n, amp))
+            .astype(MlxDtype::Bf16)
+            .unwrap()
+    };
+    let x = bf(&[1, 1, h], 1.0, &mut r);
+    let q = bf(&[1, HQ, 1, d], 1.0, &mut r);
+    let k = bf(&[1, HK, 1, d], 1.0, &mut r);
+    let (qw, kw) = (bf(&[d, h], 0.1, &mut r), bf(&[d, h], 0.1, &mut r));
+    let (qn, kn) = (bf(&[d], 0.5, &mut r), bf(&[d], 0.5, &mut r));
+    let (cos, sin) = (
+        bf(&[1, 1, 1, d], 1.0, &mut r),
+        bf(&[1, 1, 1, d], 1.0, &mut r),
+    );
+    let eps = 1e-6f32;
+    let (gq, gk, giq, gik) = x
+        .dash_decode_prologue(&q, &k, &qw, &kw, &qn, &kn, &cos, &sin, eps)
+        .unwrap();
+    let (wiq, wik) = x
+        .dash_index_qk(&qw, &kw, &qn, &kn, &cos, &sin, eps, true)
+        .unwrap();
+    let f = |a: &MlxArray| a.astype(MlxDtype::F32).unwrap().to_f32_vec().unwrap();
+    for (got, x) in [(&gq, &q), (&gk, &k)] {
+        let want = x.dash_apply_rope(&cos, &sin, true).unwrap();
+        assert_eq!(got.shape().unwrap(), want.shape().unwrap());
+        assert_eq!(max_abs(&f(got), &f(&want)), 0.0);
+    }
+    // The router matvec may sum in another order: one bf16 rounding apart.
+    for (got, want) in [(&giq, &wiq), (&gik, &wik)] {
+        assert_eq!(got.shape().unwrap(), vec![1, d]);
+        let (g, w) = (f(got), f(want));
+        let scale = w.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(
+            max_abs(&g, &w) <= 2e-2 * scale,
+            "{} vs scale {scale}",
+            max_abs(&g, &w)
+        );
+    }
+}
+
+#[test]
 fn decode_ctx_advances_pages_in_graph() {
     let pf_cnt = MlxArray::from_i32(&[3], &[10, 7, 4]).unwrap();
     // Prompt blocks: [page 0, page 0..1, page 1, text].

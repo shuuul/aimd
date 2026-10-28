@@ -273,6 +273,29 @@ impl DashRouter {
         )
     }
 
+    /// Decode step: roped attention `q`/`k` plus [`Self::index_qk`] in one
+    /// launch. Returns `(q, k, idx_q, idx_k)`.
+    pub(crate) fn decode_prologue(
+        &self,
+        x: &MlxArray,
+        q: &MlxArray,
+        k: &MlxArray,
+        step: &DashStep,
+        eps: f32,
+    ) -> Result<(MlxArray, MlxArray, MlxArray, MlxArray), MlxError> {
+        x.dash_decode_prologue(
+            q,
+            k,
+            &self.q_w,
+            &self.k_w,
+            &self.q_norm,
+            &self.k_norm,
+            &step.cos,
+            &step.sin,
+            eps,
+        )
+    }
+
     pub(crate) fn head_cls(&self) -> &MlxArray {
         &self.head_cls
     }
