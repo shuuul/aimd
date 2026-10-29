@@ -1049,6 +1049,96 @@ fn long_audio_is_segmented_with_progress_and_cancellation() {
 }
 
 #[test]
+fn segmentation_owns_only_its_request_files() {
+    let dir = TempDir::new(None, "aimd-segment-isolation-").unwrap();
+    let sentinel = dir.path().join("seg_meeting_notes.wav");
+    std::fs::write(&sentinel, b"user audio").unwrap();
+    let rt = Mock::default().tool("ffmpeg").respond(|_, args| {
+        let path = args.last().unwrap().replace("%03d", "000");
+        std::fs::write(path, &args[2])?;
+        if args[2].starts_with("fail/") {
+            Ok(CommandOutput {
+                status: Some(1),
+                stderr: b"segmentation failed".to_vec(),
+                ..CommandOutput::default()
+            })
+        } else {
+            ok_output("")
+        }
+    });
+    let first =
+        audio::segment_audio(&rt, Path::new("a/meeting.wav"), 600.0, Some(dir.path())).unwrap();
+    let second =
+        audio::segment_audio(&rt, Path::new("b/meeting.wav"), 600.0, Some(dir.path())).unwrap();
+    assert_eq!(first.paths.len(), 1, "must not include preexisting audio");
+    assert_eq!(second.paths.len(), 1);
+    assert_eq!(std::fs::read(&first.paths[0]).unwrap(), b"a/meeting.wav");
+    assert_eq!(std::fs::read(&second.paths[0]).unwrap(), b"b/meeting.wav");
+    drop(first);
+    assert!(
+        second.paths[0].is_file(),
+        "another request still owns its audio"
+    );
+    drop(second);
+    assert!(
+        audio::segment_audio(&rt, Path::new("fail/meeting.wav"), 600.0, Some(dir.path())).is_err()
+    );
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"user audio");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn partial_hf_snapshot_is_repaired_online() {
+    let dir = TempDir::new(None, "aimd-hf-repair-").unwrap();
+    let repo = "mlx-community/Tiny-4bit";
+    let snap = dir.path().join(hf::repo_folder(repo)).join("snapshots/abc");
+    std::fs::create_dir_all(&snap).unwrap();
+    let index = serde_json::json!({"weight_map": {
+        "layer.a": "model-00001-of-00002.safetensors",
+        "layer.b": "model-00002-of-00002.safetensors"
+    }})
+    .to_string();
+    for (name, body) in [
+        ("config.json", "{}"),
+        ("tokenizer.json", "{}"),
+        ("model.safetensors.index.json", index.as_str()),
+        ("model-00001-of-00002.safetensors", "first shard"),
+    ] {
+        std::fs::write(snap.join(name), body).unwrap();
+    }
+    let files = [
+        "config.json",
+        "tokenizer.json",
+        "model.safetensors.index.json",
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors",
+    ];
+    let manifest = serde_json::json!({
+        "sha": "abc",
+        "siblings": files.map(|name| serde_json::json!({"rfilename": name}))
+    });
+    let (base, server) = serve(vec![
+        (200, manifest.to_string()),
+        (200, "second shard".into()),
+    ]);
+    let resolved = hf::resolve_checkpoint(repo, &|key| match key {
+        "HF_HUB_CACHE" => Some(dir.path().to_string_lossy().into_owned()),
+        "HF_ENDPOINT" => Some(base.clone()),
+        _ => None,
+    })
+    .unwrap();
+    assert_eq!(resolved, snap);
+    assert!(snap.join("model-00002-of-00002.safetensors").is_file());
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 2, "only the missing shard is downloaded");
+    assert_eq!(
+        std::fs::read(snap.join("model-00001-of-00002.safetensors")).unwrap(),
+        b"first shard"
+    );
+    assert_eq!(hf::cached_snapshot(dir.path(), repo), Some(snap));
+}
+
+#[test]
 fn local_asr_gates_fail_fast() {
     let dir = TempDir::new(None, "aimd-asr-").unwrap();
     let wav = dir.path().join("a.wav");

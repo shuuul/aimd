@@ -33,14 +33,54 @@ pub fn repo_folder(repo_id: &str) -> String {
     format!("models--{}", repo_id.replace('/', "--"))
 }
 
-/// A complete cached snapshot (`config.json` present), preferring
-/// `refs/main`.
+/// Check the files consumed by the native loaders, without loading weights.
+/// HF's shared cache may contain only a config or a subset of the shards.
+fn complete_snapshot(snapshot: &Path) -> bool {
+    let json = |name: &str| -> Option<Value> {
+        serde_json::from_slice(&std::fs::read(snapshot.join(name)).ok()?).ok()
+    };
+    let Some(config) = json("config.json") else {
+        return false;
+    };
+    let model_type = config
+        .get("model_type")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let preprocessing = if model_type.starts_with("pp_ocrv6_") {
+        if model_type.ends_with("_rec") {
+            snapshot.join("preprocessor_config.json").is_file()
+        } else {
+            model_type.ends_with("_det")
+        }
+    } else {
+        snapshot.join("tokenizer.json").is_file()
+            || ["vocab.json", "merges.txt", "tokenizer_config.json"]
+                .iter()
+                .all(|name| snapshot.join(name).is_file())
+    };
+    if !preprocessing {
+        return false;
+    }
+    if snapshot.join("model.safetensors.index.json").exists() {
+        return json("model.safetensors.index.json")
+            .and_then(|index| index.get("weight_map").and_then(Value::as_object).cloned())
+            .is_some_and(|map| {
+                !map.is_empty()
+                    && map.values().all(|name| {
+                        name.as_str()
+                            .is_some_and(|name| snapshot.join(name).is_file())
+                    })
+            });
+    }
+    snapshot.join("model.safetensors").is_file()
+}
+
+/// A complete cached snapshot, preferring `refs/main`.
 pub fn cached_snapshot(cache: &Path, repo_id: &str) -> Option<PathBuf> {
     let root = cache.join(repo_folder(repo_id));
-    let complete = |p: &Path| p.join("config.json").is_file();
     if let Ok(sha) = std::fs::read_to_string(root.join("refs").join("main")) {
         let snap = root.join("snapshots").join(sha.trim());
-        if complete(&snap) {
+        if complete_snapshot(&snap) {
             return Some(snap);
         }
     }
@@ -50,7 +90,7 @@ pub fn cached_snapshot(cache: &Path, repo_id: &str) -> Option<PathBuf> {
             .flatten()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| complete(p))
+            .filter(|p| complete_snapshot(p))
             .map(|p| {
                 let mtime = std::fs::metadata(&p)
                     .and_then(|m| m.modified())
@@ -123,8 +163,8 @@ pub fn download_snapshot(
         .filter(|n| wanted(n))
         .map(str::to_string)
         .collect();
-    // `config.json` marks a complete snapshot (`cached_snapshot`), so it lands
-    // last: an interrupted download must not look cached.
+    // Configuration lands last, but cache hits also check weights and tokenizer:
+    // other HF clients may have downloaded config.json before anything else.
     files.sort_by_key(|n| n == "config.json");
     let root = cache.join(repo_folder(repo_id));
     let snapshot = root.join("snapshots").join(&sha);
@@ -156,6 +196,13 @@ pub fn download_snapshot(
         })?;
         std::fs::rename(&partial, &dest).map_err(io)?;
     }
+    if !complete_snapshot(&snapshot) {
+        return Err(AimdError::backend_unavailable(format!(
+            "Downloaded model {repo_id} has an incomplete snapshot at {}: \
+             required configuration, tokenizer or weight files are missing.",
+            snapshot.display()
+        )));
+    }
     std::fs::create_dir_all(root.join("refs")).map_err(io)?;
     std::fs::write(root.join("refs").join("main"), &sha).map_err(io)?;
     Ok(snapshot)
@@ -169,7 +216,7 @@ pub fn resolve_checkpoint(repo_id: &str, env: &dyn Fn(&str) -> Option<String>) -
     }
     if is_truthy(env("HF_HUB_OFFLINE")) {
         return Err(AimdError::backend_unavailable(format!(
-            "Model {repo_id} is not in the Hugging Face cache ({}) and HF_HUB_OFFLINE is set.",
+            "Model {repo_id} is missing or incomplete in the Hugging Face cache ({}) and HF_HUB_OFFLINE is set.",
             cache.display()
         )));
     }
@@ -227,9 +274,54 @@ mod tests {
             err.message
         );
         std::fs::write(snap.join("config.json"), "{}").unwrap();
+        assert_eq!(cached_snapshot(&cache, "mlx-community/Tiny-4bit"), None);
+        std::fs::write(snap.join("model.safetensors"), "weights").unwrap();
+        assert_eq!(cached_snapshot(&cache, "mlx-community/Tiny-4bit"), None);
+        std::fs::write(snap.join("vocab.json"), "{}").unwrap();
+        std::fs::write(snap.join("merges.txt"), "#version: 0.2\n").unwrap();
+        assert_eq!(cached_snapshot(&cache, "mlx-community/Tiny-4bit"), None);
+        std::fs::write(snap.join("tokenizer_config.json"), "{}").unwrap();
         assert_eq!(
             resolve_checkpoint("mlx-community/Tiny-4bit", &env).unwrap(),
             snap
+        );
+        // An index is authoritative: one existing shard is not sufficient.
+        std::fs::remove_file(snap.join("model.safetensors")).unwrap();
+        std::fs::write(
+            snap.join("model.safetensors.index.json"),
+            r#"{"weight_map":{"a":"one.safetensors","b":"two.safetensors"}}"#,
+        )
+        .unwrap();
+        std::fs::write(snap.join("one.safetensors"), "weights").unwrap();
+        assert_eq!(cached_snapshot(&cache, "mlx-community/Tiny-4bit"), None);
+        let err = resolve_checkpoint("mlx-community/Tiny-4bit", &env).unwrap_err();
+        assert!(err.message.contains("incomplete"), "{}", err.message);
+        std::fs::write(snap.join("two.safetensors"), "weights").unwrap();
+        assert_eq!(
+            cached_snapshot(&cache, "mlx-community/Tiny-4bit"),
+            Some(snap.clone())
+        );
+        // PP-OCRv6 has no BPE tokenizer; recognition needs its character table.
+        std::fs::write(
+            snap.join("config.json"),
+            r#"{"model_type":"pp_ocrv6_small_rec"}"#,
+        )
+        .unwrap();
+        assert_eq!(cached_snapshot(&cache, "mlx-community/Tiny-4bit"), None);
+        std::fs::write(snap.join("preprocessor_config.json"), "{}").unwrap();
+        assert_eq!(
+            cached_snapshot(&cache, "mlx-community/Tiny-4bit"),
+            Some(snap.clone())
+        );
+        std::fs::remove_file(snap.join("preprocessor_config.json")).unwrap();
+        std::fs::write(
+            snap.join("config.json"),
+            r#"{"model_type":"pp_ocrv6_medium_det"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cached_snapshot(&cache, "mlx-community/Tiny-4bit"),
+            Some(snap)
         );
     }
 }

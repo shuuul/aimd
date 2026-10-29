@@ -6,7 +6,7 @@ use aimd_core::ext::{SUPPORTED_AUDIO_FORMATS, suffix_lower};
 use aimd_core::{AimdError, Result, log_info};
 
 use crate::Runtime;
-use crate::tempdir::{TempFile, base_dir};
+use crate::tempdir::{TempDir, TempFile};
 
 fn sorted_supported_formats() -> String {
     let mut formats = SUPPORTED_AUDIO_FORMATS.to_vec();
@@ -156,18 +156,11 @@ pub fn get_audio_duration(rt: &dyn Runtime, source: &Path) -> Result<f64> {
     })
 }
 
-/// Segment files removed on drop.
-#[derive(Debug, Default)]
+/// Request-owned segment directory, removed with its files on drop.
+#[derive(Debug)]
 pub struct Segments {
     pub paths: Vec<PathBuf>,
-}
-
-impl Drop for Segments {
-    fn drop(&mut self) {
-        for p in &self.paths {
-            let _ = std::fs::remove_file(p);
-        }
-    }
+    _dir: TempDir,
 }
 
 fn list_segments(parent: &Path, prefix: &str) -> Vec<PathBuf> {
@@ -199,8 +192,8 @@ pub fn segment_audio(
         ));
     };
     let prefix = format!("seg_{}_", crate::file_stem(source));
-    let parent = base_dir(temp_dir);
-    let template = parent.join(format!("{prefix}%03d.wav"));
+    let dir = TempDir::new(temp_dir, "aimd-segments-")?;
+    let template = dir.path().join(format!("{prefix}%03d.wav"));
     let args: Vec<String> = [
         "-y".to_string(),
         "-i".to_string(),
@@ -226,20 +219,17 @@ pub fn segment_audio(
         Err(e) => Some(e.to_string()),
     };
     if let Some(stderr) = failed {
-        drop(Segments {
-            paths: list_segments(&parent, &prefix),
-        });
         return Err(AimdError::failed(format!(
             "ffmpeg audio segmentation failed: {stderr}"
         )));
     }
-    let paths = list_segments(&parent, &prefix);
+    let paths = list_segments(dir.path(), &prefix);
     if paths.is_empty() {
         return Err(AimdError::failed(
             "ffmpeg segmentation succeeded but no segment files were created.",
         ));
     }
-    Ok(Segments { paths })
+    Ok(Segments { paths, _dir: dir })
 }
 
 #[cfg(test)]

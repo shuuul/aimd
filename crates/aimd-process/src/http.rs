@@ -14,9 +14,16 @@ pub enum HttpError {
     Transport(String),
 }
 
+/// TCP/proxy/TLS connection budget (local DNS has a separate phase in ureq).
+/// ureq 3.5 includes the entire TLS handshake in this deadline. Do not limit
+/// response headers separately: non-streaming ASR/OCR may generate for most
+/// of the caller's global budget before sending the first response byte.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
 fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
+        .timeout_connect(Some(CONNECT_TIMEOUT.min(timeout)))
         .http_status_as_error(false)
         .build()
         .into()
@@ -186,6 +193,33 @@ pub fn multipart_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tls_handshake_obeys_connect_and_global_budgets() {
+        for (global, reason) in [
+            (Duration::from_millis(100), "global"),
+            (Duration::from_secs(30), "connect"),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (release, held) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut hello = [0u8; 32];
+                stream.read_exact(&mut hello).unwrap();
+                // Never send ServerHello. Keep the socket alive until the
+                // client times out, then join instead of leaking a thread.
+                held.recv().unwrap();
+            });
+            let err = get(&format!("https://{addr}"), &[], global).unwrap_err();
+            release.send(()).unwrap();
+            server.join().unwrap();
+            assert!(
+                matches!(&err, HttpError::Transport(message) if message == &format!("timeout: {reason}")),
+                "expected {reason} timeout during TLS handshake, got {err:?}"
+            );
+        }
+    }
 
     #[test]
     fn base64_matches_python() {

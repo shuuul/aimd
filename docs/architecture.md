@@ -122,6 +122,20 @@ URL audio fallback share one selection path. Explicit request values override
 `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`. A configured remote URL bypasses the local MLX
 preflight. Without one, local inference is used.
 
+HTTP connections (including proxy negotiation and TLS handshakes) have a 15-second
+budget, capped by the caller's total timeout. Remote inference keeps its 600-second
+total budget with no separate response-header deadline: non-streaming servers may
+not send headers until generation finishes. This requires ureq 3.5 or later.
+
+ASR segmentation owns a unique temporary subdirectory for each request, including
+when `--temp-dir` is supplied. Only that directory is removed on completion or
+failure; same-named inputs cannot overwrite another request's segments.
+
+HF cache hits require configuration, tokenizer files (or the PP-OCRv6 recognition
+character table), and weights. A safetensors index requires every referenced shard.
+Partial snapshots are repaired by downloading missing files when online; offline
+requests fail explicitly rather than returning an incomplete checkpoint.
+
 For performance expectations and benchmarks, see [Performance](performance.md).
 
 ## Cancellation And Progress

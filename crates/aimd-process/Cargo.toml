@@ -14,5 +14,5 @@ aimd-url = { workspace = true }
 serde_json = { workspace = true }
 # Scanned/encoding-issue PDF probe (same library as the Python binding).
 pdf-inspector = "1.25"
-# HTTPS for remote OpenAI-compatible backends and HF checkpoint downloads.
-ureq = { version = "3", default-features = false, features = ["rustls"] }
+# HTTPS with connection deadlines covering the complete TLS handshake.
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
