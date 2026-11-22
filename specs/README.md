@@ -13,6 +13,7 @@ Copy [000-template.md](000-template.md) to start a spec.
 | Spec | Status | Outcome |
 | --- | --- | --- |
 | [008-unlimited-ocr-2.md](008-unlimited-ocr-2.md) | Active | Unlimited-OCR-2 (DASH decoder) native OCR with 10-page multi-page PDF windows |
+| [010-workspace-consolidation.md](010-workspace-consolidation.md) | Draft | Five-crate workspace: one `aimd` library over `aimd-engine`/`aimd-mlx`, unified `System` seam, optional `native` feature |
 
 ## Archived specs
 
