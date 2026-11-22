@@ -190,7 +190,7 @@ async fn rejects_invalid_task_type() {
     );
     assert!(
         err.0
-            .contains("Input should be 'transcript', 'convert' or 'ocr'")
+            .contains("Input should be 'transcript', 'convert', 'ocr' or 'readable'")
     );
 }
 
@@ -255,7 +255,7 @@ fn schema_exposes_precision_and_task_enum() {
     assert!(props.get("precision").is_some());
     assert_eq!(
         props["task_type"]["anyOf"][0]["enum"],
-        json!(["transcript", "convert", "ocr"])
+        json!(["transcript", "convert", "ocr", "readable"])
     );
     assert_eq!(process.input_schema["required"], json!(["input_source"]));
     assert_eq!(props.as_object().unwrap().len(), 22);

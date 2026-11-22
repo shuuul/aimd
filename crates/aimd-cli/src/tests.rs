@@ -372,7 +372,7 @@ fn error_exits_and_messages() {
     assert_eq!(o.code, 1);
     assert_eq!(
         o.stderr,
-        "Error: Unsupported task. Supported tasks: transcript, convert, ocr.\n"
+        "Error: Unsupported task. Supported tasks: transcript, convert, ocr, readable.\n"
     );
 
     let o = invoke(&[], &rt);

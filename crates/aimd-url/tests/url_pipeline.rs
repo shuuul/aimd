@@ -112,8 +112,7 @@ impl Fake {
     fn config(&self) -> UrlConfig {
         UrlConfig {
             ytdlp: self.ytdlp(),
-            readable_backend: ReadableBackend::DomSmoothie,
-            curl: OsString::from("curl"),
+            readable_backend: ReadableBackend::from_env(),
         }
     }
 
@@ -762,8 +761,7 @@ fn missing_yt_dlp_is_backend_unavailable_with_install_hint() {
         ytdlp: YtDlp {
             command: vec![OsString::from("/nonexistent/aimd-test/yt-dlp")],
         },
-        readable_backend: ReadableBackend::DomSmoothie,
-        curl: "curl".into(),
+        readable_backend: ReadableBackend::from_env(),
     };
     expect_err(
         convert_url_with(

@@ -1,6 +1,6 @@
 [package]
 name = "aimd-url"
-description = "URL extraction: yt-dlp subtitles/metadata/audio download, browser cookies, readable HTML via dom_smoothie"
+description = "URL extraction: yt-dlp subtitles/metadata/audio download, browser cookies, readable HTML via Firecrawl Local"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

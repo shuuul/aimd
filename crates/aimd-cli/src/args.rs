@@ -318,7 +318,8 @@ pub fn help_text() -> String {
     let rows: [(&str, &str); 24] = [
         (
             "--task TEXT",
-            "Optional explicit task: transcript, convert, or ocr. Defaults to auto-routing.",
+            "Optional explicit task: transcript, convert, ocr, or readable (web page main \
+             content via Firecrawl Local). Defaults to auto-routing.",
         ),
         (
             "-o, --output PATH",

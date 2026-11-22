@@ -30,6 +30,9 @@ no Transformers.
 - **URL transcripts** through yt-dlp (YouTube, Bilibili, podcasts, and other
   yt-dlp sites). Subtitles are used first; without them, aimd downloads the
   audio and transcribes it locally.
+- **Web pages** (`--task readable`): the main content of an article or page
+  as Markdown, through [Firecrawl Local](https://docs.firecrawl.dev/quickstarts/firecrawl-local)
+  (Defuddle optional).
 - **Local ASR** with [Qwen3-ASR](#models) (1.7B or 0.6B), with automatic
   language detection and context biasing from page metadata.
 - **Local OCR** for images and scanned PDFs: [Unlimited-OCR-2](#models)
@@ -102,7 +105,8 @@ not in `/usr/local/cuda`.
 
 Homebrew also installs the runtime tools aimd uses: MLX (`mlx` on macOS,
 `mlx-cuda` on Linux), `ffmpeg`, `mupdf`
-(`mutool`, for rendering scanned PDF pages), `pandoc`, and `yt-dlp`. Sites
+(`mutool`, for rendering scanned PDF pages), `pandoc`, `yt-dlp`, and
+`firecrawl-local` (web pages). Sites
 change often, so keep yt-dlp current with `brew upgrade yt-dlp`. aimd suggests
 this when yt-dlp's error output looks like an outdated extractor.
 
@@ -143,7 +147,7 @@ aimd [OPTIONS] INPUT_SOURCE
 
 | Option | Description |
 |--------|-------------|
-| `--task TEXT` | Explicit task: `transcript`, `convert`, or `ocr`. Defaults to auto-routing. |
+| `--task TEXT` | Explicit task: `transcript`, `convert`, `ocr`, or `readable` (web page main content). Defaults to auto-routing. |
 | `-o, --output PATH` | Output file. Generated from the title when omitted. |
 | `-f, --format TEXT` | `markdown` (default), `json` (the MCP response with segments), `srt` or `vtt` (transcripts only). See [Source anchors](#source-anchors). |
 | `--anchors` | Add OCR position comments and `[hh:mm:ss]` transcript paragraphs to the Markdown (runs forced alignment). Off by default. |
@@ -211,6 +215,25 @@ before falling back to unauthenticated access. An explicit cookie option that
 yt-dlp rejects fails immediately. If neither subtitles nor audio
 transcription produce text, the request fails; aimd does not return
 metadata-only Markdown as a transcript.
+
+### Web pages
+
+URLs default to the transcript route. For articles and other pages, ask for
+the readable route:
+
+```bash
+aimd "https://example.com/post" --task readable
+aimd saved-page.html --task readable
+```
+
+URLs go to [Firecrawl Local](https://docs.firecrawl.dev/quickstarts/firecrawl-local)
+(`firecrawl-local scrape`), which fetches and cleans the page on your machine
+and renders JavaScript pages in an installed Chrome. A page that blocks both
+its plain fetch and the browser is handed to Firecrawl Cloud unless you set
+`FIRECRAWL_CLOUD=off`. Local `.html`/`.htm` files are extracted in-process
+with [dom_smoothie](https://crates.io/crates/dom_smoothie), since Firecrawl
+Local only fetches URLs. Set `AIMD_READABLE_BACKEND=defuddle` to use
+`npx defuddle parse` (needs Node.js) for both URLs and files instead.
 
 ### ASR context: names and terms from descriptions
 
@@ -498,6 +521,10 @@ files go.
 | `AIMD_ASR_*`, `AIMD_OCR_*` | Remote backends (see above). |
 | `AIMD_MLX_DEVICE` | `gpu` or `cpu`. Local inference needs the GPU; `cpu` is for tests. |
 | `AIMD_YT_DLP` | Path to the `yt-dlp` executable (default: `yt-dlp` on `PATH`). |
+| `AIMD_READABLE_BACKEND` | `firecrawl` (default) or `defuddle` for `--task readable`. |
+| `AIMD_FIRECRAWL` | Path to the `firecrawl-local` executable (default: `firecrawl-local` on `PATH`). |
+| `AIMD_NPX` | `npx` command for the Defuddle backend (default: `npx`). |
+| `FIRECRAWL_CLOUD`, `FIRECRAWL_LOCAL_BROWSER`, `FIRECRAWL_CHROME_PATH` | Read by Firecrawl Local itself. |
 | `HF_HUB_CACHE`, `HF_HOME` | Hugging Face cache location for model weights. |
 | `HF_TOKEN` | Hugging Face token for checkpoint downloads. |
 | `HF_ENDPOINT` | Alternative Hugging Face endpoint. |
@@ -510,7 +537,7 @@ This needs Rust (stable, edition 2024) and Homebrew `mlx`. To use the
 binaries, you also need the runtime tools.
 
 ```bash
-brew install mlx ffmpeg mupdf pandoc yt-dlp
+brew install mlx ffmpeg mupdf pandoc yt-dlp shuuul/tap/firecrawl-local
 git clone https://github.com/shuuul/aimd.git
 cd aimd
 cargo build --release -p aimd-cli -p aimd-mcp

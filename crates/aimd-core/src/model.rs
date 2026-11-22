@@ -22,15 +22,21 @@ pub enum TaskType {
     Transcript,
     Convert,
     Ocr,
+    /// Main-content Markdown of a web page or local HTML file.
+    Readable,
 }
 
 impl TaskType {
-    /// Parse `transcript` / `convert` / `ocr` (exact, lowercase).
+    /// Supported task names, for error messages.
+    pub const NAMES: &'static str = "transcript, convert, ocr, readable";
+
+    /// Parse `transcript` / `convert` / `ocr` / `readable` (exact, lowercase).
     pub fn parse(value: &str) -> Option<TaskType> {
         match value {
             "transcript" => Some(TaskType::Transcript),
             "convert" => Some(TaskType::Convert),
             "ocr" => Some(TaskType::Ocr),
+            "readable" => Some(TaskType::Readable),
             _ => None,
         }
     }
@@ -40,6 +46,7 @@ impl TaskType {
             TaskType::Transcript => "transcript",
             TaskType::Convert => "convert",
             TaskType::Ocr => "ocr",
+            TaskType::Readable => "readable",
         }
     }
 }

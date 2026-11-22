@@ -45,7 +45,6 @@ mod tempdir;
 mod xml;
 mod ytdlp;
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use aimd_core::{AimdError, ProcessHooks, ProcessInput, Result, Segment, anchors};
@@ -65,10 +64,7 @@ pub use markdown::{
     strip_subtitle_formatting,
 };
 pub use metadata::{MAX_CONTEXT_CHARS, VideoInfo, build_metadata_context, extract_video_info};
-pub use readable::{
-    ReadableBackend, ReadableHtml, extract_readable_html, readable_from_html,
-    readable_html_requested,
-};
+pub use readable::{ReadableBackend, ReadableHtml, extract_readable_html, readable_from_html};
 pub use subtitles::{
     SubtitleCandidate, detect_content_language, extract_subtitles, get_preferred_languages,
     json3_to_srt, normalize_metadata_language, normalize_subtitle_payload,
@@ -144,19 +140,14 @@ pub struct UrlOutput {
 pub struct UrlConfig {
     pub ytdlp: YtDlp,
     pub readable_backend: ReadableBackend,
-    /// `curl` for readable-HTML page fetches.
-    pub curl: OsString,
 }
 
 impl UrlConfig {
-    /// `AIMD_YT_DLP`, `AIMD_READABLE_BACKEND`/`AIMD_NPX`, `AIMD_CURL`.
+    /// `AIMD_YT_DLP`, `AIMD_READABLE_BACKEND`/`AIMD_FIRECRAWL`/`AIMD_NPX`.
     pub fn from_env() -> Self {
         Self {
             ytdlp: YtDlp::from_env(),
             readable_backend: ReadableBackend::from_env(),
-            curl: std::env::var_os("AIMD_CURL")
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| "curl".into()),
         }
     }
 }
@@ -336,10 +327,10 @@ pub fn convert_url_with(
     ))
 }
 
-/// Readable HTML for a URL or local `.html` file, shaped like the Python
-/// converter result (`title` falls back to `""`).
+/// Readable HTML for a URL or local `.html` file (`title` falls back to
+/// `""`).
 pub fn convert_readable_html(source: &str, config: &UrlConfig) -> Result<UrlOutput> {
-    let page = extract_readable_html(source, &config.readable_backend, &config.curl)?;
+    let page = extract_readable_html(source, &config.readable_backend)?;
     Ok(UrlOutput {
         markdown: markitdown_normalize(&page.markdown),
         title: page.title.unwrap_or_default(),

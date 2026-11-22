@@ -296,6 +296,18 @@ pub trait Runtime: Send + Sync {
         ))
     }
 
+    /// Main-content Markdown of an HTTP(S) URL or local HTML file.
+    /// [`NativeRuntime`] runs `aimd_url::convert_readable_html` (Firecrawl
+    /// Local for URLs, `dom_smoothie` for files, Defuddle when
+    /// `AIMD_READABLE_BACKEND=defuddle`).
+    fn readable_html(&self, source: &str) -> Result<UrlOutput> {
+        let _ = source;
+        Err(AimdError::backend_unavailable(
+            "Readable HTML needs a runtime that implements readable_html (NativeRuntime \
+             delegates to aimd_url::convert_readable_html).",
+        ))
+    }
+
     /// `TextContext` chunk size.
     fn max_chunk_size(&self) -> usize {
         aimd_core::MAX_CHUNK_SIZE
@@ -318,9 +330,13 @@ pub fn process_input_with(
         .task_type
         .expect("ensure_supported_input returns a task");
     if route.source_kind == SourceKind::Url {
-        let output = rt.url_transcript(request, hooks)?;
+        let output = if task_type == TaskType::Readable {
+            rt.readable_html(&request.input_source)?
+        } else {
+            rt.url_transcript(request, hooks)?
+        };
         return Ok(ProcessResult {
-            task_type: TaskType::Transcript,
+            task_type,
             text_context: text_context_from_markdown(
                 &output.markdown,
                 &output.title,
@@ -402,6 +418,10 @@ fn process_local_file(
         TaskType::Convert => {
             let doc = rt.convert_document(input_path, output_dir.as_deref(), temp_dir, hooks)?;
             (doc.markdown, doc.title.filter(|t| !t.is_empty()))
+        }
+        TaskType::Readable => {
+            let page = rt.readable_html(&request.input_source)?;
+            (page.markdown, Some(page.title).filter(|t| !t.is_empty()))
         }
     };
     // MarkItDown normalizes every converter result (trailing whitespace per

@@ -25,6 +25,9 @@ pub fn get_input_route(
 ) -> InputRoute {
     let other_than = |task: TaskType| requested.is_some_and(|r| r != task);
     if is_url(input_source) {
+        if requested == Some(TaskType::Readable) {
+            return route(SourceKind::Url, Some(TaskType::Readable));
+        }
         if other_than(TaskType::Transcript) {
             return route(SourceKind::Url, None);
         }
@@ -36,6 +39,12 @@ pub fn get_input_route(
     }
     let suffix = suffix_lower(path);
     let suffix = suffix.as_str();
+    if requested == Some(TaskType::Readable) {
+        if matches!(suffix, ".html" | ".htm") {
+            return route(SourceKind::DocumentFile, Some(TaskType::Readable));
+        }
+        return route(SourceKind::Unknown, None);
+    }
     if requested == Some(TaskType::Ocr) {
         if IMAGE_FILE_EXTENSIONS.contains(&suffix) {
             return route(SourceKind::ImageFile, Some(TaskType::Ocr));
@@ -93,6 +102,12 @@ pub fn ensure_supported_input(
              .tiff) and PDF files.",
         ));
     }
+    if requested == Some(TaskType::Readable) {
+        return Err(AimdError::unsupported(
+            "Unsupported readable input. Readable extraction supports HTTP(S) URLs and .html/.htm \
+             files.",
+        ));
+    }
     Err(AimdError::unsupported(
         "Unsupported input source. Supported inputs: audio/video files, video URLs, supported \
          document files, and OCR-capable images/PDFs.",
@@ -104,7 +119,10 @@ pub fn parse_task(value: Option<&str>) -> Result<Option<TaskType>> {
     match value {
         None => Ok(None),
         Some(v) => TaskType::parse(v).map(Some).ok_or_else(|| {
-            AimdError::unsupported("Unsupported task. Supported tasks: transcript, convert, ocr.")
+            AimdError::unsupported(format!(
+                "Unsupported task. Supported tasks: {}.",
+                TaskType::NAMES
+            ))
         }),
     }
 }

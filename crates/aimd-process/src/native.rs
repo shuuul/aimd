@@ -35,6 +35,10 @@ impl Runtime for NativeRuntime {
         crate::convert_url(self, request, hooks)
     }
 
+    fn readable_html(&self, source: &str) -> Result<crate::UrlOutput> {
+        aimd_url::convert_readable_html(source, &aimd_url::UrlConfig::from_env())
+    }
+
     fn preflight_local(&self, modality: LocalModality) -> Result<()> {
         let what = match modality {
             LocalModality::Asr => ("ASR", "AIMD_ASR_BASE_URL"),

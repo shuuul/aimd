@@ -55,7 +55,7 @@ aimd page.png --output page.md
 aimd notes.txt --output notes.md
 ```
 
-Force a route with `--task transcript|convert|ocr` when auto-routing picks the wrong one.
+Force a route with `--task transcript|convert|ocr|readable` when auto-routing picks the wrong one. URLs default to `transcript`; use `--task readable` for articles and other web pages (main content as Markdown via Firecrawl Local; also works on local `.html` files).
 
 ## URL and transcript sources
 

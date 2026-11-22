@@ -27,7 +27,7 @@ use serde_json::{Map, Value, json};
 
 /// Docstring of the Python `process_input` tool (kept verbatim, including its
 /// indentation, because FastMCP publishes it as the tool description).
-const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    model selects the ASR model (qwen3-asr-1.7b default, qwen3-asr-0.6b)\n    or the OCR model (unlimited-ocr-2 default, unlimited-ocr, pp-ocrv6).\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR (1 and 2) select\n    the matching mlx-community checkpoint (default 4bit; bf16 not yet supported).\n    pp-ocrv6 ignores precision. Remote backends own their precision.\n\n    language forces the ASR language (e.g. zh, en, ja, yue); omit it to\n    auto-detect. OCR ignores it.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n\n    anchors (default False) marks OCR blocks with invisible\n    <!-- aimd:loc page=.. bbox=.. --> comments and transcript paragraphs\n    with [hh:mm:ss]; include_segments returns the located/timed segments\n    (with or without anchors).\n    ";
+const PROCESS_INPUT_DESCRIPTION: &str = "Process audio/video/url/documents and return markdown context.\n\n    task_type forces a route. URLs default to transcript (subtitles, then\n    audio ASR); readable extracts the main content of a web page (or a\n    local .html/.htm file) as Markdown through Firecrawl Local.\n\n    model selects the ASR model (qwen3-asr-1.7b default, qwen3-asr-0.6b)\n    or the OCR model (unlimited-ocr-2 default, unlimited-ocr, pp-ocrv6).\n\n    precision selects model quantization: 4bit, 6bit, 8bit, or bf16 (dash\n    variants like 4-bit are accepted). Qwen3-ASR and Unlimited-OCR (1 and 2) select\n    the matching mlx-community checkpoint (default 4bit; bf16 not yet supported).\n    pp-ocrv6 ignores precision. Remote backends own their precision.\n\n    language forces the ASR language (e.g. zh, en, ja, yue); omit it to\n    auto-detect. OCR ignores it.\n\n    context is free-form ASR biasing text (proper nouns, names, domain\n    vocabulary) that improves transcription accuracy. metadata_context\n    (default True) additionally injects URL page metadata (title,\n    description, tags) as ASR context for URL inputs.\n\n    anchors (default False) marks OCR blocks with invisible\n    <!-- aimd:loc page=.. bbox=.. --> comments and transcript paragraphs\n    with [hh:mm:ss]; include_segments returns the located/timed segments\n    (with or without anchors).\n    ";
 
 /// A tool call failure; rendered as an `isError` tool result.
 #[derive(Debug)]
@@ -231,7 +231,7 @@ impl Fields<'_> {
                 self.fail(
                     "task_type",
                     &format!(
-                        "Input should be 'transcript', 'convert' or 'ocr' \
+                        "Input should be 'transcript', 'convert', 'ocr' or 'readable' \
                          [type=literal_error, input_value={shown}, input_type={kind}]"
                     ),
                 );
@@ -343,7 +343,7 @@ pub fn tools() -> Vec<Tool> {
     props.insert(
         "task_type".into(),
         nullable(
-            json!({"enum": ["transcript", "convert", "ocr"], "type": "string"}),
+            json!({"enum": ["transcript", "convert", "ocr", "readable"], "type": "string"}),
             "Task Type",
         ),
     );

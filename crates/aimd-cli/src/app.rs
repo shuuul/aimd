@@ -125,7 +125,8 @@ pub fn run(
             None => {
                 let _ = writeln!(
                     stderr,
-                    "Error: Unsupported task. Supported tasks: transcript, convert, ocr."
+                    "Error: Unsupported task. Supported tasks: {}.",
+                    TaskType::NAMES
                 );
                 return 1;
             }
@@ -172,6 +173,7 @@ fn process(
         Some(TaskType::Transcript) => "Transcription",
         Some(TaskType::Convert) => "Conversion",
         Some(TaskType::Ocr) => "OCR",
+        Some(TaskType::Readable) => "Readable extraction",
         None => "Processing",
     };
     let generic = |e: &dyn std::fmt::Display| format!("{task_name} failed: {e}");
@@ -233,8 +235,11 @@ fn process(
                 TaskType::Transcript => "transcript",
                 TaskType::Convert => "converted",
                 TaskType::Ocr => "ocr",
+                TaskType::Readable => "readable",
             };
-            let dir = if result.task_type == TaskType::Transcript {
+            let dir = if result.task_type == TaskType::Transcript
+                || aimd_core::is_url(&cli.input_source)
+            {
                 Some(std::env::current_dir().map_err(|e| generic(&e))?)
             } else {
                 parent_of(&cli.input_source)
@@ -273,6 +278,7 @@ fn process(
         TaskType::Transcript => ("Transcript saved to", "Successfully transcribed"),
         TaskType::Ocr => ("OCR output saved to", "Successfully OCR processed"),
         TaskType::Convert => ("Converted file saved to", "Successfully converted"),
+        TaskType::Readable => ("Readable output saved to", "Successfully extracted"),
     };
     log_info!("{log_line}: {shown}");
     let _ = writeln!(stdout, "{echo}");

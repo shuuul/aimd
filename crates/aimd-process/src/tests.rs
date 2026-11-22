@@ -310,6 +310,12 @@ impl Runtime for Mock {
             .clone()
             .ok_or_else(|| AimdError::backend_unavailable("no mock url"))
     }
+
+    fn readable_html(&self, _source: &str) -> Result<UrlOutput> {
+        self.url
+            .clone()
+            .ok_or_else(|| AimdError::backend_unavailable("no mock url"))
+    }
 }
 
 /// Hooks recording progress; cancels once `cancel_after` progress events
@@ -526,13 +532,14 @@ fn routes_by_source_kind_and_requested_task() {
         std::fs::write(&p, b"x").unwrap();
         p.to_string_lossy().into_owned()
     };
-    let (wav, png, pdf, epub, mkv, doc) = (
+    let (wav, png, pdf, epub, mkv, doc, html) = (
         touch("a.wav"),
         touch("a.PNG"),
         touch("a.pdf"),
         touch("a.epub"),
         touch("a.mkv"),
         touch("a.doc"),
+        touch("a.HTML"),
     );
     let text_pdf = Mock::default();
     let scanned = Mock {
@@ -553,6 +560,16 @@ fn routes_by_source_kind_and_requested_task() {
         r("https://youtu.be/x", Some(Convert), &text_pdf),
         (Url, None)
     );
+    assert_eq!(
+        r("https://example.com/post", Some(Readable), &text_pdf),
+        (Url, Some(Readable))
+    );
+    assert_eq!(r(&html, None, &text_pdf), (DocumentFile, Some(Convert)));
+    assert_eq!(
+        r(&html, Some(Readable), &text_pdf),
+        (DocumentFile, Some(Readable))
+    );
+    assert_eq!(r(&epub, Some(Readable), &text_pdf), (Unknown, None));
     assert_eq!(r(&wav, None, &text_pdf), (AudioFile, Some(Transcript)));
     assert_eq!(r(&wav, Some(Convert), &text_pdf), (AudioFile, None));
     assert_eq!(r(&mkv, None, &text_pdf), (VideoFile, Some(Transcript)));
@@ -572,6 +589,9 @@ fn routes_by_source_kind_and_requested_task() {
         "Unsupported OCR input. OCR supports image files (.png, .jpg, .jpeg, .webp, .tif, .tiff) \
          and PDF files."
     );
+    let err = ensure_supported_input(&pdf, Some(Readable), &text_pdf).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::UnsupportedInput);
+    assert!(err.message.starts_with("Unsupported readable input"));
     let err = ensure_supported_input("missing.wav", None, &text_pdf).unwrap_err();
     assert_eq!(err.kind, ErrorKind::InputNotFound);
     assert_eq!(err.message, "Input file not found: missing.wav");
@@ -584,7 +604,7 @@ fn routes_by_source_kind_and_requested_task() {
     let err = route::parse_task(Some("summarize")).unwrap_err();
     assert_eq!(
         err.message,
-        "Unsupported task. Supported tasks: transcript, convert, ocr."
+        "Unsupported task. Supported tasks: transcript, convert, ocr, readable."
     );
 }
 
@@ -708,6 +728,17 @@ fn url_results_carry_platform_and_source_uri() {
     let mut ocr_req = ProcessInput::new("https://youtu.be/x");
     ocr_req.task_type = Some(TaskType::Ocr);
     assert!(process_input_with(&ocr_req, &NoHooks, &rt).is_err());
+    assert_eq!(rt.url_requests.lock().unwrap().len(), 1);
+    // `readable` goes to the readable seam, not the transcript pipeline.
+    let mut readable_req = ProcessInput::new("https://example.com/post");
+    readable_req.task_type = Some(TaskType::Readable);
+    let result = process_input_with(&readable_req, &NoHooks, &rt).unwrap();
+    assert_eq!(result.task_type, TaskType::Readable);
+    assert_eq!(
+        result.asset_base_uri.as_deref(),
+        Some("https://example.com/post")
+    );
+    assert_eq!(result.markdown, "# Video\n\ntext");
     assert_eq!(rt.url_requests.lock().unwrap().len(), 1);
 
     struct Stub;

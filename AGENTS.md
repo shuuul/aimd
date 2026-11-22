@@ -24,7 +24,9 @@ Distribution:
   driver, CUDA 13, cuDNN 9 and NCCL 2 come from the system. No Linux bottles: hosted
   runners have no NVIDIA driver to load `libmlx.so`.
 - **Runtime deps** (formula `depends_on`): `mlx` (macOS) / `shuuul/tap/mlx-cuda`
-  (Linux), `ffmpeg`, `mupdf` (`mutool`), `pandoc`, `yt-dlp`. Model weights download from Hugging Face on first use into the HF
+  (Linux), `ffmpeg`, `mupdf` (`mutool`), `pandoc`, `yt-dlp`, `shuuul/tap/firecrawl-local`
+  (AGPL-3.0, so it stays a separate binary run as a subprocess, never a linked crate).
+  Model weights download from Hugging Face on first use into the HF
   cache.
 - **Version source**: `[workspace.package] version` in the root `Cargo.toml`.
 
@@ -41,7 +43,7 @@ crates/
 ├── aimd-core/      # models, AimdError/ErrorKind, ProcessHooks, text shaping, precision, remote config,
 │                   # extension tables, output persistence + shared help texts, logging; no heavy deps
 ├── aimd-doc/       # Pandoc conversion, EPUB (hand-written zip + OPF/spine), cleanup, pdf-inspector PDFs
-├── aimd-url/       # yt-dlp metadata/subtitles/audio, cookies, metadata ASR context, dom_smoothie readable HTML
+├── aimd-url/       # yt-dlp metadata/subtitles/audio, cookies, metadata ASR context, readable HTML (firecrawl-local)
 ├── aimd-process/   # routing + orchestration: Runtime seam, local ASR/OCR, remote backends, model resolution, HF cache
 ├── aimd-cli/       # `aimd` binary: hand-written arg parser, output naming, .env loading
 ├── aimd-mcp/       # `aimd-mcp` binary: rmcp stdio server (healthz, process_input)
@@ -132,7 +134,8 @@ flowchart TD
   stays in the interface crate.
 - **Route model**: classify inputs with `InputRoute { source_kind, task_type }`.
   `source_kind` is the supplied input kind, and `task_type` (`transcript`, `convert`,
-  `ocr`) selects processing logic.
+  `ocr`, `readable`) selects processing logic. `readable` is opt-in only (URLs and
+  `.html`/`.htm` files); URLs auto-route to `transcript`.
 - **Runtime seam**: everything that touches the system (env, `PATH`, subprocesses, model
   loading, device preflight, PDF probing) goes through `aimd_process::Runtime`, so
   hermetic tests can substitute fakes. Interfaces receive an `Arc<dyn Runtime>` or a
@@ -263,9 +266,14 @@ flowchart TD
   PDFs use the `pdf-inspector` crate; scanned pages render with `mutool draw`.
   Pandoc 3.12 rejects xlsx workbooks whose rels use absolute targets (openpyxl
   output); Excel-style relative targets convert.
-- **Readable HTML**: `aimd_url::convert_readable_html` (dom_smoothie, with
-  `AIMD_READABLE_BACKEND=defuddle` as an escape hatch) exists but is not routed from any
-  interface. Do not advertise it until a `TaskType` routes to it.
+- **Readable HTML**: `TaskType::Readable` (CLI `--task readable`, MCP
+  `task_type: "readable"`) goes through `Runtime::readable_html` ->
+  `aimd_url::convert_readable_html`. URLs run `firecrawl-local scrape <url> --format
+  markdown` (`AIMD_FIRECRAWL` override) and parse its JSON envelope; `success: false` or
+  empty markdown (blocked pages carry a `warning`) is `ProcessingFailed`, a missing binary
+  `BackendUnavailable`. Firecrawl Local does not read files, so local HTML uses
+  `dom_smoothie`. `AIMD_READABLE_BACKEND=defuddle` routes URLs and files to `npx defuddle
+  parse` (`AIMD_NPX`); Defuddle is optional and not a brew dependency.
 
 ## DEPENDENCY POLICY
 
@@ -484,7 +492,7 @@ Tests are lean by rule; weights are the expensive resource.
 
 ```bash
 # Prerequisites
-brew install mlx ffmpeg mupdf pandoc yt-dlp prek
+brew install mlx ffmpeg mupdf pandoc yt-dlp prek shuuul/tap/firecrawl-local
 
 # Code quality
 cargo fmt --all --check
