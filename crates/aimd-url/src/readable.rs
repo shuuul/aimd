@@ -204,22 +204,18 @@ fn defuddle(source: &str, npx: &OsString) -> Result<ReadableHtml> {
 pub fn extract_readable_html(source: &str, backend: &ReadableBackend) -> Result<ReadableHtml> {
     match backend {
         ReadableBackend::Defuddle { npx } => defuddle(source, npx),
-        ReadableBackend::DomSmoothie => {
-            if is_http_url(source) {
-                let html = fetch_html(source, curl)?;
-                readable_from_html(&html, Some(source))
-            } else {
-                let bytes = std::fs::read(source).map_err(|err| {
-                    if err.kind() == IoErrorKind::NotFound {
-                        AimdError::not_found(format!("Input not found: {source}"))
-                    } else {
-                        AimdError::failed(format!("Cannot read {source}: {err}"))
-                    }
-                })?;
-                let mut out = readable_from_html(&String::from_utf8_lossy(&bytes), None)?;
-                out.source = Some(source.to_string());
-                Ok(out)
-            }
+        ReadableBackend::Firecrawl { program } if is_http_url(source) => firecrawl(source, program),
+        ReadableBackend::Firecrawl { .. } => {
+            let bytes = std::fs::read(source).map_err(|err| {
+                if err.kind() == IoErrorKind::NotFound {
+                    AimdError::not_found(format!("Input not found: {source}"))
+                } else {
+                    AimdError::failed(format!("Cannot read {source}: {err}"))
+                }
+            })?;
+            let mut out = readable_from_html(&String::from_utf8_lossy(&bytes), None)?;
+            out.source = Some(source.to_string());
+            Ok(out)
         }
     }
 }
