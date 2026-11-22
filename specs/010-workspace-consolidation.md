@@ -1,7 +1,7 @@
 ---
 id: "010"
 title: "Workspace consolidation: one aimd library crate over the engine"
-status: Draft
+status: Active
 created: 2026-11-23
 updated: 2026-11-23
 coordinator: "pi (Claude Opus 5.5) session with shuuul"
@@ -119,6 +119,7 @@ Not in scope:
 | 2026-11-23 | `sys::System` trait holds `env`, `which`, `run` (current `Runtime` defaults); `Runtime: System` adds `preflight_local`, `load_asr`, `load_ocr`, `pdf_*`. `doc` and `url` take `&dyn System`. `pandoc::Runner` is deleted. `convert_document` / `url_transcript` stay on `Runtime` until WS-04 shows tests no longer need them, then are removed. | One seam for every subprocess; fakes move from coarse methods to tool level. | WS-04 |
 | 2026-11-23 | `AudioTranscriber` becomes `pub(crate)` inside `aimd::url`. | Its only reason to be public was the crate cycle. | WS-03 |
 | 2026-11-23 | `aimd-engine` feature `mlx` (default on) makes `aimd-mlx` optional and gates graphs/pipelines; mlx-free helpers used by remote paths (`parse_qwen_output`, `detect_repetition_loop`, `normalize_unlimited_ocr_markdown`, `render_unlimited_ocr2`, tokenizer language tables, wav loading) compile without it. `normalize_unlimited_ocr_markdown` moves out of `unlimited_ocr/generate.rs` into an mlx-free module. `aimd` feature `native` (default) enables `aimd-engine/mlx` and `NativeRuntime` model loading. | Enables a remote-only build without MLX; the pure helpers already have no `aimd_mlx` imports except `generate.rs`. | WS-05 |
+| 2026-11-23 | WS-05 (`native` feature) stays in this spec rather than a follow-up (shuuul). | The engine feature split touches the same imports WS-03 rewrites; doing it once avoids a second pass over the moved modules. | WS-05 |
 | 2026-11-23 | Package names `aimd-cli` / `aimd-mcp` and their paths stay; binary names `aimd` / `aimd-mcp` stay. | Release workflow and Homebrew formula build by package/path. | WS-03, WS-06 |
 
 ## Workstreams
@@ -198,6 +199,14 @@ Append entries rather than rewriting another worker's record.
 - Blockers: none.
 - Next action: decide whether WS-05 (`native` feature) stays in this spec or
   becomes a follow-up; claim WS-01 and WS-02.
+
+### 2026-11-23 — pi / coordinator — activation
+
+- Changed: recorded the WS-05 scope decision; status Draft -> Active.
+- Evidence: shuuul confirmed WS-05 stays in scope.
+- Remaining: all workstreams Pending.
+- Blockers: none.
+- Next action: claim WS-01 and WS-02 (parallel).
 
 ## Completion summary
 
