@@ -1268,6 +1268,38 @@ fn asr_input_validation_messages() {
 // Remote ASR (test_remote_backends)
 // ---------------------------------------------------------------------------
 
+fn remote_audio_runtime(duration: &'static str) -> Mock {
+    Mock::default()
+        .tool("ffmpeg")
+        .tool("ffprobe")
+        .respond(move |program, args| match program {
+            "ffprobe" => ok_output(duration),
+            "ffmpeg" => {
+                let output = args.last().unwrap();
+                if output.ends_with(".flac") {
+                    for pair in [
+                        ["-ar", "16000"],
+                        ["-ac", "1"],
+                        ["-sample_fmt", "s16"],
+                        ["-c:a", "flac"],
+                    ] {
+                        assert!(args.windows(2).any(|args| args == pair));
+                    }
+                    std::fs::write(output, b"fLaC")?;
+                } else if output.contains("%03d") {
+                    for index in ["000", "001"] {
+                        write_wav(Path::new(&output.replace("%03d", index)));
+                    }
+                } else {
+                    assert!(args[2].ends_with(".flac"));
+                    write_wav(Path::new(output));
+                }
+                ok_output("")
+            }
+            _ => unreachable!(),
+        })
+}
+
 #[test]
 fn remote_asr_posts_multipart_and_parses_qwen_output() {
     let dir = TempDir::new(None, "aimd-rasr-").unwrap();
@@ -1283,7 +1315,7 @@ fn remote_asr_posts_multipart_and_parses_qwen_output() {
     req.language = Some("en".into());
     req.context = Some("ctx".into());
     req.precision = Some("4bit".into());
-    let rt = Mock::default();
+    let rt = remote_audio_runtime("2\n");
     let (result, logs) = capture(|| process_input_with(&req, &NoHooks, &rt));
     assert_eq!(result.unwrap().markdown, "remote words");
     let recorded = server.join().unwrap();
@@ -1299,7 +1331,7 @@ fn remote_asr_posts_multipart_and_parses_qwen_output() {
     assert!(body.contains("name=\"model\"\r\n\r\nQwen3-ASR-1.7B\r\n"));
     assert!(body.contains("name=\"language\"\r\n\r\nen\r\n"));
     assert!(body.contains("name=\"prompt\"\r\n\r\nctx\r\n"));
-    assert!(body.contains("filename=\"clip.wav\"\r\nContent-Type: audio/x-wav\r\n\r\nRIFF"));
+    assert!(body.contains(".flac\"\r\nContent-Type: audio/x-flac\r\n\r\nfLaC"));
     let precision_warnings: Vec<_> = warnings(&logs)
         .into_iter()
         .filter(|w| w.starts_with("Ignoring ASR precision"))
@@ -1322,7 +1354,7 @@ fn remote_asr_nemotron_reference_keeps_the_transcription_instruction() {
     req.asr_model = Some("nemotron-transcribe".into());
     req.language = Some("zh".into());
     req.context = Some("Title: 正式会议".into());
-    let rt = Mock::default();
+    let rt = remote_audio_runtime("2\n");
     assert_eq!(
         process_input_with(&req, &NoHooks, &rt).unwrap().markdown,
         "大家好"
@@ -1346,47 +1378,68 @@ fn remote_asr_nemotron_reference_keeps_the_transcription_instruction() {
 }
 
 #[test]
-fn remote_asr_retries_unsupported_m4a_as_wav_only_when_rejected() {
+fn remote_asr_retries_unsupported_flac_as_wav_only_when_rejected() {
     let dir = TempDir::new(None, "aimd-rasr-").unwrap();
     let m4a = dir.path().join("clip.m4a");
     std::fs::write(&m4a, b"m4a").unwrap();
     let refusal = r#"{"error":{"message":"Invalid or unsupported audio file.","param":"file"}}"#;
     let success = r#"{"text":"hello"}"#;
-    for reject in [false, true] {
+    for rejection in [
+        None,
+        Some((400, refusal)),
+        Some((415, "Unsupported Media Type")),
+    ] {
         let mut responses = Vec::new();
-        if reject {
-            responses.push((400, refusal.into()));
+        if let Some((status, body)) = rejection {
+            responses.push((status, body.into()));
         }
         responses.push((200, success.into()));
         let (base, server) = serve(responses);
         let mut req = request(&m4a);
         req.asr_base_url = Some(base);
-        let rt = Mock::default()
-            .tool("ffmpeg")
-            .tool("ffprobe")
-            .respond(|program, args| match program {
-                "ffprobe" => ok_output("2\n"),
-                "ffmpeg" => {
-                    write_wav(Path::new(args.last().unwrap()));
-                    ok_output("")
-                }
-                _ => unreachable!(),
-            });
+        let rt = remote_audio_runtime("2\n");
         assert_eq!(
             process_input_with(&req, &NoHooks, &rt).unwrap().markdown,
             "hello"
         );
         let recorded = server.join().unwrap();
-        assert!(String::from_utf8_lossy(&recorded[0].body).contains("filename=\"clip.m4a\""));
+        assert!(
+            String::from_utf8_lossy(&recorded[0].body)
+                .contains(".flac\"\r\nContent-Type: audio/x-flac\r\n\r\nfLaC")
+        );
         let runs = rt.runs();
-        assert_eq!(runs.len(), 1 + usize::from(reject));
-        if reject {
+        assert!(runs[1].1[2].ends_with("clip.m4a"));
+        assert!(!Path::new(runs[1].1.last().unwrap()).exists());
+        assert_eq!(runs.len(), 2 + usize::from(rejection.is_some()));
+        if rejection.is_some() {
             assert!(
                 String::from_utf8_lossy(&recorded[1].body)
                     .contains(".wav\"\r\nContent-Type: audio/x-wav\r\n\r\nRIFF")
             );
-            assert!(!Path::new(runs[1].1.last().unwrap()).exists());
+            assert!(!Path::new(runs[2].1.last().unwrap()).exists());
         }
+    }
+}
+
+#[test]
+fn remote_asr_uploads_each_long_audio_segment_as_flac() {
+    let dir = TempDir::new(None, "aimd-rasr-").unwrap();
+    let wav = dir.path().join("clip.wav");
+    write_wav(&wav);
+    let (base, server) = serve(vec![(200, r#"{"text":"hello"}"#.into()); 2]);
+    let mut req = request(&wav);
+    req.asr_base_url = Some(base);
+    let rt = remote_audio_runtime("601\n");
+    assert_eq!(
+        process_input_with(&req, &NoHooks, &rt).unwrap().markdown,
+        "hello hello"
+    );
+    let runs = rt.runs();
+    assert_eq!(runs.len(), 4);
+    for (index, request) in server.join().unwrap().into_iter().enumerate() {
+        let body = String::from_utf8_lossy(&request.body);
+        assert!(body.contains(".flac\"\r\nContent-Type: audio/x-flac\r\n\r\nfLaC"));
+        assert!(runs[2 + index].1[2].ends_with(&format!("seg_clip_{index:03}.wav")));
     }
 }
 
@@ -1415,11 +1468,12 @@ fn remote_asr_error_mapping() {
             "Remote ASR backend returned an invalid JSON response",
         ),
     ];
+    let rt = remote_audio_runtime("2\n");
     for (status, body, kind, message) in cases {
         let (base, server) = serve(vec![(status, body.into())]);
         let mut req = request(&wav);
         req.asr_base_url = Some(base);
-        let (err, _) = capture(|| process_input_with(&req, &NoHooks, &Mock::default()));
+        let (err, _) = capture(|| process_input_with(&req, &NoHooks, &rt));
         let err = err.unwrap_err();
         assert_eq!((err.kind, err.message.as_str()), (kind, message));
         server.join().unwrap();
@@ -1429,14 +1483,14 @@ fn remote_asr_error_mapping() {
     let (base, server) = serve(vec![(200, r#"{"text":"  "}"#.into())]);
     let mut req = request(&wav);
     req.asr_base_url = Some(base);
-    let (result, _) = capture(|| process_input_with(&req, &NoHooks, &Mock::default()));
+    let (result, _) = capture(|| process_input_with(&req, &NoHooks, &rt));
     assert_eq!(result.unwrap().markdown, "");
     server.join().unwrap();
 
     let mut req = request(&wav);
     let url = closed_port_url();
     req.asr_base_url = Some(url.clone());
-    let (err, _) = capture(|| process_input_with(&req, &NoHooks, &Mock::default()));
+    let (err, _) = capture(|| process_input_with(&req, &NoHooks, &rt));
     let err = err.unwrap_err();
     assert_eq!(err.kind, ErrorKind::BackendUnavailable);
     assert!(

@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::anchors;
+use crate::audio::AudioFormat;
 use crate::ext::{AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS, is_audio_extension, suffix_lower};
 use crate::remote_config::resolve_remote_backend_with;
 use crate::{
@@ -370,15 +371,14 @@ fn transcribe_remote(
     temp_dir: Option<&Path>,
     context: Option<&str>,
 ) -> Result<String> {
-    let converted = audio::convert_to_wav_if_needed(rt, path, temp_dir)?;
-    let request_path = converted.as_ref().map_or(path, |c| c.path());
+    // Encoding each segment separately writes a complete FLAC stream header.
+    let encoded = audio::encode_audio(rt, path, AudioFormat::Flac, temp_dir)?;
+    let request_path = encoded.path();
     let send = |path: &Path| remote::transcribe(config, path, options.language.as_deref(), context);
     match send(request_path) {
-        Err(remote::RemoteAsrError::UnsupportedAudio(_))
-            if suffix_lower(request_path) != ".wav" =>
-        {
+        Err(remote::RemoteAsrError::UnsupportedAudio(_)) => {
             log_info!("Remote ASR rejected the audio format. Retrying as WAV.");
-            let wav = audio::convert_to_wav(rt, path, temp_dir)?;
+            let wav = audio::convert_to_wav(rt, request_path, temp_dir)?;
             Ok(send(wav.path())?)
         }
         reply => reply.map_err(AimdError::from),

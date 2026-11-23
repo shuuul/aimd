@@ -82,6 +82,7 @@ fn map_asr_error(base_url: &str, error: HttpError) -> RemoteAsrError {
                     error["param"] == "file"
                         && error["message"] == "Invalid or unsupported audio file."
                 }),
+            HttpError::Status(415, _) => true,
             _ => false,
         };
     let error = map_http_error("ASR", base_url, error);

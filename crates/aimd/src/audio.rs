@@ -2,16 +2,25 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::ext::{SUPPORTED_AUDIO_FORMATS, suffix_lower};
+use crate::ext::suffix_lower;
 use crate::{AimdError, Result, log_info};
 
 use crate::Runtime;
 use crate::util::tempdir::{TempDir, TempFile};
 
-fn sorted_supported_formats() -> String {
-    let mut formats = SUPPORTED_AUDIO_FORMATS.to_vec();
-    formats.sort_unstable();
-    formats.join(", ")
+#[derive(Clone, Copy)]
+pub enum AudioFormat {
+    Wav,
+    Flac,
+}
+
+impl AudioFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Wav => ".wav",
+            Self::Flac => ".flac",
+        }
+    }
 }
 
 fn lossy(path: &Path) -> String {
@@ -29,48 +38,63 @@ pub fn convert_to_wav(
     source: &Path,
     temp_dir: Option<&Path>,
 ) -> Result<TempFile> {
+    encode_audio(rt, source, AudioFormat::Wav, temp_dir)
+}
+
+/// Encode 16 kHz mono signed 16-bit audio.
+pub fn encode_audio(
+    rt: &dyn Runtime,
+    source: &Path,
+    format: AudioFormat,
+    temp_dir: Option<&Path>,
+) -> Result<TempFile> {
     let suffix = suffix_lower(source);
+    let target = format.extension()[1..].to_ascii_uppercase();
     let Some(ffmpeg) = rt.which("ffmpeg") else {
         return Err(AimdError::backend_unavailable(format!(
-            "Cannot convert {suffix} to WAV: ffmpeg not found. Install ffmpeg (`brew install \
-             ffmpeg`) or provide a supported format ({}).",
-            sorted_supported_formats()
+            "Cannot convert {suffix} to {target}: ffmpeg not found. Install ffmpeg."
         )));
     };
-    let wav = TempFile::reserve(temp_dir, "aimd-asr-", ".wav")?;
-    log_info!("Converting {suffix} to WAV for transcription backend");
-    let args = [
-        "-y".to_string(),
-        "-i".to_string(),
-        lossy(source),
-        "-ar".to_string(),
-        "16000".to_string(),
-        "-ac".to_string(),
-        "1".to_string(),
-        lossy(wav.path()),
+    let audio = TempFile::reserve(temp_dir, "aimd-asr-", format.extension())?;
+    log_info!("Converting {suffix} to {target} for transcription backend");
+    let mut args = vec![
+        "-y".into(),
+        "-i".into(),
+        source.as_os_str().to_owned(),
+        "-ar".into(),
+        "16000".into(),
+        "-ac".into(),
+        "1".into(),
     ];
+    if matches!(format, AudioFormat::Flac) {
+        // Set the block size explicitly. When resampling, FFmpeg can otherwise
+        // choose very short FLAC frames and exceed the equivalent WAV size.
+        args.extend(
+            [
+                "-vn",
+                "-c:a",
+                "flac",
+                "-sample_fmt",
+                "s16",
+                "-frame_size",
+                "1024",
+                "-map_metadata",
+                "-1",
+            ]
+            .map(Into::into),
+        );
+    }
+    args.push(audio.path().as_os_str().to_owned());
     let out = rt
-        .run(&ffmpeg, &args.map(Into::into), None)
-        .map_err(|e| AimdError::failed(format!("ffmpeg conversion to WAV failed: {e}")))?;
+        .run(&ffmpeg, &args, None)
+        .map_err(|e| AimdError::failed(format!("ffmpeg conversion to {target} failed: {e}")))?;
     if !out.success() {
         return Err(AimdError::failed(format!(
-            "ffmpeg conversion to WAV failed: {}",
+            "ffmpeg conversion to {target} failed: {}",
             out.stderr_text()
         )));
     }
-    Ok(wav)
-}
-
-/// Remote uploads: convert only formats outside `SUPPORTED_AUDIO_FORMATS`.
-pub fn convert_to_wav_if_needed(
-    rt: &dyn Runtime,
-    source: &Path,
-    temp_dir: Option<&Path>,
-) -> Result<Option<TempFile>> {
-    if SUPPORTED_AUDIO_FORMATS.contains(&suffix_lower(source).as_str()) {
-        return Ok(None);
-    }
-    convert_to_wav(rt, source, temp_dir).map(Some)
+    Ok(audio)
 }
 
 /// Parse `Duration: hh:mm:ss.ss` from ffmpeg stderr.

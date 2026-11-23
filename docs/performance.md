@@ -32,10 +32,39 @@ normalizing punctuation and case, the two transcripts differed by nine word
 edits over 1,828 words. This measures agreement between runs. The recording
 was used without a time-aligned reference transcript.
 
-The default stays at 600 s per segment. Each 16 kHz mono PCM WAV segment is
-about 19.2 MB, within the tested server's 25 MiB file limit. A longer segment
-limit based on compressed MP3 alone would also need to account for WAV uploads
-and files that require transcoding.
+The current client encodes the same 600 s segments as 16 kHz mono 16-bit FLAC.
+On the same recording, the two FLAC uploads totaled 11.84 MB of audio, down
+56% from the WAV uploads. The request took 19.00 s end to end in one run, and
+Nemotron returned the same text byte-for-byte as the segmented WAV run. The
+FLAC files also decoded to the same PCM bytes as the WAV segments. At this
+segment length, a retry as PCM WAV is about 19.2 MB per full segment, within
+the tested server's 25 MiB file limit.
+
+### Context prompts
+
+The [NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B#context-asr)
+reports 3.33% WER without context, 3.34% with coarse context, and 1.71% with
+fine context on ContextASR-Bench. It recommends `Context terms:` for domain
+vocabulary. In zspark's transcription route, a nonempty `prompt` supplies the
+full instruction in the user turn before the audio. aimd keeps the verbatim
+transcription instruction next to the audio and puts the reference separately
+before it.
+
+On 36 English and 36 Mandarin clips, we compared three prompt forms with
+domain terms unrelated to those clips. This measures susceptibility to
+irrelevant terms in the local test corpus.
+
+| Prompt | English WER | Mandarin CER | Mandarin clips containing an unrelated term |
+| --- | ---: | ---: | ---: |
+| No context | 0.65% | 7.52% | 0/36 |
+| aimd reference block, then verbatim instruction | 0.87% | 10.78% | 1/36 |
+| Model card's `Context terms:` prompt | 0.87% | 19.86% | 9/36 |
+| `Context terms:` followed by the verbatim instruction | 0.87% | 20.85% | 7/36 |
+
+On a separate Mandarin domain-terms clip, the aimd and model-card prompts
+both recovered `寒武纪`. Both wrote `昇腾` as `升腾`. Prefer a short list of
+names and spellings likely to occur in the recording. `--no-context` disables
+platform metadata when a separate `--context` glossary is sufficient.
 
 ## Native Rust engine (MLX backend)
 

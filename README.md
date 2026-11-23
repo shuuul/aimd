@@ -482,10 +482,10 @@ names in snake_case (`asr_base_url`, ...).
 For a server exposing `nemotron-transcribe`, set
 `--asr-model nemotron-transcribe` with its `--asr-base-url`. aimd wraps ASR
 context in a verbatim transcription instruction that marks it as reference
-text and includes any requested language. For remote ASR, aimd sends M4A and
-other directly supported input formats as-is first. If the server returns an
-explicit unsupported audio file error, aimd uses ffmpeg to retry once as
-16 kHz mono WAV.
+text and includes any requested language. Remote ASR uses ffmpeg to encode
+all audio as 16 kHz mono 16-bit FLAC before upload, including each segment
+of a long recording. If the server rejects the format, aimd retries that
+upload once with the same samples in WAV.
 
 The OCR instruction follows the served model name. A name starting with
 `Unlimited-OCR-2` (after any `org/` prefix; case, `_` and spaces ignored) gets

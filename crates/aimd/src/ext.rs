@@ -15,10 +15,6 @@ pub const VIDEO_FILE_EXTENSIONS: &[&str] = &[
     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".ts", ".m4v",
 ];
 
-/// Formats the Python ASR backends read without an ffmpeg transcode
-/// (`audio_utils.SUPPORTED_AUDIO_FORMATS`); remote ASR uploads these as-is.
-pub const SUPPORTED_AUDIO_FORMATS: &[&str] = &[".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"];
-
 /// OCR image inputs.
 pub const IMAGE_FILE_EXTENSIONS: &[&str] = &[".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"];
 
@@ -132,7 +128,6 @@ mod tests {
     fn extension_tables() {
         // test_audio_transcoding.py::test_mp4a_*; test_ocr.py::test_ocr_extension_constants_are_centralized
         assert!(AUDIO_FILE_EXTENSIONS.contains(&".mp4a"));
-        assert!(!SUPPORTED_AUDIO_FORMATS.contains(&".mp4a"));
         assert!(is_audio_extension(".mkv"));
         assert!(OCR_DOCUMENT_EXTENSIONS.contains(&".pdf"));
         assert!(is_convert_extension(".epub"));
