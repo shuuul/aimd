@@ -451,14 +451,14 @@ fn warnings(logs: &[(Level, String)]) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-struct Recorded {
-    request_line: String,
+pub(crate) struct Recorded {
+    pub(crate) request_line: String,
     headers: Vec<(String, String)>,
-    body: Vec<u8>,
+    pub(crate) body: Vec<u8>,
 }
 
 impl Recorded {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -468,7 +468,9 @@ impl Recorded {
 
 /// Serve `responses` (status, body) in order; returns the base URL and the
 /// recorded requests (joined once every response was sent).
-fn serve(responses: Vec<(u16, String)>) -> (String, std::thread::JoinHandle<Vec<Recorded>>) {
+pub(crate) fn serve(
+    responses: Vec<(u16, String)>,
+) -> (String, std::thread::JoinHandle<Vec<Recorded>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = std::thread::spawn(move || {

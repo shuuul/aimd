@@ -219,6 +219,9 @@ async fn forwards_precision_remote_and_flags() {
             "precision": "4bit",
             "context": "names",
             "metadata_context": false,
+            "llm_base_url": "http://chat.example/v1",
+            "llm_model": "glossary-model",
+            "llm_api_key": "test-token",
             "raw_transcript": true,
             "asr_base_url": "http://asr.example/v1",
             "ocr_base_url": "http://ocr.example/v1",
@@ -233,6 +236,9 @@ async fn forwards_precision_remote_and_flags() {
     assert_eq!(r.precision.as_deref(), Some("4bit"));
     assert_eq!(r.context.as_deref(), Some("names"));
     assert!(!r.metadata_context && r.raw_transcript);
+    assert_eq!(r.llm_base_url.as_deref(), Some("http://chat.example/v1"));
+    assert_eq!(r.llm_model.as_deref(), Some("glossary-model"));
+    assert_eq!(r.llm_api_key.as_deref(), Some("test-token"));
     assert_eq!(r.asr_base_url.as_deref(), Some("http://asr.example/v1"));
     assert_eq!(r.ocr_base_url.as_deref(), Some("http://ocr.example/v1"));
     assert_eq!(r.cookies, None);
@@ -260,7 +266,10 @@ fn schema_exposes_precision_and_task_enum() {
         json!(["transcript", "convert", "ocr", "readable"])
     );
     assert_eq!(process.input_schema["required"], json!(["input_source"]));
-    assert_eq!(props.as_object().unwrap().len(), 22);
+    for name in ["llm_base_url", "llm_model", "llm_api_key"] {
+        assert!(props.get(name).is_some(), "missing schema property {name}");
+    }
+    assert_eq!(props.as_object().unwrap().len(), 25);
 }
 
 #[test]

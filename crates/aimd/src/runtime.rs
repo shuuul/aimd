@@ -387,4 +387,4 @@ pub fn directory_uri(directory: &Path) -> String {
 
 #[cfg(test)]
 #[path = "tests.rs"]
-mod tests;
+pub(crate) mod tests;

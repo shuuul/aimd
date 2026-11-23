@@ -91,6 +91,10 @@ pub struct ProcessInput {
     pub context: Option<String>,
     /// Build ASR context from URL page metadata (default `true`).
     pub metadata_context: bool,
+    /// OpenAI-compatible chat endpoint for extracting ASR terms from URL metadata.
+    pub llm_base_url: Option<String>,
+    pub llm_model: Option<String>,
+    pub llm_api_key: Option<String>,
     pub asr_base_url: Option<String>,
     pub asr_model: Option<String>,
     pub asr_api_key: Option<String>,
@@ -122,6 +126,9 @@ impl Default for ProcessInput {
             precision: None,
             context: None,
             metadata_context: true,
+            llm_base_url: None,
+            llm_model: None,
+            llm_api_key: None,
             asr_base_url: None,
             asr_model: None,
             asr_api_key: None,

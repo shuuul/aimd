@@ -38,12 +38,10 @@ fn truthy(v: Option<&Value>) -> bool {
     }
 }
 
-/// Free-form ASR biasing text from URL metadata (title, author, description,
-/// tags, chapters), capped at [`MAX_CONTEXT_CHARS`]. `None` when empty.
-pub fn build_metadata_context(info: &Value) -> Option<String> {
-    let mut parts: Vec<String> = Vec::new();
+fn metadata_fields(info: &Value) -> Vec<(&'static str, Vec<&str>)> {
+    let mut parts = Vec::new();
     if let Some(title) = non_blank(info.get("title")) {
-        parts.push(format!("Title: {}", strip(title)));
+        parts.push(("Title", vec![strip(title)]));
     }
     let uploader = if truthy(info.get("uploader")) {
         info.get("uploader")
@@ -51,12 +49,12 @@ pub fn build_metadata_context(info: &Value) -> Option<String> {
         info.get("channel")
     };
     if let Some(author) = non_blank(uploader) {
-        parts.push(format!("Author: {}", strip(author)));
+        parts.push(("Author", vec![strip(author)]));
     }
     if let Some(description) = non_blank(info.get("description")) {
-        parts.push(format!(
-            "Description: {}",
-            prefix_chars(strip(description), MAX_DESCRIPTION_CHARS)
+        parts.push((
+            "Description",
+            vec![prefix_chars(strip(description), MAX_DESCRIPTION_CHARS)],
         ));
     }
     let tags: Vec<&str> = info
@@ -71,8 +69,7 @@ pub fn build_metadata_context(info: &Value) -> Option<String> {
         })
         .unwrap_or_default();
     if !tags.is_empty() {
-        let shown: Vec<&str> = tags.into_iter().take(MAX_TAG_COUNT).collect();
-        parts.push(format!("Tags: {}", shown.join(", ")));
+        parts.push(("Tags", tags.into_iter().take(MAX_TAG_COUNT).collect()));
     }
     let chapters: Vec<&str> = info
         .get("chapters")
@@ -87,9 +84,23 @@ pub fn build_metadata_context(info: &Value) -> Option<String> {
         })
         .unwrap_or_default();
     if !chapters.is_empty() {
-        let shown: Vec<&str> = chapters.into_iter().take(MAX_CHAPTER_COUNT).collect();
-        parts.push(format!("Chapters: {}", shown.join("; ")));
+        parts.push((
+            "Chapters",
+            chapters.into_iter().take(MAX_CHAPTER_COUNT).collect(),
+        ));
     }
+    parts
+}
+
+/// Free-form ASR biasing text capped at [`MAX_CONTEXT_CHARS`].
+pub fn build_metadata_context(info: &Value) -> Option<String> {
+    let parts: Vec<_> = metadata_fields(info)
+        .into_iter()
+        .map(|(label, values)| {
+            let separator = if label == "Chapters" { "; " } else { ", " };
+            format!("{label}: {}", values.join(separator))
+        })
+        .collect();
     if parts.is_empty() {
         return None;
     }
@@ -98,6 +109,31 @@ pub fn build_metadata_context(info: &Value) -> Option<String> {
         parts.join("\n")
     );
     Some(prefix_chars(&context, MAX_CONTEXT_CHARS).to_string())
+}
+
+/// Bounded text fields for the chat model, in descending priority.
+pub(super) fn terms_metadata(info: &Value) -> Vec<(&'static str, Vec<&str>)> {
+    let mut fields = metadata_fields(info);
+    fields.sort_by_key(|(label, _)| match *label {
+        "Title" => 0,
+        "Chapters" => 1,
+        "Tags" => 2,
+        "Description" => 3,
+        _ => 4,
+    });
+    let mut remaining = MAX_CONTEXT_CHARS;
+    for (_, values) in &mut fields {
+        values.retain(|value| {
+            let len = value.chars().take(remaining + 1).count();
+            if len > remaining {
+                return false;
+            }
+            remaining -= len;
+            true
+        });
+    }
+    fields.retain(|(_, values)| !values.is_empty());
+    fields
 }
 
 /// Metadata plus the cookie source that produced it (Python stored it as

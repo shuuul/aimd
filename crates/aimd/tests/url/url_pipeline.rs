@@ -1327,6 +1327,91 @@ fn audio_fallback_metadata_context_variants() {
 }
 
 #[test]
+fn configured_term_extraction_replaces_raw_metadata_and_preserves_manual_context() {
+    let fake = linus_fake("terms");
+    let asr = MockAsr::ok("transcribed audio");
+    let content = json!({"terms": ["Linus Torvalds", "invented term", "Linus Torvalds"]});
+    let response = json!({"choices": [{"message": {"content": content.to_string()}}]});
+    let (url, server) = crate::runtime::tests::serve(vec![(200, response.to_string())]);
+    let mut input = input_in("https://example.com/video", &fake);
+    input.llm_base_url = Some(url);
+    input.llm_model = Some("term-model".into());
+    input.llm_api_key = Some("test-token".into());
+    input.context = Some("Manual vocabulary".into());
+    run_audio(&fake, &input, &asr, &Hooks::default()).unwrap();
+    assert_eq!(
+        asr.single().context.as_deref(),
+        Some("Manual vocabulary\n\nReference terms: Linus Torvalds")
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[0].request_line,
+        "POST /v1/chat/completions HTTP/1.1"
+    );
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("Bearer test-token")
+    );
+    let request: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(request["model"], "term-model");
+    let fields: Value =
+        serde_json::from_str(request["messages"][1]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(fields["Title"], json!(["Interview with Linus Torvalds"]));
+    assert!(fields.get("webpage_url").is_none());
+}
+
+#[test]
+fn term_extraction_uses_no_raw_metadata_on_empty_response_or_failure() {
+    for (status, content) in [
+        (200, r#"{"terms": []}"#),
+        (200, "invalid JSON"),
+        (503, "unavailable"),
+    ] {
+        let fake = linus_fake("term-errors");
+        let asr = MockAsr::ok("transcribed audio");
+        let response = json!({"choices": [{"message": {"content": content}}]});
+        let (url, server) = crate::runtime::tests::serve(vec![(status, response.to_string())]);
+        let mut input = input_in("https://example.com/video", &fake);
+        input.llm_base_url = Some(url);
+        input.llm_model = Some("term-model".into());
+        input.context = Some("Manual vocabulary".into());
+        let result = run_audio(&fake, &input, &asr, &Hooks::default());
+        match (status, content) {
+            (200, content) if content.starts_with('{') => {
+                result.unwrap();
+                assert_eq!(asr.single().context.as_deref(), Some("Manual vocabulary"));
+            }
+            _ => {
+                let error = result.unwrap_err();
+                assert_eq!(
+                    error.kind,
+                    if status == 503 {
+                        ErrorKind::BackendUnavailable
+                    } else {
+                        ErrorKind::ProcessingFailed
+                    }
+                );
+                assert!(asr.seen.lock().unwrap().is_empty());
+                assert!(fake.audio_calls().is_empty());
+            }
+        }
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn no_context_skips_configured_term_extraction() {
+    let fake = linus_fake("no-terms");
+    let asr = MockAsr::ok("transcribed audio");
+    let mut input = input_in("https://example.com/video", &fake);
+    input.llm_base_url = Some("invalid-without-model".into());
+    input.metadata_context = false;
+    input.context = Some("Manual vocabulary".into());
+    run_audio(&fake, &input, &asr, &Hooks::default()).unwrap();
+    assert_eq!(asr.single().context.as_deref(), Some("Manual vocabulary"));
+}
+
+#[test]
 fn audio_fallback_auto_detects_language_and_forwards_model_precision() {
     let fake = Fake::new("lang");
     fake.info(&json!({
@@ -1434,6 +1519,7 @@ fn raw_transcript_keeps_subtitle_timestamps() {
         .sub("en", "vtt", VTT);
     let mut inp = input_in("https://example.com/v", &fake);
     inp.raw_transcript = true;
+    inp.llm_base_url = Some("invalid-without-model".into());
     let out = convert_url_with(&inp, &fake.ytdlp(), &MockAsr::ok(""), &Hooks::default()).unwrap();
     assert!(
         out.markdown.contains("00:00:01.000 --> 00:00:02.000"),

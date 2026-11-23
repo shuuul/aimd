@@ -21,6 +21,9 @@ pub struct Cli {
     pub ocr_model: Option<String>,
     pub ocr_api_key: Option<String>,
     pub context: Option<String>,
+    pub llm_base_url: Option<String>,
+    pub llm_model: Option<String>,
+    pub llm_api_key: Option<String>,
     pub no_context: bool,
     pub language: Option<String>,
     pub start: Option<i64>,
@@ -115,6 +118,9 @@ const OPTIONS: &[OptionSpec] = &[
     ),
     ("--context", None, "context", Kind::Str, None),
     ("--no-context", None, "no_context", Kind::Flag, None),
+    ("--llm-base-url", None, "llm_base_url", Kind::Str, None),
+    ("--llm-model", None, "llm_model", Kind::Str, None),
+    ("--llm-api-key", None, "llm_api_key", Kind::Str, None),
     ("--language", Some("-l"), "language", Kind::Str, None),
     ("--start", None, "start", Kind::Int, None),
     ("--end", None, "end", Kind::Int, None),
@@ -158,6 +164,9 @@ fn set(cli: &mut Cli, field: &str, value: String) {
         "format" => &mut cli.format,
         "model" => &mut cli.model,
         "precision" => &mut cli.precision,
+        "llm_base_url" => &mut cli.llm_base_url,
+        "llm_model" => &mut cli.llm_model,
+        "llm_api_key" => &mut cli.llm_api_key,
         "asr_base_url" => &mut cli.asr_base_url,
         "asr_model" => &mut cli.asr_model,
         "asr_api_key" => &mut cli.asr_api_key,
@@ -315,7 +324,7 @@ pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>) -> Parsed {
 
 /// Plain-text `--help`.
 pub fn help_text() -> String {
-    let rows: [(&str, &str); 24] = [
+    let rows = [
         (
             "--task TEXT",
             "Optional explicit task: transcript, convert, ocr, or readable (web page main \
@@ -360,6 +369,18 @@ pub fn help_text() -> String {
             "Bearer token for the remote OCR endpoint. [env var: AIMD_OCR_API_KEY]",
         ),
         ("--context TEXT", CONTEXT_HELP_TEXT),
+        (
+            "--llm-base-url TEXT",
+            "OpenAI-compatible endpoint for URL ASR term extraction [env: AIMD_LLM_BASE_URL].",
+        ),
+        (
+            "--llm-model TEXT",
+            "Chat model for term extraction [env: AIMD_LLM_MODEL].",
+        ),
+        (
+            "--llm-api-key TEXT",
+            "Optional term extraction API key [env: AIMD_LLM_API_KEY].",
+        ),
         (
             "--no-context",
             "Disable automatic ASR context built from URL metadata (title/description/tags).",
@@ -471,6 +492,11 @@ mod tests {
             "chrome",
             "--log-level",
             "debug",
+            "--llm-base-url",
+            "http://chat/v1",
+            "--llm-model=glossary",
+            "--llm-api-key",
+            "token",
             "--asr-base-url",
             "http://a",
             "--ocr-api-key",
@@ -487,6 +513,9 @@ mod tests {
         assert_eq!(cli.save_original.as_deref(), Some("keep/"));
         assert_eq!(cli.cookies.as_deref(), Some("c.txt"));
         assert_eq!(cli.log_level, "debug");
+        assert_eq!(cli.llm_base_url.as_deref(), Some("http://chat/v1"));
+        assert_eq!(cli.llm_model.as_deref(), Some("glossary"));
+        assert_eq!(cli.llm_api_key.as_deref(), Some("token"));
         assert_eq!(cli.asr_base_url.as_deref(), Some("http://a"));
         assert_eq!(cli.ocr_api_key.as_deref(), Some("k"));
         assert_eq!(run(&["--", "-dash.wav"]).input_source, "-dash.wav");

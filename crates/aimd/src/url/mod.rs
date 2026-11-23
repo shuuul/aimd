@@ -176,13 +176,74 @@ pub fn merge_asr_context(
     metadata_context: bool,
     info: &serde_json::Value,
 ) -> Option<String> {
-    if metadata_context && let Some(built) = build_metadata_context(info) {
-        return Some(match context {
-            Some(c) if !c.is_empty() => format!("{c}\n\n{built}"),
-            _ => built,
-        });
+    let automatic = metadata_context
+        .then(|| build_metadata_context(info))
+        .flatten();
+    merge_context(context, automatic)
+}
+
+fn merge_context(explicit: Option<&str>, automatic: Option<String>) -> Option<String> {
+    match (explicit, automatic) {
+        (Some(context), Some(automatic)) if !context.is_empty() => {
+            Some(format!("{context}\n\n{automatic}"))
+        }
+        (_, Some(automatic)) => Some(automatic),
+        (explicit, None) => explicit.map(str::to_string),
     }
-    context.map(str::to_string)
+}
+
+fn url_asr_context(
+    input: &ProcessInput,
+    info: &serde_json::Value,
+    system: &dyn System,
+    hooks: &dyn ProcessHooks,
+) -> Result<Option<String>> {
+    let explicit = input.context.as_deref();
+    if !input.metadata_context {
+        return Ok(explicit.map(str::to_string));
+    }
+    let setting = |value: Option<&str>, env: &str| {
+        value
+            .map(str::to_string)
+            .or_else(|| system.env(env))
+            .filter(|value| !value.trim().is_empty())
+    };
+    let base_url = setting(input.llm_base_url.as_deref(), "AIMD_LLM_BASE_URL");
+    let model = setting(input.llm_model.as_deref(), "AIMD_LLM_MODEL");
+    let (base_url, model) = match (base_url, model) {
+        (None, None) => return Ok(merge_asr_context(explicit, true, info)),
+        (Some(base_url), Some(model)) => (base_url, model),
+        _ => {
+            return Err(AimdError::unsupported(
+                "ASR term extraction requires both llm_base_url and llm_model",
+            ));
+        }
+    };
+    let metadata = metadata::terms_metadata(info);
+    if metadata.is_empty() {
+        return Ok(explicit.map(str::to_string));
+    }
+    let api_key = setting(input.llm_api_key.as_deref(), "AIMD_LLM_API_KEY");
+    hooks.progress(
+        "extracting_terms",
+        None,
+        None,
+        Some("Extracting ASR terms from URL metadata"),
+    );
+    if hooks.is_cancelled() {
+        return Err(AimdError::cancelled(
+            "URL processing cancelled before term extraction",
+        ));
+    }
+    let terms = crate::remote::extract_asr_terms(&base_url, &model, api_key.as_deref(), &metadata);
+    if hooks.is_cancelled() {
+        return Err(AimdError::cancelled(
+            "URL processing cancelled after term extraction",
+        ));
+    }
+    let terms = terms?;
+    let glossary = (!terms.is_empty()).then(|| format!("Reference terms: {}", terms.join(", ")));
+    Ok(merge_context(explicit, glossary))
 }
 
 /// URL -> Markdown with tools resolved from the environment.
@@ -250,12 +311,13 @@ pub(crate) fn convert_url_with(
         });
     }
 
+    let context = url_asr_context(input, info, ytdlp.system, hooks)?;
     hooks.progress("downloading", None, None, Some("Downloading source audio"));
     // Only an explicit language forces ASR; otherwise Qwen3-ASR detects it
     // (metadata/title heuristics only steer subtitle selection).
     let request = TranscribeRequest {
         language: language.map(str::to_string),
-        context: merge_asr_context(input.context.as_deref(), input.metadata_context, info),
+        context,
         model: input.model.clone(),
         precision: input.precision.clone(),
         temp_dir: input.temp_dir.clone(),

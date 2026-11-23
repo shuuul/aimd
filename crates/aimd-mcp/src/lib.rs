@@ -99,6 +99,9 @@ impl ProcessArgs {
         let precision = field.optional_string("precision");
         let context = field.optional_string("context");
         let metadata_context = field.bool_or("metadata_context", true);
+        let llm_base_url = field.optional_string("llm_base_url");
+        let llm_model = field.optional_string("llm_model");
+        let llm_api_key = field.optional_string("llm_api_key");
         let anchors = field.bool_or("anchors", false);
         let include_segments = field.bool_or("include_segments", false);
         let asr_base_url = field.optional_string("asr_base_url");
@@ -134,6 +137,9 @@ impl ProcessArgs {
             precision,
             context,
             metadata_context,
+            llm_base_url,
+            llm_model,
+            llm_api_key,
             anchors,
             include_segments,
             asr_base_url,
@@ -299,6 +305,9 @@ pub fn tools() -> Vec<Tool> {
     })));
     let strings = [
         ("asr_api_key", "Asr Api Key"),
+        ("llm_base_url", "URL ASR term extraction endpoint"),
+        ("llm_model", "Term extraction chat model"),
+        ("llm_api_key", "Term extraction API key"),
         ("asr_base_url", "Asr Base Url"),
         ("asr_model", "Asr Model"),
         ("context", "Context"),

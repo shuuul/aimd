@@ -492,6 +492,34 @@ The OCR instruction follows the served model name. A name starting with
 `<PAGE><image>` + `Multi page parsing.` and its block output is converted to
 Markdown; any other name gets the v1 `<image>` + `document parsing.`.
 
+### LLM extraction of URL ASR terms
+
+Set both `--llm-base-url` and `--llm-model` to extract a glossary with an
+OpenAI-compatible chat model when a URL transcript needs audio ASR. The
+extractor sends bounded title, author, chapter, tag, and description text to
+`/chat/completions` once per URL. aimd checks that each returned term appears
+verbatim in the supplied metadata, then adds up to 12 terms after any manual
+`--context`. If the glossary is empty, ASR uses only the manual context, if
+provided. Request or response errors stop the conversion before audio download.
+
+```bash
+aimd 'https://www.youtube.com/watch?v=VIDEO_ID' \
+  --llm-base-url http://localhost:8888/v1 \
+  --llm-model my-chat-model
+```
+
+| Variable | CLI option | MCP parameter |
+|----------|------------|---------------|
+| `AIMD_LLM_BASE_URL` | `--llm-base-url` | `llm_base_url` |
+| `AIMD_LLM_MODEL` | `--llm-model` | `llm_model` |
+| `AIMD_LLM_API_KEY` | `--llm-api-key` | `llm_api_key` |
+
+The API key is optional. The chat endpoint is separate from the ASR backend
+and can point to the same server. With no extractor configured, URL audio
+ASR continues to use its existing metadata context. Use `--no-context`
+(`metadata_context: false` in MCP) to skip automatic context and keep manual
+context. Existing subtitles skip audio processing and term extraction.
+
 ## MCP server
 
 ```bash
@@ -527,7 +555,8 @@ files go.
 | Variable | Purpose |
 |----------|---------|
 | `AIMD_TEMP_DIR` | Temporary downloads, transcoding, and extraction (CLI: `--temp-dir`). |
-| `AIMD_ASR_*`, `AIMD_OCR_*` | Remote backends (see above). |
+| `AIMD_ASR_*`, `AIMD_OCR_*` | Remote inference backends. |
+| `AIMD_LLM_*` | Optional chat backend for extracting URL ASR terms. |
 | `AIMD_MLX_DEVICE` | `gpu` or `cpu`. Local inference needs the GPU; `cpu` is for tests. |
 | `AIMD_YT_DLP` | Path to the `yt-dlp` executable (default: `yt-dlp` on `PATH`). |
 | `AIMD_READABLE_BACKEND` | `firecrawl` (default) or `defuddle` for `--task readable`. |
