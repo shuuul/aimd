@@ -96,12 +96,13 @@ aimd --help
 ```
 
 The formula lives in [shuuul/homebrew-tap](https://github.com/shuuul/homebrew-tap).
-Bottles are built for macOS on Apple Silicon (arm64). On Linux (x86_64 or
-aarch64 with an NVIDIA GPU) the formula builds from source against the tap's
-`mlx-cuda`, MLX's CUDA backend. The NVIDIA driver, CUDA 13, cuDNN 9, and NCCL 2
-come from the system and must be on the dynamic loader path. Arch's
-`/opt/cuda` is found automatically; elsewhere set `CUDA_HOME` if the toolkit is
-not in `/usr/local/cuda`.
+Bottles are available for macOS on Apple Silicon (arm64) and Linux x86_64.
+The Linux x86_64 aimd binaries and the tap's `mlx-cuda` require glibc 2.35 or
+later. Linux aarch64 builds from source against the same `mlx-cuda` formula.
+On Linux, the NVIDIA driver, CUDA 13, cuDNN 9, and NCCL 2 come from the system
+and must be on the dynamic loader path. Arch's `/opt/cuda` is found
+automatically. Set `CUDA_HOME` if your toolkit uses another location outside
+`/usr/local/cuda`.
 
 Homebrew also installs the runtime tools aimd uses: MLX (`mlx` on macOS,
 `mlx-cuda` on Linux), `ffmpeg`, `mupdf`
@@ -545,9 +546,10 @@ cargo build --release -p aimd-cli -p aimd-mcp
 ```
 
 `crates/aimd-mlx/build.rs` finds MLX through `brew --prefix mlx`. Set
-`MLX_PREFIX` to use a different MLX install. See [AGENTS.md](AGENTS.md) for
-the crate layout, test tiers, and release process, and
-[docs/architecture.md](docs/architecture.md) for the processing flow.
+`MLX_PREFIX` to use a different MLX install. See
+[architecture and code map](docs/architecture.md) for the crate layout and
+processing flow, and [development and releases](docs/development.md) for test
+and release commands.
 
 Release notes are on the GitHub Releases page.
 

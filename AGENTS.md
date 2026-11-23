@@ -1,516 +1,75 @@
-# PROJECT KNOWLEDGE BASE
+# aimd repository guidance
 
-**Generated:** 2026-10-26
-**Version:** 1.4.0
-**Branch:** main
+`aimd` converts URLs, media, and documents to Markdown and chunked text context.
+The Rust CLI (`aimd-cli`) and rmcp stdio server (`aimd-mcp`) call
+`aimd::process_input`. `aimd` owns routing, adapters, and orchestration.
+`aimd-engine` owns model graphs and preprocessing. `aimd-mlx` wraps MLX C++.
+The default `native` feature enables local GPU inference. The library also
+supports document and URL processing and remote inference without MLX.
 
-## OVERVIEW
+- [Architecture and code map](docs/architecture.md)
+- [Model and runtime implementation](docs/models.md)
+- [Development, testing, and releases](docs/development.md)
+- [Performance and accuracy measurements](docs/performance.md)
+- [User-facing usage and supported models](README.md)
 
-`aimd` is a native Rust context-preparation toolkit for LLM workflows. It turns URLs,
-audio/video, and documents into Markdown plus a chunked text context. Local ASR
-(Qwen3-ASR) and OCR (Unlimited-OCR, Unlimited-OCR-2, PP-OCRv6) run on MLX through a C-ABI shim; there is no Python
-runtime.
+## Processing contracts
 
-Interfaces (one binary each):
+- Keep routing and orchestration in `aimd`. `doc` and `url` are independent
+  adapters. Use `System` for environment lookup, executable lookup, and
+  subprocesses. `Runtime` extends it for model loading, preflight, and PDF
+  probes. Run `cargo xtask check-modules` after changing module boundaries.
+- Use `InputRoute { source_kind, task_type }`. URLs default to `transcript`.
+  `readable` is opt-in for URLs and `.html`/`.htm` files. For URL transcripts,
+  try subtitles in language and format preference order, then audio and ASR.
+  Preserve automatic browser-cookie probing when no cookie option was supplied.
+  Reject invalid explicit cookie options and report failure if neither path
+  produces text. Test changes to this fallback order.
+- Return a typed `AimdError`. Use `BackendUnavailable` for missing tools,
+  checkpoints, or GPUs, `InputNotFound` for missing paths, `UnsupportedInput`
+  for unsupported inputs or options, `ProcessingFailed` for conversion failures,
+  and `Cancelled` for cooperative cancellation.
+- Resolve models and check required tools and the MLX GPU before rendering,
+  downloading, or transcoding. A configured remote backend bypasses MLX preflight.
+- Thread `ProcessHooks` through processing. Check cancellation at safe boundaries
+  between segments, pages or page windows, and chapters. Preserve work that
+  completes during an uninterruptible model call or subprocess.
+- CLI and MCP own output paths and persist through `aimd::output`. Write
+  `ProcessResult.markdown` byte-for-byte and preserve `TextContext.chunk_list`
+  for context consumers. Asset-producing conversions own their `output_dir`
+  and ignore `output_file`. Directory asset URIs end in `/`.
+- Keep MCP JSON field names, error bodies, and tool schemas wire-compatible.
+  Changes require an explicit decision. With `anchors` and `include_segments`
+  both disabled, preserve byte-for-byte Markdown and skip forced alignment.
 
-- **CLI**: `aimd` (`crates/aimd-cli`)
-- **MCP server**: `aimd-mcp` (`crates/aimd-mcp`, rmcp stdio)
+## Models and dependencies
 
-Distribution:
+- Keep canonical model aliases kebab-case. The defaults are `qwen3-asr-1.7b`
+  and `unlimited-ocr-2`. Preserve `unlimited-ocr` for v1 and accept legacy aliases
+  and supported explicit checkpoint IDs. The README lists supported families.
+- Keep precision separate from the model alias and forward it through CLI, MCP,
+  URL audio fallback, ASR, and OCR. Qwen3-ASR and Unlimited-OCR 1/2 run at 4-bit
+  (default), 6-bit, and 8-bit. Native `bf16` returns `BackendUnavailable`.
+  PP-OCRv6 and remote inference ignore local precision with one warning.
+  Reject precision that conflicts with an explicit checkpoint ID.
+- Forward ASR context and the metadata toggle through CLI, MCP, and URL audio
+  fallback. Preserve language auto-detection when omitted. Retry only a local
+  4-bit segment flagged for repetition, once, with the matching 8-bit
+  checkpoint. Keep first-pass ASR text out of the context.
+- Use MLX for local compute. Gate custom Metal kernels on
+  `aimd_mlx::metal_kernels_available()` and use MLX ops elsewhere. Keep DASH
+  block-sparse on all backends. Preserve early submission of the next decode
+  step and automatic buffer bounds. Use shapeless compilation for fused
+  elementwise ops and keep results identical to the unfused graph.
+- Hand-write simple parsers and helpers. Justify new dependencies for complex
+  domains and get coordinator sign-off before adding shared workspace versions.
+  Install external tools through Homebrew dependencies. Firecrawl Local stays
+  a subprocess because it is AGPL-3.0.
 
-- **Homebrew**: `brew install shuuul/tap/aimd` (formula in `shuuul/homebrew-tap`).
-  Bottles for macOS arm64. Linux (x86_64/aarch64, NVIDIA) builds from source against
-  the tap's `mlx-cuda`, which repackages MLX's official `mlx-cuda-13` wheel; the NVIDIA
-  driver, CUDA 13, cuDNN 9 and NCCL 2 come from the system. No Linux bottles: hosted
-  runners have no NVIDIA driver to load `libmlx.so`.
-- **Runtime deps** (formula `depends_on`): `mlx` (macOS) / `shuuul/tap/mlx-cuda`
-  (Linux), `ffmpeg`, `mupdf` (`mutool`), `pandoc`, `yt-dlp`, `shuuul/tap/firecrawl-local`
-  (AGPL-3.0, so it stays a separate binary run as a subprocess, never a linked crate).
-  Model weights download from Hugging Face on first use into the HF
-  cache.
-- **Version source**: `[workspace.package] version` in the root `Cargo.toml`.
+## Verification and specs
 
-## CRATE MAP
-
-The Cargo workspace root is the repo root (`Cargo.toml`, `Cargo.lock`). `target*/` is
-gitignored.
-
-```text
-crates/
-├── aimd/          # request/result contract, System and Runtime, adapters and orchestration
-├── aimd-engine/   # safetensors weights, tokenizer, front-ends, model graphs and generation
-├── aimd-mlx/      # C-ABI shim over MLX C++; quantization oracle and goldens in tests
-├── aimd-cli/      # aimd binary, argument parser, output naming and .env loading
-├── aimd-mcp/      # aimd-mcp binary, rmcp stdio server
-└── xtask/         # check-specs and check-modules
-```
-
-CLI and MCP call `aimd::process_input`. `aimd` uses `aimd-engine` and enables
-`aimd-engine/mlx` through its default `native` feature. A library build with
-`--no-default-features` supports documents, URL extraction and remote inference.
-Local inference requires `native`. The URL adapter defines an internal
-`AudioTranscriber` that orchestration implements with the configured runtime.
-
-Other trees: `scripts/` holds the standalone PEP 723 reference exporters (used only to
-regenerate goldens, not shipped). `docs/` holds architecture and performance
-notes. `specs/` holds tracked execution specs.
-
-## ARCHITECTURE DIAGRAM
-
-```mermaid
-flowchart TD
-    CLI[aimd-cli] --> Route
-    MCP[aimd-mcp] --> Route
-    subgraph Aimd[aimd library]
-        Route[process_input and route] --> Doc[doc: Pandoc, EPUB, pdf-inspector]
-        Route --> Url[url: readable HTML, subtitles and audio]
-        Route --> Inference[ASR and OCR]
-        Url -->|AudioTranscriber| Inference
-        Doc --> Sys[System: env, PATH and subprocesses]
-        Url --> Sys
-        Inference --> Runtime[Runtime: System, model loading and PDF probing]
-        Runtime --> Sys
-        Inference --> Remote[OpenAI-compatible HTTP]
-    end
-    Runtime -->|native| Engine[aimd-engine]
-    Engine -->|mlx| MLX[aimd-mlx]
-```
-
-## WHERE TO LOOK
-
-| Task | Location | Notes |
-|------|----------|-------|
-| Input routing | `crates/aimd/src/route.rs` | `get_input_route` / `ensure_supported_input` map source kind + task into an `InputRoute`; `parse_task`. |
-| Orchestration | `crates/aimd/src/runtime.rs` | `process_input` / `process_input_with(request, hooks, &dyn Runtime)`; local-file dispatch, MarkItDown-style normalization, `TextContext` wrapping. |
-| System seam | `crates/aimd/src/sys.rs`, `runtime.rs`, `native.rs` | `System` handles env, `PATH` and subprocesses. `Runtime` extends it with preflight, model loading and PDF probing. |
-| PDF/OCR routing | `crates/aimd/src/native.rs` | pdf-inspector probe: scanned or `has_encoding_issues` PDFs route to OCR. |
-| Model + precision resolution | `crates/aimd/src/models.rs` | Alias/precision to model keys; `ocr_family` decodes them for `NativeRuntime::load_ocr`; native gates; 8-bit fallback; ASR language codes. |
-| Precision parsing | `crates/aimd/src/precision.rs` | Normalizes `4bit`/`6bit`/`8bit`/`bf16` and dash/space/case variants. |
-| HF checkpoints | `crates/aimd/src/hf.rs` | Cache lookup (`HF_HUB_CACHE` > `HF_HOME/hub` > `~/.cache/huggingface/hub`), HTTPS snapshot download, `HF_TOKEN`, `HF_ENDPOINT`, `HF_HUB_OFFLINE`. |
-| Local ASR | `crates/aimd/src/asr.rs`, `audio.rs` | ffmpeg decode to 16 kHz mono, >600 s segmenting, context, 4-bit -> 8-bit repetition retry. |
-| Local OCR | `crates/aimd/src/ocr.rs` | Images and `mutool draw` PDF pages rendered in the background (`PdfRenderJob`); per-page progress and cancellation. |
-| Remote backends | `crates/aimd/src/remote_config.rs`, `crates/aimd/src/remote.rs` | `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix; ureq + rustls. |
-| Request/result models | `crates/aimd/src/model.rs` | `ProcessInput`, `ProcessResult`, `TextContext`, `TaskType`, `SourceKind`; serde names are the wire format. |
-| Errors | `crates/aimd/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
-| Cancellation/progress | `crates/aimd/src/hooks.rs` | `ProcessHooks` (`is_cancelled`, `progress`, `check_cancelled`), `NoHooks`. |
-| Text shaping | `crates/aimd/src/text.rs` | Title extraction and header/paragraph chunking (`MAX_CHUNK_SIZE`). |
-| Source anchors | `crates/aimd/src/anchors.rs` | OCR `<!-- aimd:loc -->` comments, sentence split, unit-to-sentence timing, `[hh:mm:ss]` paragraphs, subtitle cues, SRT/VTT write/parse. |
-| Output persistence + help texts | `crates/aimd/src/output.rs` | `persist_result_output_if_requested`; `OutputFormat`, `result_payload`/`payload_text` (MCP response, CLI `--format json`), `subtitle_text`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
-| Extension tables | `crates/aimd/src/ext.rs` | Audio/video/image/OCR/asset extensions and the Pandoc reader map. |
-| CLI | `crates/aimd-cli/src/args.rs`, `app.rs` | Hand-written parser over the frozen flag surface; output naming; `.env` loading. |
-| MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
-| Document conversion | `crates/aimd/src/doc/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
-| URL conversion | `crates/aimd/src/url/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
-| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
-| MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. |
-| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. `scripts/omnidoc_{build,score}.py`: OmniDocBench subset for comparing OCR models against ground truth (`docs/performance.md`). |
-| Tracked specs | `specs/` | Lifecycle, numbering, and index in `specs/README.md`. |
-
-## CONVENTIONS
-
-- **Module boundaries**: Interfaces call the public `aimd` API. Contract modules
-  (`model`, `error`, `hooks`, `output`, `log`, `text`, `anchors`) use other contract
-  modules, and `text` shares `util::pytext`. `sys` and `util` use the contract.
-  `doc` and `url` can also use `sys`, `util` and `ext`. Orchestration can import
-  any module. `cargo xtask check-modules` checks the import rules.
-- **Route model**: classify inputs with `InputRoute { source_kind, task_type }`.
-  `source_kind` is the supplied input kind, and `task_type` (`transcript`, `convert`,
-  `ocr`, `readable`) selects processing logic. `readable` is opt-in only (URLs and
-  `.html`/`.htm` files); URLs auto-route to `transcript`.
-- **System and runtime seams**: Source adapters use `System` for env, `PATH` and
-  subprocesses. `Runtime: System` adds model loading, GPU preflight and PDF probes.
-  Production uses `NativeRuntime`; adapter tests fake tools through `System`.
-- **Typed errors**: return `aimd::AimdError` with the right `ErrorKind`.
-  Missing tools, models, or device (`pandoc`, `yt-dlp`, `ffmpeg`, `mutool`, MLX GPU) ->
-  `BackendUnavailable`. Missing inputs -> `InputNotFound`. Unsupported inputs or options
-  -> `UnsupportedInput`. Conversion failures -> `ProcessingFailed`. Cancellation ->
-  `Cancelled`.
-- **Cooperative cancellation**: thread `&dyn ProcessHooks` through core, doc, URL,
-  ASR, and OCR. Call `check_cancelled` only at safe boundaries (between segments, pages,
-  chapters), never inside uninterruptible model calls or subprocesses. Work that
-  finishes during a late cancellation stays a completed artifact, never discarded.
-- **Output ownership**: `output_file` belongs to the CLI/MCP, not to `ProcessInput`
-  or `ProcessResult`. Persist through `aimd::output`. Asset conversions
-  (`output_dir` set) ignore `output_file`. Persisted files are `markdown`
-  byte-for-byte, never rebuilt from `chunk_list`.
-- **Stable output contract**: `ProcessResult` keeps the lossless `markdown`, an optional
-  `asset_base_uri` (directory URIs end in `/`), an optional `output_dir`, an optional
-  `platform`, and optional `segments`, alongside
-  `TextContext { title, chunk_list, split_header_level }`. Viewers consume `markdown`;
-  context-window consumers use `chunk_list`.
-- **Source anchors** (spec 005): `ProcessInput.anchors` (default `false`; CLI
-  `--anchors`, MCP `anchors`; `--no-anchors` is still accepted as a no-op) adds OCR
-  `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->` comments (1-based page, bbox
-  normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript paragraphs to `markdown`.
-  `ProcessInput::wants_positions()` (`anchors || include_segments`) gates forced
-  alignment and `ProcessResult.segments`; CLI `--format json/srt/vtt` set
-  `include_segments`. With both off the output must match the pre-anchor output byte
-  for byte and skip forced alignment. Positions come through the
-  `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
-  local ASR aligns 295 s segments (the aligner caps at 300 s; ffmpeg overshoots a 300 s
-  cut by milliseconds) with Qwen3-ForcedAligner-0.6B-8bit, loaded lazily once per process.
-  It covers zh, yue, en, de, es, fr, it, pt, ru and ko (not Japanese). Anything unaligned
-  (remote ASR, unsupported language, failed alignment) spreads its sentences over the
-  segment span instead of failing. JSON segment coordinates round to 3 decimals, times
-  to ms. `include_segments` (MCP; CLI `--format json`)
-  returns `segments`. MCP response fields are additive (`segments` last).
-- **Wire compatibility**: MCP JSON field names, error bodies, and tool
-  schemas match the frozen Python contract. Change them only with an explicit decision.
-- **Fail-fast preflight**: resolve the model and check the backend (MLX GPU device,
-  required tools) before expensive work such as PDF rendering, downloads, or
-  transcoding. Local inference on the MLX CPU device is `BackendUnavailable`.
-- **URL cookie behavior**: keep automatic browser-cookie probing when no cookie option is
-  supplied; it is intentional user convenience for restricted media. Explicit cookie
-  options that yt-dlp rejects fail fast (`UnsupportedInput`). Subtitle and audio
-  fallback failures must not be hidden behind metadata-only success results.
-- **URL fallback ordering**: subtitles first (language preference order, then formats),
-  then audio download + ASR. If both produce no text, the request is a processing
-  failure. Stale-extractor yt-dlp stderr gets the `brew upgrade yt-dlp` hint.
-- **Model naming**: user-facing aliases are kebab-case: `qwen3-asr-1.7b` (default),
-  `qwen3-asr-0.6b`, `unlimited-ocr-2` (OCR default), `unlimited-ocr`, and `pp-ocrv6`. Legacy underscore aliases and explicit
-  `mlx-community/*` ids remain compatibility inputs but must not be the canonical names in
-  docs or help text. GLM-OCR and Transformers/`Qwen/*` ids are not supported and must
-  not reappear in help text. PaddleOCR-VL-1.6 and MiniCPM-OCR 1.0 were removed (tags
-  `paddleocr-vl-last`, `minicpm-ocr-last`); PaddleOCR-VL trailed Unlimited-OCR on
-  OmniDocBench (similarity 0.65-0.71 vs 0.85) and looped on dense pages
-  (`docs/performance.md`).
-- **Precision separation**: model family/size goes through `model`; quantization goes
-  through the separate `precision` option. The parser accepts `4bit`, `6bit`, `8bit`, and
-  `bf16` (dash/space/case variants normalized in `aimd::normalize_precision`). The native
-  engine runs Qwen3-ASR and Unlimited-OCR (1 and 2) at `4bit` (default), `6bit`, and `8bit`;
-  `bf16` is rejected for them as `BackendUnavailable`. PP-OCRv6 ignores precision
-  with one warning. A precision that conflicts
-  with an explicit checkpoint id is an error.
-- **Precision propagation**: `ProcessInput.precision` must be forwarded by CLI,
-  MCP, URL audio fallback, local ASR, and OCR.
-- **ASR context biasing**: `ProcessInput.context` (explicit text) and
-  `ProcessInput.metadata_context` (default `true`) are forwarded by CLI
-  (`--context`/`--no-context`) and MCP. `aimd::url` builds context from page
-  metadata (title/author/description/tags/chapters, capped at 2000 chars) and merges it
-  into the audio fallback. Qwen3-ASR consumes it as the system message. Never feed
-  first-pass ASR output back as context.
-- **4-bit retry**: a 4-bit Qwen3-ASR segment that trips the repetition-loop detector is
-  retried once with the matching 8-bit checkpoint. Other precisions and remote ASR do not
-  auto-switch.
-- **Remote inference**: `AIMD_ASR_BASE_URL` / `AIMD_OCR_BASE_URL` (or the explicit
-  CLI/MCP fields) opt into OpenAI-compatible HTTP backends and bypass local MLX
-  preflight. Optional `AIMD_{ASR,OCR}_{MODEL,API_KEY}` have matching fields. Bare server
-  URLs gain `/v1`. Explicit values override the environment. Remote precision is
-  server-owned, so a local `precision` is ignored with one warning. Remote OCR picks
-  the instruction from the served model name: `Unlimited-OCR-2*` gets
-  `<PAGE><image>\nMulti page parsing.` and `render_unlimited_ocr2`; anything else
-  gets v1's `<image>\ndocument parsing.`.
-- **MLX only**: MLX is the only compute backend (Metal on macOS, the mlx CUDA backend on
-  Linux). Do not add CPU compute paths or hand-written CUDA. The WS-08 custom Metal
-  kernels are gated on `aimd_mlx::metal_kernels_available()`; other GPU backends use
-  the stock mlx ops.
-- **Fused elementwise ops**: shapeless compiled shim ops (`swiglu`, `gelu`,
-  `bias_act`) run on every backend and must match
-  the unfused graph value for value (tested in `aimd-mlx/tests`). Do not
-  compile whole models shape-keyed: every new page/clip shape would retrace
-  (spec 006).
-- **Host/GPU overlap** (spec 007): decode loops submit step k+1
-  (`async_eval`) before reading token k back, like mlx-lm `generate_step`.
-  The shim defaults `MLX_MAX_MB_PER_BUFFER` to 30 on every backend (a user
-  value wins). Larger Metal command buffers keep the previous step's KV arrays
-  alive, so `slice_update` copies the cache instead of donating it (MoE
-  Unlimited-OCR lost 15%). Host-side image work threads through
-  `aimd_engine::parallel` (`for_row_bands`, ordered `map`), computing each
-  element exactly as one thread would. PDF OCR renders pages on a
-  background thread (`PdfRenderJob`, PPM for local engines, PNG for remote)
-  at most two pages ahead.
-- **Buffer memory**: mlx keeps freed buffers for reuse and reuses one only
-  for a similar size, so shape-varying calls (PP-OCRv6 rec batch widths,
-  image crops) used to grow the cache to 25 GB. Three automatic layers bound
-  memory; models must not depend on hand-placed `clear_cache` calls: the
-  30 MB `MLX_MAX_MB_PER_BUFFER` above also bounds the temporaries a pending
-  buffer holds (mlx's CUDA default held a whole vision tower: 11 GB per
-  Unlimited-OCR page, 4 GB at 30 MB, same speed), the shim
-  caps the cache at 1 GB on every device (`set_cache_limit` at device
-  selection), and `aimd::native` wraps every native model in `Released`,
-  which clears the cache after each call so a long-lived MCP process keeps
-  only the weights between requests (Metal hands the pages back a few
-  seconds later). `aimd_mlx::memory_stats()` reads the counters,
-  `aimd-mlx/tests/mlx_memory.rs` guards the cap, and `corpus_gate` prints
-  each model's MLX peak; check it when adding a model.
-- **Linux build**: `aimd-mlx` links `libmlx.so` from `MLX_PREFIX` (brew `mlx-cuda`, or
-  an unpacked `mlx-cuda-13` wheel for dev). Cargo applies the shim's rpath only to
-  `aimd-mlx`'s own targets, so dev runs of dependents need
-  `LD_LIBRARY_PATH=$MLX_PREFIX/lib` (brew's linker shim adds the rpath for installs).
-  The shim points `CUDA_HOME` at `/opt/cuda` when unset and `/usr/local/cuda` is
-  absent, because mlx's CUDA JIT needs the toolkit headers. It also caps mlx's memory
-  limit at 90% of the VRAM free at device selection. mlx sizes that limit from total
-  VRAM, so without the cap its buffer cache runs a shared GPU out of memory.
-- **Document tools**: Pandoc (brew) reads every supported document format; `.txt`/`.md`
-  pass through; legacy `.doc`/`.ppt`/`.xls` and MOBI/AZW3 are unsupported. Text-layer
-  PDFs use the `pdf-inspector` crate; scanned pages render with `mutool draw`.
-  Pandoc 3.12 rejects xlsx workbooks whose rels use absolute targets (openpyxl
-  output); Excel-style relative targets convert.
-- **Readable HTML**: `TaskType::Readable` (CLI `--task readable`, MCP
-  `task_type: "readable"`) goes through `aimd::url` via `System`. URLs run `firecrawl-local scrape <url> --format
-  markdown` (`AIMD_FIRECRAWL` override) and parse its JSON envelope; `success: false` or
-  empty markdown (blocked pages carry a `warning`) is `ProcessingFailed`, a missing binary
-  `BackendUnavailable`. Firecrawl Local does not read files, so local HTML uses
-  `dom_smoothie`. `AIMD_READABLE_BACKEND=defuddle` routes URLs and files to `npx defuddle
-  parse` (`AIMD_NPX`); Defuddle is optional and not a brew dependency.
-
-## DEPENDENCY POLICY
-
-Hand-write the simple parts; use third-party crates only for genuinely complex domains.
-
-- **Hand-written**: CLI argument parsing, zip central-directory reading, OPF/spine
-  walking, Netscape cookie parsing, UUIDs/timestamps, `.env` parsing,
-  TTML/srv subtitle XML parsing.
-- **Third-party (approved)**: `rmcp` (MCP),
-  `serde`/`serde_json`, `pdf-inspector` (PDF text layer + OCR probe), `dom_smoothie`
-  (readability), `regex`, `miniz_oxide` (deflate), `ureq` with `rustls` (remote backends,
-  HF downloads), `image`, `tokenizers`, `safetensors`, `memmap2`, `half`, `thiserror`,
-  `cc` (shim build).
-- New crates need a stated reason that the domain is complex. Add shared versions under
-  `[workspace.dependencies]` only with coordinator sign-off, because parallel builds
-  share `Cargo.lock`.
-- External tools come from Homebrew `depends_on`, never from a bundled downloader.
-
-## TRACKED SPECS
-
-Long-running, multi-workstream, or handoff-heavy work is tracked as execution
-specs in `specs/` with a validated lifecycle. A spec records intent,
-decisions, workstream progress, and acceptance evidence; it does not replace
-durable docs, code, tests, or schemas. Stable behavior must still land in the
-nearest `AGENTS.md`, docs, and code after closeout.
-
-When a spec is required:
-
-- Work spans multiple workstreams, agents, or explicit handoffs.
-- Work needs coordinated decisions or acceptance evidence before parallel
-  work starts.
-
-How to write and close a spec:
-
-1. Copy `specs/000-template.md` to `specs/NNN-kebab-case.md`. Reserve the
-   next free ID by scanning both `specs/` and `specs/archive/`; never reuse,
-   renumber, or delete an ID.
-2. Fill the flat frontmatter (`id`, `title`, `status`, `created`, `updated`,
-   `coordinator`) and every required section: `Context`, `Goal and success
-   criteria`, `Scope and non-goals`, `Decisions`, `Workstreams`,
-   `Verification`, `Documentation sync`, `Progress and handoff`, and
-   `Completion summary`.
-3. Add the index row to `specs/README.md` in ascending ID order and set
-   `status: Active` once the contract is decision-complete. Reserve the ID
-   and index the spec BEFORE parallel work starts.
-4. Workers claim a workstream row (`WS-01`, ...) before editing and append
-   entries under `Progress and handoff`; never rewrite another worker's
-   history. Record blocking at the workstream level, not as a fourth status.
-5. Close out by satisfying every success criterion (or recording the decision
-   that removed one), syncing lasting knowledge into docs/`AGENTS.md`,
-   completing the summary, setting `status: Completed`, and moving the file
-   plus its index row to `specs/archive/` in the same change.
-6. Run `cargo xtask check-specs` after any spec change and always before
-   archiving.
-
-Canonical lifecycle, numbering, coordination, and closeout rules live in
-`specs/README.md`; the `xtask` validator enforces them structurally.
-
-## MODEL AND PRECISION DESIGN
-
-The user-facing model selection contract separates model family/size from
-precision:
-
-```bash
-aimd audio.wav --model qwen3-asr-1.7b --precision 4bit
-aimd audio.wav --model qwen3-asr-0.6b --precision 8bit
-aimd scan.pdf --model unlimited-ocr --precision 8bit
-```
-
-Supported model families are intentionally narrow:
-
-- **ASR**: `qwen3-asr-1.7b` (default) and `qwen3-asr-0.6b`. Omitted precision defaults
-  to `4bit` and resolves to `mlx-community/Qwen3-ASR-{1.7B,0.6B}-{4bit,6bit,8bit}`.
-  Omitted `language` means auto-detect (no forced language in the prompt) for local
-  ASR, every segment, the 8-bit retry, and the URL audio fallback; URL metadata and
-  title heuristics steer subtitle choice only. Explicit codes come from
-  `aimd_engine::tokenizer::ASR_LANGUAGES` (30 languages).
-- **Unlimited-OCR vision + R-SWA** (v1 and v2 share the towers): the numerical source of
-  truth is Baidu's `deepencoder.py` / `modeling_deepseekv2.py`, not mlx-vlm. CLIP uses
-  `quick_gelu` and LayerNorm eps 1e-5; crop pos embeds resample the CLIP grid spatially
-  (bicubic antialias) and SAM rel pos with the half-pixel linear index. v1's ring cache
-  keeps the whole prompt (`KvCache::retain_prompt`), then a 128-token decode ring.
-- **OCR v1**: `unlimited-ocr`, resolving to `mlx-community/Unlimited-OCR-{4bit,6bit,8bit}`
-  (default 4bit). OCR uses single-image gundam mode (`document parsing.`), the
-  sliding-window no-repeat n-gram guard (35/128), and `max_tokens=8192` per page.
-  PDFs go in 5-page `recognize_pages` windows (upstream `infer_multi`: one 1024 base
-  view per page, `Multi page parsing.`, no `<PAGE>` in the prompt). v1 writes `<PAGE>`
-  as 3 text tokens; the page-count guard matches that sequence and substitutes it for
-  an EOS before the last page. A window of one page keeps the gundam request. v1
-  matched page-by-page output through 6 pages; 7+ loop or repeat page 1 (spec 008).
-- **Unlimited-OCR-2**: `unlimited-ocr-2`, resolving to
-  `mlx-community/Unlimited-OCR-2-{4bit,6bit,8bit}` (default 4bit). The default OCR model (omitted `model`);
-  a separate model from v1, which stays `unlimited-ocr`. The decoder uses DASH block-sparse
-  attention (block 32, local window 128, top-k 12 routed blocks, entmax15 prior, page2d
-  RoPE) through the `aimd_mlx::dash` shim ops: custom Metal kernels, the same block
-  selection from mlx gathers elsewhere. Never fall back to dense attention; the dense
-  `DashMode` is a test oracle only. Prompt: `[bos] + ([<PAGE>] + <image>*n)` per page +
-  `Multi page parsing.`. Every page is gundam-tiled (max 16 crops), single images and
-  multi-page requests alike (mlx-vlm's default; upstream `infer` uses base mode for
-  several pages, which misreads small text and loops on long documents). PDFs go through `OcrModel::recognize_pages` in 10-page windows
-  (`pages_per_request`), with progress and cancellation between windows. Generation
-  carries the upstream page-count guard (EOS banned until every `<PAGE>`, forced past
-  it, 20000 tokens per page) and widens the n-gram window to 1024 for multi-page
-  requests. `markdown2::render_unlimited_ocr2` turns the 0..999 page-relative boxes
-  into per-page located items.
-- **PP-OCRv6**: `pp-ocrv6` (`pp-ocrv6-medium`), medium tier only. Model key
-  `PaddlePaddle/PP-OCRv6_medium` names the `_det_safetensors` / `_rec_safetensors`
-  repo pair. The HF rec checkpoint's `head.encoder.conv_block.{0,1}` are Paddle's
-  `skip_conv` / `conv_reduce` swapped; the loader swaps them back (never download the
-  Paddle `.pdparams` pickles). Output: lines scoring >= 0.5 in reading order. Parity
-  with mlx4ocr is bit-exact from decoded pixels on; JPEG decoding (zune-jpeg vs
-  libjpeg-turbo) differs by a few levels.
-- **bf16** resolves but is rejected by the native gate for Qwen3-ASR and Unlimited-OCR 1/2 (`ensure_native_asr` /
-  `ensure_native_ocr`).
-- Explicit `mlx-community/*` ids for these families remain compatibility inputs; unknown
-  models fail with the "Unsupported MLX ... model" `ProcessingFailed` message.
-
-Checkpoints load once per model per process (MCP reuses loaded pipelines).
-
-## TEST RULES
-
-Tests are lean by rule; weights are the expensive resource.
-
-- **One load per checkpoint per test binary**: checkpoint-backed tests get
-  models/stores from a shared lazy fixture (`OnceLock<Option<_>>` in a
-  `test_support` module; `None` = cache absent -> skip). Never call
-  `Pipeline::load` / `load_checkpoint` on a real checkpoint inside an
-  individual test.
-- **Three tiers**:
-  1. Hermetic (default `cargo test --workspace`): unit tests, committed golden slices,
-     fake `Runtime`s, and fake tool scripts. No checkpoint, no network. Run it before
-     every commit.
-  2. Checkpoint parity: runs only when the HF cache is present and the MLX
-     device is the GPU (`aimd_mlx::device_is_cpu()` false), always via the
-     shared fixture.
-  3. E2E / bench: behind `AIMD_E2E=1`; at most one E2E test per model per
-     fixture image/clip. Anything that shells out to real tools (`say`, `ffmpeg`,
-     `pandoc`, `yt-dlp`, `mutool`, `uv run` references) or writes outside a temp dir is
-     tier 3.
-  4. Golden-corpus gate (accuracy): `scripts/build_corpus.py` builds labeled
-     `say` clips and rendered pages from `scripts/corpus/`,
-     `scripts/corpus_baseline.py` records mlx-audio / mlx-vlm outputs
-     (`corpus_baseline_paddle.py` for PP-OCRv6), and the
-     `corpus_gate` example scores both (ASR WER/CER <= baseline + 1%, OCR
-     similarity >= baseline - 2%, stop rate no lower). Run it after any change
-     that can move model outputs or when adding a model/precision.
-- **Extend, don't duplicate**: a new stage check extends the existing golden
-  test for that model; do not add a second test that covers the same stage
-  or reloads the same weights. Delete tests made redundant by a backend or
-  API change in the same change.
-- **Golden fixtures**: live in the owning crate's `tests/golden/<set>/`, located via
-  `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-mlx` at `crates/aimd-mlx/tests/golden/quant`. `mel`, `tokenizer`, `asr_encoder`,
-  `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `ocr2_decoder`,
-  `ocr2_markdown`, and `ppocrv6` belong to `aimd-engine`.
-  `ocr2_decoder` comes from the shuuul/mlx-vlm port (`export_ocr2_decoder_reference.py`).
-  `ocr_vision` comes from Baidu's `deepencoder.py` in torch f32 (its bounds measure the
-  bf16 port against f32 truth). Every mlx-vlm-based Unlimited-OCR exporter and corpus
-  baseline calls `reference_unlimited_ocr.patch_mlx_vlm_to_baidu`, which fixes mlx-vlm
-  0.7.x where it diverges from Baidu (CLIP `quick_gelu` and LN eps 1e-5, spatial CLIP
-  pos resample, half-pixel SAM rel pos, R-SWA keeping the whole prompt).
-  `crates/aimd/tests/golden/subtitles` is frozen: its Python oracle was deleted, so update it
-  only with a reviewed, intentional behavior change. Regenerate the others with
-  `uv run scripts/export_*_reference.py` (PEP 723 standalone scripts). Never hand-edit
-  them.
-- **Small fixtures**: committed golden files stay <= 1 MB each; larger dumps
-  are regenerated by the exporters, not committed.
-- **MLX device**: `AIMD_MLX_DEVICE=cpu|gpu` overrides the device (chosen once
-  per process in the shim; CPU when no GPU is available). The hermetic tier runs with
-  `AIMD_MLX_DEVICE=cpu` so it does not depend on a usable GPU. Tolerances
-  are the same on both devices. MLX's CPU `quantized_matmul` is imprecise with
-  bf16 inputs (error grows with K), so CPU-device tests feed it f32 activations,
-  scales and biases rather than loosening bounds.
-- **Backend-specific bounds**: the Unlimited-OCR vision stage/final-feature goldens
-  pin Metal mlx rounding (the tower amplifies any rounding change past them), so they
-  are enforced only when `metal_kernels_available()`; on CUDA they print the drift and
-  the corpus gate is the accuracy check. The Unlimited-OCR v1 prefill logits golden gets a noise bound off
-  Metal; its forced greedy stream must still match. PP-OCRv6 is f32, so mlx's default TF32 convs/matmuls on CUDA move its
-  probability maps; off Metal its checkpoint test uses noise bounds and requires
-  exact text. Run the checkpoint tier and the corpus gate on
-  a Linux GPU box (metacube, dspark) after changes that can move CUDA outputs.
-- **Never download in tests**: no hf-hub fetches, no network in tiers 1-2.
-- **No idle waits**: mock servers and job tests use short poll intervals; no
-  `sleep`-based synchronization.
-- **Budget**: hermetic `cargo test --workspace` should finish in about 2 minutes. A
-  change that pushes it past that needs a stated reason.
-- **Concurrent builds**: use `CARGO_TARGET_DIR=target-<name>` per agent/worker to avoid
-  build-lock contention.
-
-## ANTI-PATTERNS
-
-- Embedding routing or orchestration in `aimd-cli` or `aimd-mcp`.
-- Importing orchestration from a source adapter, or adding dependencies between
-  `doc` and `url`.
-- Calling env, `PATH` lookups, or subprocesses directly instead of using `System`.
-- Returning ad-hoc string errors or panicking where an `AimdError` kind exists.
-- Checking cancellation inside uninterruptible model calls, or discarding a completed
-  artifact because cancellation arrived late.
-- Changing URL subtitle/cookie/audio fallback ordering without explicit tests.
-- Removing automatic URL browser-cookie probing without an explicit product decision;
-  simplify surrounding error handling instead.
-- Returning metadata-only URL output as a successful transcript when subtitle extraction
-  and audio transcription both failed.
-- Reintroducing removed options (GLM-OCR, Transformers/CUDA Python backends, bf16 help
-  text claiming support) or listing them in help text.
-- Adding a third-party crate for a simple domain, or a tool downloader instead of a brew
-  `depends_on`.
-- Adding CPU compute paths alongside MLX, or broad abstractions before a second backend
-  needs them.
-- Hand-editing golden fixtures.
-
-## COMMANDS
-
-```bash
-# Prerequisites
-brew install mlx ffmpeg mupdf pandoc yt-dlp prek shuuul/tap/firecrawl-local
-
-# Code quality
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-prek run --all-files
-
-# Tests
-cargo test --workspace                       # Metal when available
-AIMD_MLX_DEVICE=cpu cargo test --workspace   # hermetic tier (pre-commit gate)
-AIMD_E2E=1 cargo test -p aimd-engine --lib   # tier 3, needs the HF cache
-AIMD_E2E=1 cargo test -p aimd --test e2e
-AIMD_E2E=1 cargo test -p aimd --lib url::e2e
-cargo check -p aimd --no-default-features
-
-# Specs and module boundaries
-cargo xtask check-specs
-cargo xtask check-modules
-
-# Build and run
-cargo build --release -p aimd-cli -p aimd-mcp
-./target/release/aimd audio.mp3 --model qwen3-asr-1.7b --precision 4bit
-./target/release/aimd "https://youtube.com/..." --cookies-from-browser chrome --raw-transcript
-./target/release/aimd audio.mp3 --temp-dir ./tmp --log-level DEBUG
-./target/release/aimd-mcp
-
-# Regenerate a golden set (not shipped; needs uv)
-uv run scripts/export_mel_reference.py
-
-# Golden-corpus accuracy gate (macOS: say + Chrome; corpus in target/corpus)
-uv run scripts/build_corpus.py
-uv run scripts/corpus_baseline.py
-uv run scripts/corpus_baseline_paddle.py
-cargo run --release -p aimd-engine --example corpus_gate
-cargo run --release -p aimd-engine --example corpus_gate -- --only ocr --ocr-model pp-ocrv6
-
-# Forced-aligner parity (gated clips: mean abs timestamp error <= 80 ms)
-uv run scripts/export_aligner_reference.py --corpus --corpus-dir target/corpus
-cargo run --release -p aimd-engine --example aligner_parity
-```
-
-## BEFORE EVERY COMMIT
-
-Run the hooks and the Rust gates, and include any hook-generated fixes in the commit:
+Before each commit, run the hooks and Rust gates. Review any hook fixes and
+include them in the commit. Use Conventional Commits.
 
 ```bash
 prek run --all-files
@@ -519,46 +78,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 AIMD_MLX_DEVICE=cpu cargo test --workspace
 ```
 
-If `prek` modifies files, review the diff, stage the updates, and run
-`prek run --all-files` again before committing. The hooks (`.pre-commit-config.yaml`)
-run whitespace/YAML checks, `cargo fmt`, and `ruff` for the Python exporters in
-`scripts/`.
-
-Use Conventional Commits:
-
-```text
-feat(asr): add context biasing to remote ASR
-fix(url): preserve subtitle fallback errors
-perf(engine): ring KV cache for the Qwen3 decoder
-docs(performance): record M2 Pro OCR results
-chore(deps): bump rmcp
-```
-
-Breaking changes: add `!` after the type/scope (for example `feat(mcp)!: change tool
-response`) and include a `BREAKING CHANGE:` footer.
-
-## RELEASE PROCESS
-
-Releases are manual and tag-driven; release-please is not used.
-
-1. Bump `[workspace.package] version` in the root `Cargo.toml`.
-2. Run `cargo update --workspace` to refresh the workspace versions in `Cargo.lock`.
-3. Commit `chore(release): vX.Y.Z` on `main`.
-4. Push the tag `vX.Y.Z`.
-5. `.github/workflows/release.yml` (on `v*` tags) verifies that the tag matches the
-   workspace version (`cargo metadata --locked`), builds and smoke-tests the two
-   binaries on macOS arm64, creates the GitHub Release with generated notes, and opens the
-   formula bump PR (url + sha256) on `shuuul/homebrew-tap` using the `HOMEBREW_TAP_TOKEN`
-   secret.
-6. In the tap, brew test-bot builds bottles on that PR, and the tap's `publish.yml`
-   (`brew pr-pull`) publishes them.
-
-Release notes come from the GitHub Release (there is no `CHANGELOG.md`).
-
-## CI
-
-CI only packages; tests run locally. Before a release, run the commit gates plus the
-checkpoint tier and the corpus gate on a Metal Mac (and on metacube for Linux CUDA).
-
-- `.github/workflows/release.yml`: release build, smoke test, GitHub Release, and tap PR
-  (see above). There is no PR/push test workflow.
+- Keep hermetic and checkpoint tests offline. Load each checkpoint once per
+  test binary through a shared lazy fixture. Gate real tools and end-to-end
+  tests behind `AIMD_E2E=1`. Use short polling intervals for test synchronization.
+- Extend existing golden tests and regenerate fixtures with their exporters.
+  Keep committed fixtures at most 1 MB each. The subtitle fixtures are frozen
+  and require a reviewed behavior change to update.
+- Run the corpus gate for changes that can affect model outputs. Check
+  checkpoint parity and the corpus on a Linux GPU for changes that can affect
+  CUDA. Keep the hermetic suite around two minutes and use a separate
+  `CARGO_TARGET_DIR=target-<name>` for each concurrent worker.
+- Track multi-workstream, multi-agent, and handoff-heavy work in `specs/`.
+  Reserve and index a spec before parallel work starts. Follow the lifecycle in
+  [specs/README.md](specs/README.md) and run `cargo xtask check-specs` after changes.
+- The workspace version comes from root `Cargo.toml`. Follow the
+  [release process](docs/development.md#release-process) for tag-driven releases.

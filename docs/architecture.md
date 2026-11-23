@@ -58,12 +58,22 @@ CLI and MCP own output destinations and persist requested files through
    `output_file` if requested.
 
 ```mermaid
-flowchart LR
-    CLI[aimd-cli] --> Aimd[aimd library]
-    MCP[aimd-mcp] --> Aimd
-    Aimd --> Engine[aimd-engine]
-    Aimd -->|native| MLX[aimd-mlx]
-    Engine -->|mlx| MLX
+flowchart TD
+    CLI[aimd-cli] --> Route
+    MCP[aimd-mcp] --> Route
+    subgraph Aimd[aimd library]
+        Route[process_input and route] --> Doc[doc: Pandoc, EPUB, pdf-inspector]
+        Route --> Url[url: readable HTML, subtitles and audio]
+        Route --> Inference[ASR and OCR]
+        Url -->|AudioTranscriber| Inference
+        Doc --> Sys[System: env, PATH and subprocesses]
+        Url --> Sys
+        Inference --> Runtime[Runtime: System, model loading and PDF probing]
+        Runtime --> Sys
+        Inference --> Remote[OpenAI-compatible HTTP]
+    end
+    Runtime -->|native| Engine[aimd-engine]
+    Engine -->|mlx| MLX[aimd-mlx]
 ```
 
 `ProcessResult.markdown` is the exact converter output before context splitting.
@@ -92,7 +102,7 @@ from `ProcessResult.markdown`; interfaces must not rebuild them from
 |------|----------|--------------|
 | Transcript | `aimd::url` for URL subtitles/audio; `aimd::asr` for transcription | Qwen3-ASR 1.7B/0.6B (`mlx-community/Qwen3-ASR-*-{4,6,8}bit`) on MLX, or remote `/v1/audio/transcriptions` when `AIMD_ASR_BASE_URL` is set. |
 | Convert | `aimd::doc` | Pandoc CLI, pdf-inspector, passthrough for `.txt`/`.md`. |
-| OCR | `aimd::ocr` | Unlimited-OCR (`mlx-community/Unlimited-OCR-{4,6,8}bit`, 5-page PDF windows) or Unlimited-OCR-2 (`mlx-community/Unlimited-OCR-2-{4,6,8}bit`, 10-page PDF windows) on MLX, or remote `/v1/chat/completions` when `AIMD_OCR_BASE_URL` is set. |
+| OCR | `aimd::ocr` | Unlimited-OCR 1/2 or PP-OCRv6 on MLX, or remote `/v1/chat/completions` when `AIMD_OCR_BASE_URL` is set. |
 
 The README is the user-facing source of truth for `--model` values. Resolution lives in
 `crates/aimd/src/models.rs`, and the CLI help texts live in `crates/aimd/src/output.rs`.
@@ -132,7 +142,7 @@ For performance expectations and benchmarks, see [Performance](performance.md).
 Every pipeline receives `&dyn ProcessHooks`. Pipelines report progress stages
 (`extracting`, `downloading`, `transcribing`, `converting`, `recognizing`) with unit
 counts when known. They call `check_cancelled()` only at safe boundaries: between ASR
-segments, OCR pages, and EPUB chapters. Model calls and subprocesses are never
+segments, OCR pages or page windows, and EPUB chapters. Model calls and subprocesses are never
 interrupted; a cancellation that arrives during uninterruptible work keeps the
 completed artifact instead of discarding it.
 
@@ -150,3 +160,75 @@ failures at its boundary:
 
 The CLI logs the message to stderr and exits non-zero. MCP returns the message as a tool
 error.
+
+## Adapter and output details
+
+- **Source anchors** (spec 005): `ProcessInput.anchors` (default `false`; CLI
+  `--anchors`, MCP `anchors`; `--no-anchors` is still accepted as a no-op) adds OCR
+  `<!-- aimd:loc page=P bbox=x0,y0,x1,y1 kind=K -->` comments (1-based page, bbox
+  normalized 0..1, 3 decimals) and `[hh:mm:ss] ` transcript paragraphs to `markdown`.
+  `ProcessInput::wants_positions()` (`anchors || include_segments`) gates forced
+  alignment and `ProcessResult.segments`; CLI `--format json/srt/vtt` set
+  `include_segments`. With both off the output must match the pre-anchor output byte
+  for byte and skip forced alignment. Positions come through the
+  `OcrModel::recognize_located` / `AsrModel::transcribe_aligned` seams (defaults: none);
+  local ASR aligns 295 s segments (the aligner caps at 300 s; ffmpeg overshoots a 300 s
+  cut by milliseconds) with Qwen3-ForcedAligner-0.6B-8bit, loaded lazily once per process.
+  It covers zh, yue, en, de, es, fr, it, pt, ru and ko (not Japanese). Anything unaligned
+  (remote ASR, unsupported language, failed alignment) spreads its sentences over the
+  segment span instead of failing. JSON segment coordinates round to 3 decimals, times
+  to ms. `include_segments` (MCP; CLI `--format json`)
+  returns `segments`. MCP response fields are additive (`segments` last).
+
+- **URL cookie behavior**: keep automatic browser-cookie probing when no cookie option is
+  supplied; it is intentional user convenience for restricted media. Explicit cookie
+  options that yt-dlp rejects fail fast (`UnsupportedInput`). Subtitle and audio
+  fallback failures must not be hidden behind metadata-only success results.
+
+- **URL fallback ordering**: subtitles first (language preference order, then formats),
+  then audio download + ASR. If both produce no text, the request is a processing
+  failure. Stale-extractor yt-dlp stderr gets the `brew upgrade yt-dlp` hint.
+
+- **Document tools**: Pandoc (brew) reads every supported document format; `.txt`/`.md`
+  pass through; legacy `.doc`/`.ppt`/`.xls` and MOBI/AZW3 are unsupported. Text-layer
+  PDFs use the `pdf-inspector` crate; scanned pages render with `mutool draw`.
+  Pandoc 3.12 rejects xlsx workbooks whose rels use absolute targets (openpyxl
+  output); Excel-style relative targets convert.
+
+- **Readable HTML**: `TaskType::Readable` (CLI `--task readable`, MCP
+  `task_type: "readable"`) goes through `aimd::url` via `System`. URLs run `firecrawl-local scrape <url> --format
+  markdown` (`AIMD_FIRECRAWL` override) and parse its JSON envelope; `success: false` or
+  empty markdown (blocked pages carry a `warning`) is `ProcessingFailed`, a missing binary
+  `BackendUnavailable`. Firecrawl Local does not read files, so local HTML uses
+  `dom_smoothie`. `AIMD_READABLE_BACKEND=defuddle` routes URLs and files to `npx defuddle
+  parse` (`AIMD_NPX`); Defuddle is optional and not a brew dependency.
+
+## Where to look
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Input routing | `crates/aimd/src/route.rs` | `get_input_route` / `ensure_supported_input` map source kind + task into an `InputRoute`; `parse_task`. |
+| Orchestration | `crates/aimd/src/runtime.rs` | `process_input` / `process_input_with(request, hooks, &dyn Runtime)`; local-file dispatch, MarkItDown-style normalization, `TextContext` wrapping. |
+| System seam | `crates/aimd/src/sys.rs`, `runtime.rs`, `native.rs` | `System` handles env, `PATH` and subprocesses. `Runtime` extends it with preflight, model loading and PDF probing. |
+| PDF/OCR routing | `crates/aimd/src/native.rs` | pdf-inspector probe: scanned or `has_encoding_issues` PDFs route to OCR. |
+| Model + precision resolution | `crates/aimd/src/models.rs` | Alias/precision to model keys; `ocr_family` decodes them for `NativeRuntime::load_ocr`; native gates; 8-bit fallback; ASR language codes. |
+| Precision parsing | `crates/aimd/src/precision.rs` | Normalizes `4bit`/`6bit`/`8bit`/`bf16` and dash/space/case variants. |
+| HF checkpoints | `crates/aimd/src/hf.rs` | Cache lookup (`HF_HUB_CACHE` > `HF_HOME/hub` > `~/.cache/huggingface/hub`), HTTPS snapshot download, `HF_TOKEN`, `HF_ENDPOINT`, `HF_HUB_OFFLINE`. |
+| Local ASR | `crates/aimd/src/asr.rs`, `audio.rs` | ffmpeg decode to 16 kHz mono, >600 s segmenting, context, 4-bit -> 8-bit repetition retry. |
+| Local OCR | `crates/aimd/src/ocr.rs` | Images and `mutool draw` PDF pages rendered in the background (`PdfRenderJob`); progress and cancellation between pages or page windows. |
+| Remote backends | `crates/aimd/src/remote_config.rs`, `crates/aimd/src/remote.rs` | `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix; ureq + rustls. |
+| Request/result models | `crates/aimd/src/model.rs` | `ProcessInput`, `ProcessResult`, `TextContext`, `TaskType`, `SourceKind`; serde names are the wire format. |
+| Errors | `crates/aimd/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
+| Cancellation/progress | `crates/aimd/src/hooks.rs` | `ProcessHooks` (`is_cancelled`, `progress`, `check_cancelled`), `NoHooks`. |
+| Text shaping | `crates/aimd/src/text.rs` | Title extraction and header/paragraph chunking (`MAX_CHUNK_SIZE`). |
+| Source anchors | `crates/aimd/src/anchors.rs` | OCR `<!-- aimd:loc -->` comments, sentence split, unit-to-sentence timing, `[hh:mm:ss]` paragraphs, subtitle cues, SRT/VTT write/parse. |
+| Output persistence + help texts | `crates/aimd/src/output.rs` | `persist_result_output_if_requested`; `OutputFormat`, `result_payload`/`payload_text` (MCP response, CLI `--format json`), `subtitle_text`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
+| Extension tables | `crates/aimd/src/ext.rs` | Audio/video/image/OCR/asset extensions and the Pandoc reader map. |
+| CLI | `crates/aimd-cli/src/args.rs`, `app.rs` | Hand-written parser over the frozen flag surface; output naming; `.env` loading. |
+| MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
+| Document conversion | `crates/aimd/src/doc/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
+| URL conversion | `crates/aimd/src/url/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
+| Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
+| MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. |
+| Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference. `--ocr-model` picks the OCR family. `scripts/omnidoc_{build,score}.py` compare OCR models with ground truth on an OmniDocBench subset. [Performance](performance.md) |
+| Tracked specs | [`specs/`](../specs/README.md) | Lifecycle, numbering, and index. |

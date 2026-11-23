@@ -1,9 +1,9 @@
 ---
 id: "008"
 title: "Unlimited-OCR-2: DASH decoder and windowed multi-page PDF OCR"
-status: Active
+status: Completed
 created: 2026-10-27
-updated: 2026-10-28
+updated: 2026-11-23
 coordinator: "Claude (Opus 5.5) session with shuuul"
 ---
 
@@ -45,8 +45,8 @@ multi-page requests of up to 10 pages.
 - [x] `mlx-community/Unlimited-OCR-2-{4bit,6bit,8bit,bf16}` exist (converted
       with the mlx-vlm port; vision dense bf16, `dash_router` dense).
 - [x] `aimd scan.pdf --model unlimited-ocr-2` (and `--precision 8bit`) runs
-      locally; a PDF is OCR'd in windows of at most 10 pages, base mode, with
-      progress and cancellation between windows.
+      locally. The final layout tiles every page (gundam), with up to 10 pages
+      per request and progress and cancellation between windows.
 - [x] The native decoder matches the mlx-vlm port: committed goldens for
       prefill logits rows, routing (`topi`/`bias`/`valid` on sampled layers)
       and a forced greedy stream, enforced on Metal like the v1 decoder goldens.
@@ -99,10 +99,10 @@ Not in scope:
 
 | ID | Deliverable | Owner | Status | Dependencies | Verification |
 | --- | --- | --- | --- | --- | --- |
-| WS-01 | mlx-vlm port, turtle parity, conversions + uploads, upstream PR | Claude | In progress | None | turtle torch reference vs mlx-vlm; HF repos exist |
+| WS-01 | mlx-vlm port, turtle parity, conversions + uploads, upstream PR | Claude | Completed | None | turtle torch reference vs mlx-vlm, HF uploads, [mlx-vlm #2601](https://github.com/Neywa-Labs/mlx-vlm/pull/2601) merged |
 | WS-02 | Shim DASH ops + native DASH decoder | Claude | Completed | WS-01 parity | decoder goldens (exporter from mlx-vlm), `AIMD_MLX_DEVICE=cpu cargo test` |
-| WS-03 | Pipeline: base mode, multi-image prompt, page guard, v2 Markdown converter, located blocks | Claude | Completed | WS-02 | unit tests + E2E on corpus pages |
-| WS-04 | aimd-process: alias, 10-page windows, progress/cancel, help/docs | Claude | In progress | WS-03 | hermetic route/model tests, corpus gate |
+| WS-03 | Pipeline: gundam tiling, multi-image prompt, page guard, v2 Markdown converter, located blocks | Claude | Completed | WS-02 | unit tests + E2E on corpus pages |
+| WS-04 | Model alias, 10-page windows, progress/cancel, help/docs | Claude | Completed | WS-03 | hermetic route/model tests, cancellation between windows, corpus gate |
 
 ## Verification
 
@@ -119,11 +119,13 @@ cargo xtask check-specs
 
 ## Documentation sync
 
-- Durable product/developer docs: README model table, `docs/` performance notes.
+- Durable model and developer docs: [README](../../README.md#models),
+  [Model implementation](../../docs/models.md), and
+  [Performance](../../docs/performance.md).
 - Nearest local `AGENTS.md`: none below the root.
 - Parent/package guidance: n/a.
-- Root guidance and roadmap: `AGENTS.md` model naming, MODEL AND PRECISION
-  DESIGN, golden fixture list.
+- Root [AGENTS.md](../../AGENTS.md) retains model naming, the sparse DASH
+  requirement, and the golden fixture rules.
 
 ## Progress and handoff
 
@@ -361,6 +363,24 @@ cargo xtask check-specs
   (within noise; vision is GEMM-bound at ~3.5 TFLOPS).
 - Next action: commit.
 
+### 2026-11-23 — Codex — Closeout
+
+- Verified that the mlx-vlm model port merged on 2026-10-27. The separate
+  Metal kernel port was submitted and closed without merging on 2026-10-28.
+  [Model PR #2601](https://github.com/Neywa-Labs/mlx-vlm/pull/2601) ·
+  [Kernel PR #2605](https://github.com/Neywa-Labs/mlx-vlm/pull/2605)
+- The WS-04 record above covers cancellation between windows and the 4-bit
+  corpus result. Later Metal checkpoint and end-to-end runs passed, as recorded
+  above. [Spec 010](010-workspace-consolidation.md) also records identical OCR
+  outputs to v1.5.0 on the Metal and CUDA corpora after consolidation.
+
 ## Completion summary
 
-Pending.
+Unlimited-OCR-2 shipped as the default OCR model in v1.3.1. It tiles each
+PDF page and processes at most 10 pages per request, with progress and
+cancellation between windows. Unlimited-OCR v1 retains its own alias and
+uses five-page PDF windows. The v2 4-bit corpus gate scored 1.0000 similarity
+and stopped normally on all four requests. The checkpoint artifacts are
+published and the upstream mlx-vlm model port merged. Implementation details
+live in [Model implementation](../../docs/models.md) and measurements in
+[Performance](../../docs/performance.md).
