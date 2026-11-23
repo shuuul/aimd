@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "aimd"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "aimd-engine",
  "aimd-mlx",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-cli"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "aimd",
  "serde_json",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-engine"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "aimd-mlx",
  "half",
@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-mcp"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "aimd",
  "rmcp",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "aimd-mlx"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "cc",
  "half",
@@ -3150,7 +3150,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xtask"
-version = "1.5.0"
+version = "1.5.1"
 
 [[package]]
 name = "y4m"
