@@ -8,6 +8,7 @@ use crate::{AimdError, RemoteBackendConfig, Result, log_info};
 use aimd_engine::models::qwen3_asr::generate::parse_qwen_output;
 use aimd_engine::models::unlimited_ocr::markdown::normalize_unlimited_ocr_markdown;
 use aimd_engine::models::unlimited_ocr::markdown2::render_unlimited_ocr2;
+use aimd_engine::tokenizer::resolve_language;
 use serde_json::{Value, json};
 
 use crate::http::{self, HttpError, base64_encode, guess_mime, multipart_body};
@@ -52,19 +53,89 @@ fn read_file(path: &Path) -> Result<Vec<u8>> {
         .map_err(|e| AimdError::failed(format!("Cannot read {}: {e}", path.display())))
 }
 
-/// POST `/audio/transcriptions` (multipart) and parse the Qwen output.
-pub fn transcribe(
+pub(crate) enum RemoteAsrError {
+    UnsupportedAudio(AimdError),
+    Other(AimdError),
+}
+
+impl From<AimdError> for RemoteAsrError {
+    fn from(error: AimdError) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<RemoteAsrError> for AimdError {
+    fn from(error: RemoteAsrError) -> Self {
+        match error {
+            RemoteAsrError::UnsupportedAudio(error) | RemoteAsrError::Other(error) => error,
+        }
+    }
+}
+
+fn map_asr_error(base_url: &str, error: HttpError) -> RemoteAsrError {
+    let unsupported_audio =
+        match &error {
+            HttpError::Status(400, detail) => serde_json::from_str::<Value>(detail)
+                .ok()
+                .is_some_and(|body| {
+                    let error = &body["error"];
+                    error["param"] == "file"
+                        && error["message"] == "Invalid or unsupported audio file."
+                }),
+            _ => false,
+        };
+    let error = map_http_error("ASR", base_url, error);
+    if unsupported_audio {
+        RemoteAsrError::UnsupportedAudio(error)
+    } else {
+        RemoteAsrError::Other(error)
+    }
+}
+
+/// Nemotron treats a supplied prompt as the whole user instruction.
+fn nemotron_prompt(context: &str, language: Option<&str>) -> String {
+    let language = language
+        .map(str::trim)
+        .filter(|language| !language.is_empty());
+    let canonical = language.and_then(resolve_language);
+    let language = canonical.as_deref().or(language).unwrap_or("as spoken");
+    // Keep the model's standard instruction immediately before the audio.
+    format!(
+        "Reference for spellings only:\n<reference>\n{context}\n</reference>\n\n\
+         Audio transcription. Language: {language}. Wording: verbatim, including fillers and \
+         repetitions. Formatting: punctuation and capitalization. Output: transcript only."
+    )
+}
+
+/// POST `/audio/transcriptions` (multipart) and parse the transcript.
+pub(crate) fn transcribe(
     config: &RemoteBackendConfig,
     file_path: &Path,
     language: Option<&str>,
     context: Option<&str>,
-) -> Result<String> {
+) -> std::result::Result<String, RemoteAsrError> {
     let mut fields: Vec<(&str, &str)> = vec![("model", config.model.as_str())];
-    if let Some(language) = language.filter(|l| !l.is_empty()) {
+    let language = language.filter(|l| !l.is_empty());
+    if let Some(language) = language {
         fields.push(("language", language));
     }
-    if let Some(context) = context.filter(|c| !c.is_empty()) {
-        fields.push(("prompt", context));
+    let is_nemotron = config
+        .model
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("nemotron-transcribe"));
+    let prompt;
+    let context = context.filter(|c| !c.is_empty());
+    let field = if is_nemotron {
+        prompt = context
+            .filter(|c| !c.trim().is_empty())
+            .map(|c| nemotron_prompt(c, language));
+        prompt.as_deref()
+    } else {
+        context
+    };
+    if let Some(field) = field {
+        fields.push(("prompt", field));
     }
     let bytes = read_file(file_path)?;
     let name = file_path
@@ -79,18 +150,15 @@ pub fn transcribe(
     ];
     let url = format!("{}/audio/transcriptions", config.base_url);
     let response = http::post(&url, &headers, &body, TIMEOUT)
-        .map_err(|e| map_http_error("ASR", &config.base_url, e))?;
+        .map_err(|error| map_asr_error(&config.base_url, error))?;
     let payload: Value = serde_json::from_slice(&response)
         .map_err(|_| AimdError::failed("Remote ASR backend returned an invalid JSON response"))?;
     let text = payload.get("text").and_then(Value::as_str).unwrap_or("");
-    if text.trim().is_empty() {
-        return Err(AimdError::failed("Remote ASR produced empty transcription"));
-    }
-    let transcription = parse_qwen_output(text);
-    if transcription.is_empty() {
-        return Err(AimdError::failed("Remote ASR produced empty transcription"));
-    }
-    Ok(transcription)
+    Ok(if is_nemotron {
+        text.trim().to_string()
+    } else {
+        parse_qwen_output(text)
+    })
 }
 
 /// POST `/chat/completions` with one image; returns normalized Markdown.

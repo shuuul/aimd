@@ -1312,6 +1312,85 @@ fn remote_asr_posts_multipart_and_parses_qwen_output() {
 }
 
 #[test]
+fn remote_asr_nemotron_reference_keeps_the_transcription_instruction() {
+    let dir = TempDir::new(None, "aimd-rasr-").unwrap();
+    let wav = dir.path().join("clip.wav");
+    write_wav(&wav);
+    let (base, server) = serve(vec![(200, r#"{"text":"大家好"}"#.into()); 2]);
+    let mut req = request(&wav);
+    req.asr_base_url = Some(base);
+    req.asr_model = Some("nemotron-transcribe".into());
+    req.language = Some("zh".into());
+    req.context = Some("Title: 正式会议".into());
+    let rt = Mock::default();
+    assert_eq!(
+        process_input_with(&req, &NoHooks, &rt).unwrap().markdown,
+        "大家好"
+    );
+    req.context = None;
+    assert_eq!(
+        process_input_with(&req, &NoHooks, &rt).unwrap().markdown,
+        "大家好"
+    );
+
+    let recorded = server.join().unwrap();
+    let with_reference = String::from_utf8_lossy(&recorded[0].body);
+    assert!(with_reference.contains("name=\"language\"\r\n\r\nzh\r\n"));
+    assert!(with_reference.contains("name=\"prompt\"\r\n\r\nReference for spellings only:"));
+    assert!(with_reference.contains(
+        "<reference>\nTitle: 正式会议\n</reference>\n\nAudio transcription. Language: Chinese. Wording: verbatim,"
+    ));
+    let without_reference = String::from_utf8_lossy(&recorded[1].body);
+    assert!(without_reference.contains("name=\"language\"\r\n\r\nzh\r\n"));
+    assert!(!without_reference.contains("name=\"prompt\""));
+}
+
+#[test]
+fn remote_asr_retries_unsupported_m4a_as_wav_only_when_rejected() {
+    let dir = TempDir::new(None, "aimd-rasr-").unwrap();
+    let m4a = dir.path().join("clip.m4a");
+    std::fs::write(&m4a, b"m4a").unwrap();
+    let refusal = r#"{"error":{"message":"Invalid or unsupported audio file.","param":"file"}}"#;
+    let success = r#"{"text":"hello"}"#;
+    for reject in [false, true] {
+        let mut responses = Vec::new();
+        if reject {
+            responses.push((400, refusal.into()));
+        }
+        responses.push((200, success.into()));
+        let (base, server) = serve(responses);
+        let mut req = request(&m4a);
+        req.asr_base_url = Some(base);
+        let rt = Mock::default()
+            .tool("ffmpeg")
+            .tool("ffprobe")
+            .respond(|program, args| match program {
+                "ffprobe" => ok_output("2\n"),
+                "ffmpeg" => {
+                    write_wav(Path::new(args.last().unwrap()));
+                    ok_output("")
+                }
+                _ => unreachable!(),
+            });
+        assert_eq!(
+            process_input_with(&req, &NoHooks, &rt).unwrap().markdown,
+            "hello"
+        );
+        let recorded = server.join().unwrap();
+        assert!(String::from_utf8_lossy(&recorded[0].body).contains("filename=\"clip.m4a\""));
+        let runs = rt.runs();
+        assert_eq!(runs.len(), 1 + usize::from(reject));
+        if reject {
+            assert!(
+                String::from_utf8_lossy(&recorded[1].body)
+                    .contains(".wav\"\r\nContent-Type: audio/x-wav\r\n\r\nRIFF")
+            );
+            assert!(!Path::new(runs[1].1.last().unwrap()).exists());
+        }
+    }
+}
+
+#[test]
 fn remote_asr_error_mapping() {
     let dir = TempDir::new(None, "aimd-rasr-").unwrap();
     let wav = dir.path().join("clip.wav");

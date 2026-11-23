@@ -22,6 +22,21 @@ This document records practical performance expectations for `aimd` processing p
 | OCR | native MLX | Unlimited-OCR (`4bit`, `6bit`, `8bit`) | Default 4-bit. PDFs 5 pages per request (base mode; 10 scanned pages 17.7 s vs 34.5 s page by page on M2 Pro, same text); single images gundam mode, no-repeat n-gram guard (`ngram=35`, `window=128`), `max_tokens=8192`. Without the guard the model can loop (e.g. `R. R. R. ...`) until max_tokens and take minutes per page. |
 | ASR / OCR | remote OpenAI-compatible | server-defined | Latency is network plus server-side; no local load. |
 
+## Remote Nemotron ASR
+
+On a 14-minute English [LibriVox recording](https://archive.org/details/adventures_sherlock_holmes_rg_librivox),
+`nemotron-transcribe` on two DGX Sparks took 20.53 s through aimd, including
+ffmpeg and two requests. The two WAV files totaled 26.88 MB of audio. A single
+request with the original MP3 took 18.50 s and uploaded 6.72 MB. After
+normalizing punctuation and case, the two transcripts differed by nine word
+edits over 1,828 words. This measures agreement between runs. The recording
+was used without a time-aligned reference transcript.
+
+The default stays at 600 s per segment. Each 16 kHz mono PCM WAV segment is
+about 19.2 MB, within the tested server's 25 MiB file limit. A longer segment
+limit based on compressed MP3 alone would also need to account for WAV uploads
+and files that require transcoding.
+
 ## Native Rust engine (MLX backend)
 
 The engine runs only on MLX through the `aimd-mlx` C-ABI shim (brew `mlx`

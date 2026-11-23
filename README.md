@@ -479,6 +479,14 @@ AIMD_OCR_MODEL=Unlimited-OCR \
 Explicit options override the environment. MCP tool parameters use the same
 names in snake_case (`asr_base_url`, ...).
 
+For a server exposing `nemotron-transcribe`, set
+`--asr-model nemotron-transcribe` with its `--asr-base-url`. aimd wraps ASR
+context in a verbatim transcription instruction that marks it as reference
+text and includes any requested language. For remote ASR, aimd sends M4A and
+other directly supported input formats as-is first. If the server returns an
+explicit unsupported audio file error, aimd uses ffmpeg to retry once as
+16 kHz mono WAV.
+
 The OCR instruction follows the served model name. A name starting with
 `Unlimited-OCR-2` (after any `org/` prefix; case, `_` and spaces ignored) gets
 `<PAGE><image>` + `Multi page parsing.` and its block output is converted to

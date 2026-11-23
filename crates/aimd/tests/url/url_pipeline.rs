@@ -1258,7 +1258,7 @@ fn run_audio(
 #[test]
 fn audio_fallback_injects_metadata_context_by_default() {
     let fake = linus_fake("ctxdefault");
-    let asr = MockAsr::ok("transcribed audio text");
+    let asr = MockAsr::ok("大家好");
     let hooks = Hooks::default();
     let out = run_audio(
         &fake,
@@ -1267,7 +1267,7 @@ fn audio_fallback_injects_metadata_context_by_default() {
         &hooks,
     )
     .unwrap();
-    assert!(out.markdown.contains("transcribed audio text"));
+    assert!(out.markdown.contains("大家好"));
     let context = asr.single().context.unwrap();
     assert!(
         context.contains("Linus Torvalds") && context.contains("Linux kernel"),
@@ -1396,9 +1396,8 @@ fn no_subtitles_and_no_audio_text_is_processing_failure() {
     );
     assert!(asr.requests().is_empty());
 
-    // Transcript of <= 10 characters counts as no text.
-    let fake = linus_fake("short");
-    let asr = MockAsr::ok("too short");
+    let fake = linus_fake("blank");
+    let asr = MockAsr::ok(" \n\t ");
     expect_err(
         run_audio(
             &fake,

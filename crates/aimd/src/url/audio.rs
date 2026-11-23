@@ -277,7 +277,7 @@ fn download_and_transcribe(
             sentences: None,
         }
     };
-    if text.text.chars().count() > 10 {
+    if !crate::util::pytext::strip(&text.text).is_empty() {
         Ok(Some(text))
     } else {
         Ok(None)

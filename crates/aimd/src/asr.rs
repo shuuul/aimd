@@ -282,17 +282,10 @@ fn transcribe_segment_with_fallback(
         transcribe_local(rt, model_id, args)
     };
     let piece = match engine {
-        Engine::Remote(config) => {
-            match transcribe_remote(rt, config, options, path, temp_dir, context) {
-                Err(e) if e.message.to_lowercase().contains("empty transcription") => {
-                    return Ok(AlignedTranscript::default());
-                }
-                other => AlignedTranscript {
-                    text: other?,
-                    units: None,
-                },
-            }
-        }
+        Engine::Remote(config) => AlignedTranscript {
+            text: transcribe_remote(rt, config, options, path, temp_dir, context)?,
+            units: None,
+        },
         Engine::Local { model_id, language } => match local(model_id, language)? {
             Some(piece) => piece,
             None => return Ok(AlignedTranscript::default()),
@@ -379,5 +372,15 @@ fn transcribe_remote(
 ) -> Result<String> {
     let converted = audio::convert_to_wav_if_needed(rt, path, temp_dir)?;
     let request_path = converted.as_ref().map_or(path, |c| c.path());
-    remote::transcribe(config, request_path, options.language.as_deref(), context)
+    let send = |path: &Path| remote::transcribe(config, path, options.language.as_deref(), context);
+    match send(request_path) {
+        Err(remote::RemoteAsrError::UnsupportedAudio(_))
+            if suffix_lower(request_path) != ".wav" =>
+        {
+            log_info!("Remote ASR rejected the audio format. Retrying as WAV.");
+            let wav = audio::convert_to_wav(rt, path, temp_dir)?;
+            Ok(send(wav.path())?)
+        }
+        reply => reply.map_err(AimdError::from),
+    }
 }
