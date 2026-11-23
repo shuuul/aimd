@@ -43,31 +43,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "aimd-cli"
+name = "aimd"
 version = "1.5.0"
 dependencies = [
- "aimd-core",
- "aimd-process",
- "serde_json",
-]
-
-[[package]]
-name = "aimd-core"
-version = "1.5.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "aimd-doc"
-version = "1.5.0"
-dependencies = [
- "aimd-core",
+ "aimd-engine",
+ "aimd-mlx",
+ "dom_smoothie",
  "miniz_oxide 0.9.1",
  "pdf-inspector",
  "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "ureq",
+]
+
+[[package]]
+name = "aimd-cli"
+version = "1.5.0"
+dependencies = [
+ "aimd",
  "serde_json",
 ]
 
@@ -76,10 +71,11 @@ name = "aimd-engine"
 version = "1.5.0"
 dependencies = [
  "aimd-mlx",
- "aimd-weights",
  "half",
  "image",
+ "memmap2",
  "regex",
+ "safetensors",
  "serde",
  "serde_json",
  "thiserror",
@@ -90,8 +86,7 @@ dependencies = [
 name = "aimd-mcp"
 version = "1.5.0"
 dependencies = [
- "aimd-core",
- "aimd-process",
+ "aimd",
  "rmcp",
  "serde",
  "serde_json",
@@ -102,44 +97,8 @@ dependencies = [
 name = "aimd-mlx"
 version = "1.5.0"
 dependencies = [
- "aimd-weights",
  "cc",
  "half",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "aimd-process"
-version = "1.5.0"
-dependencies = [
- "aimd-core",
- "aimd-doc",
- "aimd-engine",
- "aimd-mlx",
- "aimd-url",
- "pdf-inspector",
- "serde_json",
- "ureq",
-]
-
-[[package]]
-name = "aimd-url"
-version = "1.5.0"
-dependencies = [
- "aimd-core",
- "dom_smoothie",
- "serde_json",
-]
-
-[[package]]
-name = "aimd-weights"
-version = "1.5.0"
-dependencies = [
- "half",
- "memmap2",
- "safetensors",
  "serde",
  "serde_json",
  "thiserror",

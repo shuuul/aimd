@@ -486,5 +486,5 @@ bench rows above if the numbers move:
 ```bash
 cargo test --workspace
 AIMD_E2E=1 cargo test -p aimd-engine --lib
-AIMD_E2E=1 cargo test -p aimd-process --test e2e
+AIMD_E2E=1 cargo test -p aimd --test e2e
 ```

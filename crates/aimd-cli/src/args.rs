@@ -1,6 +1,6 @@
 //! Hand-written parser for the frozen Typer flag surface.
 
-use aimd_core::output::{CONTEXT_HELP_TEXT, MODEL_HELP_TEXT, PRECISION_HELP_TEXT};
+use aimd::output::{CONTEXT_HELP_TEXT, MODEL_HELP_TEXT, PRECISION_HELP_TEXT};
 
 /// Parsed command line (env-var fallbacks applied by [`parse`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -182,7 +182,7 @@ fn set(cli: &mut Cli, field: &str, value: String) {
 /// Click `INT`: optional sign, digits, surrounding whitespace, `_` allowed
 /// between digits (Python `int()`).
 fn parse_int(value: &str) -> Option<i64> {
-    let t = aimd_core::pyfmt::strip(value);
+    let t = aimd::util::pytext::strip(value);
     let (sign, digits) = match t.strip_prefix('-') {
         Some(rest) => (-1, rest),
         None => (1, t.strip_prefix('+').unwrap_or(t)),

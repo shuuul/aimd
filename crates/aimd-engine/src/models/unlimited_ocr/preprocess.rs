@@ -32,6 +32,7 @@
 //! `(16 + 1) * 16 + 1 = 273` global image tokens plus `(10*w + 1) * 10*h`
 //! crop tokens for a `w x h` crop grid.
 
+#[cfg(any(test, feature = "mlx"))]
 use half::bf16;
 
 /// Gundam crop tile edge (`image_size` in the gundam-mode processor call).
@@ -600,6 +601,7 @@ pub(crate) fn normalize_pixels_bf16(u8img: &[u8], h: usize, w: usize) -> Vec<f32
 /// HWC u8 -> HWC bf16 `((x / 255) - 0.5) / 0.5` (same values as
 /// `normalize_pixels_bf16`, channel-last like `pixel_values.transpose(0,
 /// 2, 3, 1)` feeds SAM).
+#[cfg(any(test, feature = "mlx"))]
 pub(crate) fn pixels_nhwc_bf16(u8img: &[u8]) -> Vec<bf16> {
     u8img
         .iter()
@@ -612,6 +614,7 @@ pub(crate) fn pixels_nhwc_bf16(u8img: &[u8]) -> Vec<bf16> {
 // ---------------------------------------------------------------------------
 
 /// Keys cubic kernel with parameter `a` (torch antialias uses -0.5).
+#[cfg(feature = "mlx")]
 fn cubic_kernel_a(x: f32, a: f32) -> f32 {
     let absx = x.abs();
     let absx2 = absx * absx;
@@ -630,6 +633,7 @@ fn cubic_kernel_a(x: f32, a: f32) -> f32 {
 /// the mlx_vlm Metal kernel: support 2.0, a = -0.5): f32
 /// coordinate math, tap range clamped in-bounds, weight-sum normalization.
 /// `src`: `[in_h, in_w, c]`; returns `[out_h, out_w, c]`.
+#[cfg(feature = "mlx")]
 pub(crate) fn bicubic_interp_antialias(
     src: &[f32],
     in_h: usize,
@@ -679,6 +683,7 @@ pub(crate) fn bicubic_interp_antialias(
 /// SAM `get_abs_pos_sam` (Baidu `deepencoder.py`): f32 bicubic
 /// (antialias). Returns `[tgt, tgt, c]` in f32; the upload rounds it to
 /// bf16 like the reference's `.to(dtype)`.
+#[cfg(feature = "mlx")]
 pub(crate) fn sam_pos_embed_interp(
     pos_embed: &[f32],
     src: usize,
@@ -695,6 +700,7 @@ pub(crate) fn sam_pos_embed_interp(
 /// class row is kept. `pos` is `[1 + src^2, dim]`; returns `[1 + side^2,
 /// dim]` with `side = isqrt(tgt_tokens)` (equal to `pos` when the grid
 /// already matches). f32; the upload rounds it to bf16.
+#[cfg(feature = "mlx")]
 pub(crate) fn clip_pos_embed_interp(pos: &[f32], dim: usize, tgt_tokens: usize) -> Vec<f32> {
     let src = (pos.len() / dim - 1).isqrt();
     let side = tgt_tokens.isqrt(); // `int(math.sqrt(tgt_size))`
@@ -713,6 +719,7 @@ pub(crate) fn clip_pos_embed_interp(pos: &[f32], dim: usize, tgt_tokens: usize) 
 /// `[rows, c]` table to `max_rel = 2*q-1` rows when needed (half-pixel
 /// source index clamped at 0, f32), then gathered by
 /// `relative_coords[i][j] = i - j + (q - 1)` -> `[q, k, c]`.
+#[cfg(feature = "mlx")]
 pub(crate) fn get_rel_pos_table(
     rel_pos: &[f32],
     rel_rows: usize,

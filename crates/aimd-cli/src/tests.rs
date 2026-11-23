@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aimd_core::log::{Level, capture};
-use aimd_core::{AimdError, ProcessHooks, Result};
-use aimd_process::{AsrFailure, AsrModel, DocOutput, LocalModality, OcrFailure, OcrModel, Runtime};
+use aimd::log::{Level, capture};
+use aimd::{AimdError, ProcessHooks, Result};
+use aimd::{AsrFailure, AsrModel, DocOutput, LocalModality, OcrFailure, OcrModel, Runtime};
 
 use crate::app::{output_path_from_title, parse_dotenv, run};
 
@@ -49,13 +49,16 @@ impl OcrModel for Text {
     }
 }
 
-impl Runtime for Fake {
-    fn env(&self, _: &str) -> Option<String> {
+impl aimd::System for Fake {
+    fn env_os(&self, _: &str) -> Option<std::ffi::OsString> {
         None
     }
     fn which(&self, _: &str) -> Option<PathBuf> {
         None
     }
+}
+
+impl Runtime for Fake {
     fn preflight_local(&self, _: LocalModality) -> Result<()> {
         Ok(())
     }
@@ -76,9 +79,9 @@ impl Runtime for Fake {
     }
     fn url_transcript(
         &self,
-        _: &aimd_core::ProcessInput,
+        _: &aimd::ProcessInput,
         _: &dyn ProcessHooks,
-    ) -> Result<aimd_process::UrlOutput> {
+    ) -> Result<aimd::UrlOutput> {
         Err(AimdError::backend_unavailable("no url"))
     }
 }
@@ -94,7 +97,7 @@ fn invoke(args: &[&str], rt: &Fake) -> Outcome {
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let (code, logs) = capture(|| run(&args, &|_| None, rt, &mut out, &mut err));
-    aimd_core::log::set_level(Level::Info);
+    aimd::log::set_level(Level::Info);
     Outcome {
         code,
         stdout: String::from_utf8(out).unwrap(),

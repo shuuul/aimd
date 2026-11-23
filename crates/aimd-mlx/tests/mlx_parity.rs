@@ -1,7 +1,7 @@
 //! Parity + error-path tests for the `aimd-mlx` C-ABI shim (WS-11a).
 //!
-//! Parity baseline for the quantized path: [`aimd_weights::dequantize_affine`]
-//! (bit-exact vs `mx.dequantize`, guarded by `aimd-weights/tests/golden/quant`) cast to
+//! Parity baseline for the quantized path: [`dequantize_affine`]
+//! (bit-exact vs `mx.dequantize`, guarded by `tests/golden/quant`) cast to
 //! f16, followed by a naive f32-accumulate matmul, for the golden quant
 //! fixtures (the committed checkpoint slices + synthetic f16/bf16,
 //! 4-bit/8-bit cases). Dense f16 matmul and the model stages are covered by
@@ -17,8 +17,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use aimd_mlx::{MlxArray, MlxDtype, MlxError};
-use aimd_weights::{QuantizedTensor, ScaleDtype, dequantize_affine};
+#[path = "common/mlx_quant.rs"]
+mod mlx_quant;
+
 use half::{bf16, f16};
+use mlx_quant::{QuantizedTensor, ScaleDtype, dequantize_affine};
 use serde::Deserialize;
 
 // ---------------------------------------------------------------------------
@@ -62,14 +65,14 @@ impl Rng {
 }
 
 // ---------------------------------------------------------------------------
-// Golden quant fixture loading (same layout as aimd-weights' golden_parity).
+// Golden quant fixture loading.
 // ---------------------------------------------------------------------------
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../aimd-weights/tests/golden/quant")
+        .join("tests/golden/quant")
         .canonicalize()
-        .expect("aimd-weights/tests/golden/quant fixtures must be present")
+        .expect("tests/golden/quant fixtures must be present")
 }
 
 #[derive(Deserialize)]
@@ -170,7 +173,7 @@ fn max_abs(values: &[f32]) -> f32 {
 /// Casts dequantized bits (f16 or bf16 patterns) to f16 — the f16
 /// reference-compute convention. bf16 -> f16 is exact for weight-range values
 /// (wider mantissa; only the exponent range shrinks).
-fn dequant_to_f16(dequant: &aimd_weights::DequantizedTensor) -> Vec<f16> {
+fn dequant_to_f16(dequant: &mlx_quant::DequantizedTensor) -> Vec<f16> {
     dequant
         .data
         .iter()
@@ -179,6 +182,72 @@ fn dequant_to_f16(dequant: &aimd_weights::DequantizedTensor) -> Vec<f16> {
             ScaleDtype::Bf16 => f16::from_f32(ScaleDtype::Bf16.to_f32(bits)),
         })
         .collect()
+}
+
+#[test]
+fn dequantize_matches_affine_reference() {
+    // 4-bit, group 32 (a group size the bundled mlx.metallib ships kernels
+    // for — group sizes outside {32, 64, 128} fail to load a Metal kernel),
+    // one row of 64 values = two groups, packed into eight u32 words. Nibble
+    // packing (mlx affine): low nibbles first — value v at position p sits
+    // in nibble p. Values 0..15 repeated: words alternate
+    // 0x76543210 / 0xFEDCBA98.
+    let payload: Vec<u8> = [
+        0x7654_3210u32,
+        0xFEDC_BA98,
+        0x7654_3210,
+        0xFEDC_BA98,
+        0x7654_3210,
+        0xFEDC_BA98,
+        0x7654_3210,
+        0xFEDC_BA98,
+    ]
+    .iter()
+    .flat_map(|w| w.to_le_bytes())
+    .collect();
+    let half = |v: f32| half::f16::from_f32(v).to_bits();
+    let q = QuantizedTensor {
+        bits: 4,
+        group_size: 32,
+        shape: vec![1, 64],
+        scale_dtype: ScaleDtype::F16,
+        payload,
+        scales: vec![half(0.5), half(2.0)],
+        biases: vec![half(0.25), half(-1.0)],
+    };
+    let reference = dequantize_affine(&q).unwrap();
+
+    let w = MlxArray::from_bytes(&q.payload, MlxDtype::U32, &[1, 8]).unwrap();
+    let scales = MlxArray::from_f16(
+        &[1, 2],
+        &q.scales
+            .iter()
+            .map(|&b| half::f16::from_bits(b))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let biases = MlxArray::from_f16(
+        &[1, 2],
+        &q.biases
+            .iter()
+            .map(|&b| half::f16::from_bits(b))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let out = w
+        .dequantize(&scales, Some(&biases), Some(32), Some(4))
+        .unwrap();
+    assert_eq!(out.shape().unwrap(), reference.shape);
+    assert_eq!(out.dtype().unwrap(), MlxDtype::F16);
+    let got = out.to_f16_vec().unwrap();
+    for (p, (a, &r)) in got.iter().zip(&reference.data).enumerate() {
+        let r = half::f16::from_bits(r);
+        assert!(
+            (a.to_f32() - r.to_f32()).abs() < 1e-6,
+            "[{p}]: {} vs {r}",
+            a.to_f32()
+        );
+    }
 }
 
 /// Naive `x[m, k] @ wt[n, k]^T` with f32 accumulation, f16-rounded output —

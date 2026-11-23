@@ -10,8 +10,7 @@ name = "aimd"
 path = "src/main.rs"
 
 [dependencies]
-aimd-core = { workspace = true }
-aimd-process = { workspace = true }
+aimd = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

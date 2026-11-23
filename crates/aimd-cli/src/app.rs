@@ -3,13 +3,13 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use aimd_core::log::{LEVEL_NAMES, Level, set_level};
-use aimd_core::output::{
+use aimd::Runtime;
+use aimd::log::{LEVEL_NAMES, Level, set_level};
+use aimd::output::{
     OutputFormat, PersistError, build_output_text, payload_text, persist_output, resolve_path,
     result_payload, subtitle_text,
 };
-use aimd_core::{NoHooks, ProcessInput, TaskType, log_debug, log_error, log_info, log_warn};
-use aimd_process::Runtime;
+use aimd::{NoHooks, ProcessInput, TaskType, log_debug, log_error, log_info, log_warn};
 
 use crate::args::{Cli, Parsed, USAGE, help_text, parse};
 
@@ -27,8 +27,8 @@ pub fn output_path_from_title(
         .collect();
     let mut collapsed = String::new();
     let mut in_space = false;
-    for c in aimd_core::pyfmt::strip(&replaced).chars() {
-        if aimd_core::pyfmt::is_space(c) {
+    for c in aimd::util::pytext::strip(&replaced).chars() {
+        if aimd::util::pytext::is_space(c) {
             if !in_space {
                 collapsed.push('_');
             }
@@ -120,7 +120,7 @@ pub fn run(
     }
     let requested = match cli.task.as_deref() {
         None => None,
-        Some(task) => match TaskType::parse(&aimd_core::pyfmt::strip(task).to_lowercase()) {
+        Some(task) => match TaskType::parse(&aimd::util::pytext::strip(task).to_lowercase()) {
             Some(t) => Some(t),
             None => {
                 let _ = writeln!(
@@ -206,7 +206,7 @@ fn process(
         ocr_model: cli.ocr_model.clone(),
         ocr_api_key: cli.ocr_api_key.clone(),
     };
-    let result = aimd_process::process_input_with(&request, &NoHooks, rt).map_err(|e| e.message)?;
+    let result = aimd::process_input_with(&request, &NoHooks, rt).map_err(|e| e.message)?;
     log_info!("Task: {}", result.task_type.as_str());
     if let Some(platform) = &result.platform {
         log_info!("Platform: {platform}");
@@ -237,8 +237,7 @@ fn process(
                 TaskType::Ocr => "ocr",
                 TaskType::Readable => "readable",
             };
-            let dir = if result.task_type == TaskType::Transcript
-                || aimd_core::is_url(&cli.input_source)
+            let dir = if result.task_type == TaskType::Transcript || aimd::is_url(&cli.input_source)
             {
                 Some(std::env::current_dir().map_err(|e| generic(&e))?)
             } else {

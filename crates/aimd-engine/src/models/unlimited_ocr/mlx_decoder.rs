@@ -37,8 +37,8 @@
 
 use std::path::Path;
 
+use crate::weights::{WeightStore, WeightsError, load_checkpoint};
 use aimd_mlx::{DashLayerConsts, DashMode, MlxArray, MlxError, SdpaMask};
-use aimd_weights::{WeightStore, WeightsError, load_checkpoint};
 
 use crate::models::kv_cache::KvCache;
 

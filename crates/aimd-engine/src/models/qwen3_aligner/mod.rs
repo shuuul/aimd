@@ -14,9 +14,9 @@
 //!   `timestamp_segment_time`).
 //! - [`units`]: the host-side processor: unit splitting per language, the
 //!   prompt string, and timestamp repair/decoding (`fix_timestamp`).
-//! - [`pipeline`]: [`pipeline::ForcedAlignerPipeline`], which reuses the
+//! - `pipeline`: `pipeline::ForcedAlignerPipeline`, which reuses the
 //!   Qwen3-ASR MLX audio tower and decoder from
-//!   [`crate::models::qwen3_asr::pipeline`] (weights load the same way; the
+//!   `crate::models::qwen3_asr::pipeline` (weights load the same way; the
 //!   decoder body is shared, the untied quantized `lm_head` is the only new
 //!   tensor).
 //!
@@ -45,6 +45,7 @@
 //! 60 s / 300 s probes.
 
 pub mod config;
+#[cfg(feature = "mlx")]
 pub mod pipeline;
 pub mod units;
 

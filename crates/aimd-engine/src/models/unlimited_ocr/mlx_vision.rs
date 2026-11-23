@@ -40,8 +40,8 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::weights::{WeightStore, WeightsError, load_checkpoint};
 use aimd_mlx::{MlxArray, MlxDtype, MlxError, SdpaMask};
-use aimd_weights::{WeightStore, WeightsError, load_checkpoint};
 use half::bf16;
 
 use super::config::{UnlimitedOcrConfig, parse_config};

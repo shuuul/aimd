@@ -11,11 +11,11 @@
 //!   relative-position tables).
 //! - `mlx_weights`: verbatim safetensors -> MLX uploads (dense bf16 and
 //!   packed 4-bit affine modules, no eager dequantization).
-//! - [`mlx_vision`]: SAM ViT-B (window attention, global blocks
+//! - `mlx_vision`: SAM ViT-B (window attention, global blocks
 //!   2/5/8/11, decomposed rel-pos bias) + CLIP-L + quantized projector
 //!   2048 -> 1280 + mlx-vlm token shaping (`image_newline` columns,
 //!   `view_separator`), op-for-op with mlx-vlm `deepseekocr`.
-//! - [`mlx_decoder`]: DeepSeek-V2-lite decoder (12 layers, hidden 1280,
+//! - `mlx_decoder`: DeepSeek-V2-lite decoder (12 layers, hidden 1280,
 //!   LlamaAttention, layer 0 dense then 64 routed experts top-6 with
 //!   softmax scoring + 2 shared experts via `gather_qmm`) with the
 //!   Python-exact `RingSlidingKVCache` (window 128).
@@ -25,12 +25,12 @@
 //! - [`generate`]: image-feature splice, mlx-vlm `generate_step` loop
 //!   (2048-token chunked prefill, pipelined greedy decode), the
 //!   sliding-window no-repeat n-gram guard (n=35, window=128, ported from
-//!   `src/aimd/plugins/ocr/models/mlx.py`), EOS handling and the markdown
-//!   normalization port from `src/aimd/plugins/ocr/models/unlimited.py`.
-//! - [`pipeline`]: [`pipeline::UnlimitedOcrPipeline`] wires image decode
+//!   `src/aimd/plugins/ocr/models/mlx.py`) and EOS handling.
+//! - [`markdown`]: Unlimited-OCR v1 Markdown normalization and located blocks.
+//! - `pipeline`: `pipeline::UnlimitedOcrPipeline` wires image decode
 //!   -> preprocessing -> vision features -> `<image>document parsing.`
 //!   prompt ids (bos + one contiguous `<image>` run sized by
-//!   [`pipeline::gundam_image_token_count`]) -> embedding splice ->
+//!   `pipeline::gundam_image_token_count`) -> embedding splice ->
 //!   guarded greedy generation -> strip + markdown normalization.
 //! - [`markdown2`]: Unlimited-OCR 2 raw layout blocks -> Markdown (port of
 //!   Baidu's `process_unlimitedOCR2.py`), plus page/block accessors.
@@ -48,13 +48,19 @@
 //! only `pipeline` composes them.
 
 pub mod config;
+#[cfg(feature = "mlx")]
 pub mod dash;
 pub mod generate;
+pub mod markdown;
 pub mod markdown2;
+#[cfg(feature = "mlx")]
 pub mod mlx_decoder;
+#[cfg(feature = "mlx")]
 pub mod mlx_vision;
+#[cfg(feature = "mlx")]
 pub(crate) mod mlx_weights;
+#[cfg(feature = "mlx")]
 pub mod pipeline;
 pub mod preprocess;
-#[cfg(test)]
+#[cfg(all(test, feature = "mlx"))]
 pub(crate) mod test_support;

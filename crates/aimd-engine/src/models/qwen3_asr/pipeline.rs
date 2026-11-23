@@ -39,7 +39,7 @@
 //! # Weight import
 //!
 //! Every tensor is imported through the shim's bit-exact byte constructor
-//! from [`aimd_weights::WeightStore`] views: tower bf16 verbatim, decoder
+//! from [`WeightStore`] views: tower bf16 verbatim, decoder
 //! triples via [`MlxArray::quantized_weight`] (checkpoint quantization is
 //! the contract).
 //!
@@ -72,8 +72,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use crate::weights::{ScaleDtype, WeightStore, WeightsError, load_checkpoint};
 use aimd_mlx::{MlxArray, MlxDtype, MlxError, SdpaMask};
-use aimd_weights::{ScaleDtype, WeightStore, WeightsError, load_checkpoint};
 use half::bf16;
 
 use crate::audio::{AudioError, MelConfig, load_wav, mel_spectrogram};

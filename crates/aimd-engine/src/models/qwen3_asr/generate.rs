@@ -1,7 +1,7 @@
 //! Backend-agnostic generation helpers: settings/outcome types, EOS
 //! resolution, repetition-loop detection, and output parsing (WS-06b).
 //!
-//! The greedy loop itself lives in [`super::pipeline`] (MLX); this module
+//! The greedy loop itself lives in the MLX pipeline; this module
 //! holds the pieces the Python behavior contracts define independent of the
 //! compute backend:
 //!
@@ -28,7 +28,7 @@ use crate::tokenizer::Tokenizer;
 /// Default generation budget (`max_new_tokens` in the Python backends).
 pub const DEFAULT_MAX_NEW_TOKENS: usize = 4096;
 
-/// Knobs for the greedy generation loop of [`super::pipeline`].
+/// Knobs for the greedy generation loop.
 #[derive(Clone, Copy, Debug)]
 pub struct GenerationSettings {
     /// Hard stop on generated (non-EOS) tokens. Default 4096.

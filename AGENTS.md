@@ -37,24 +37,19 @@ gitignored.
 
 ```text
 crates/
-├── aimd-weights/   # safetensors mmap; MLX affine 4/8-bit unpack (test-only bit-exact oracle); tests/golden/quant
-├── aimd-mlx/       # C-ABI shim over MLX C++ (build.rs + shim/); device selection; needs brew mlx
-├── aimd-engine/    # tokenizer, mel front-end, model graphs + generation (models/{qwen3_asr,qwen3_aligner,unlimited_ocr,pp_ocrv6})
-├── aimd-core/      # models, AimdError/ErrorKind, ProcessHooks, text shaping, precision, remote config,
-│                   # extension tables, output persistence + shared help texts, logging; no heavy deps
-├── aimd-doc/       # Pandoc conversion, EPUB (hand-written zip + OPF/spine), cleanup, pdf-inspector PDFs
-├── aimd-url/       # yt-dlp metadata/subtitles/audio, cookies, metadata ASR context, readable HTML (firecrawl-local)
-├── aimd-process/   # routing + orchestration: Runtime seam, local ASR/OCR, remote backends, model resolution, HF cache
-├── aimd-cli/       # `aimd` binary: hand-written arg parser, output naming, .env loading
-├── aimd-mcp/       # `aimd-mcp` binary: rmcp stdio server (healthz, process_input)
-└── xtask/          # repo tooling (`cargo xtask check-specs`)
+├── aimd/          # request/result contract, System and Runtime, adapters and orchestration
+├── aimd-engine/   # safetensors weights, tokenizer, front-ends, model graphs and generation
+├── aimd-mlx/      # C-ABI shim over MLX C++; quantization oracle and goldens in tests
+├── aimd-cli/      # aimd binary, argument parser, output naming and .env loading
+├── aimd-mcp/      # aimd-mcp binary, rmcp stdio server
+└── xtask/         # check-specs and check-modules
 ```
 
-Dependency direction: `aimd-core` <- `aimd-doc`, `aimd-url` <- `aimd-process` (also
-`aimd-engine`, `aimd-mlx`) <- `aimd-cli` / `aimd-mcp`. `aimd-doc` and
-`aimd-url` depend only on `aimd-core`. The URL audio fallback reaches ASR through the
-`aimd_url::AudioTranscriber` trait, which `aimd-process` implements
-(`UrlAudioTranscriber`). This keeps the crate graph acyclic.
+CLI and MCP call `aimd::process_input`. `aimd` uses `aimd-engine` and enables
+`aimd-engine/mlx` through its default `native` feature. A library build with
+`--no-default-features` supports documents, URL extraction and remote inference.
+Local inference requires `native`. The URL adapter defines an internal
+`AudioTranscriber` that orchestration implements with the configured runtime.
 
 Other trees: `scripts/` holds the standalone PEP 723 reference exporters (used only to
 regenerate goldens, not shipped). `docs/` holds architecture and performance
@@ -64,63 +59,48 @@ notes. `specs/` holds tracked execution specs.
 
 ```mermaid
 flowchart TD
-    CLI["aimd-cli\naimd binary"]
-    MCP["aimd-mcp\nrmcp stdio"]
-
-    Core["aimd-core\nProcessInput / ProcessResult / TaskType\nAimdError, ProcessHooks, text shaping, output"]
-    Process["aimd-process\nprocess_input + route + Runtime seam"]
-
-    Doc["aimd-doc\nPandoc, EPUB, pdf-inspector"]
-    Url["aimd-url\nyt-dlp subtitles -> audio fallback"]
-    Asr["aimd-process::asr\nffmpeg decode/segment, retry"]
-    Ocr["aimd-process::ocr\nimages + mutool-rendered PDFs"]
-    Remote["aimd-process::remote\nOpenAI-compatible ASR/OCR"]
-    Engine["aimd-engine\nQwen3-ASR, Unlimited-OCR 1/2,\nPP-OCRv6"]
-    Mlx["aimd-mlx\nMLX C++ shim (Metal)"]
-
-    CLI --> Core
-    MCP --> Core
-    CLI --> Process
-    MCP --> Process
-    Process --> Doc
-    Process --> Url
-    Url -->|AudioTranscriber| Asr
-    Process --> Asr
-    Process --> Ocr
-    Asr --> Remote
-    Ocr --> Remote
-    Asr --> Engine
-    Ocr --> Engine
-    Engine --> Mlx
-    CLI --> Output["aimd_core::output\noptional markdown persistence"]
-    MCP --> Output
+    CLI[aimd-cli] --> Route
+    MCP[aimd-mcp] --> Route
+    subgraph Aimd[aimd library]
+        Route[process_input and route] --> Doc[doc: Pandoc, EPUB, pdf-inspector]
+        Route --> Url[url: readable HTML, subtitles and audio]
+        Route --> Inference[ASR and OCR]
+        Url -->|AudioTranscriber| Inference
+        Doc --> Sys[System: env, PATH and subprocesses]
+        Url --> Sys
+        Inference --> Runtime[Runtime: System, model loading and PDF probing]
+        Runtime --> Sys
+        Inference --> Remote[OpenAI-compatible HTTP]
+    end
+    Runtime -->|native| Engine[aimd-engine]
+    Engine -->|mlx| MLX[aimd-mlx]
 ```
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Input routing | `crates/aimd-process/src/route.rs` | `get_input_route` / `ensure_supported_input` map source kind + task into an `InputRoute`; `parse_task`. |
-| Orchestration | `crates/aimd-process/src/lib.rs` | `process_input` / `process_input_with(request, hooks, &dyn Runtime)`; local-file dispatch, MarkItDown-style normalization, `TextContext` wrapping. |
-| System seam | `crates/aimd-process/src/lib.rs`, `native.rs` | `Runtime` trait (env, `which`, subprocess, preflight, model loading, PDF probe); `NativeRuntime` is the real system. Tests override pieces. |
-| PDF/OCR routing | `crates/aimd-process/src/native.rs` | pdf-inspector probe: scanned or `has_encoding_issues` PDFs route to OCR. |
-| Model + precision resolution | `crates/aimd-process/src/models.rs` | Alias/precision to model keys; `ocr_family` decodes them for `NativeRuntime::load_ocr`; native gates; 8-bit fallback; ASR language codes. |
-| Precision parsing | `crates/aimd-core/src/precision.rs` | Normalizes `4bit`/`6bit`/`8bit`/`bf16` and dash/space/case variants. |
-| HF checkpoints | `crates/aimd-process/src/hf.rs` | Cache lookup (`HF_HUB_CACHE` > `HF_HOME/hub` > `~/.cache/huggingface/hub`), HTTPS snapshot download, `HF_TOKEN`, `HF_ENDPOINT`, `HF_HUB_OFFLINE`. |
-| Local ASR | `crates/aimd-process/src/asr.rs`, `audio.rs` | ffmpeg decode to 16 kHz mono, >600 s segmenting, context, 4-bit -> 8-bit repetition retry. |
-| Local OCR | `crates/aimd-process/src/ocr.rs` | Images and `mutool draw` PDF pages rendered in the background (`PdfRenderJob`); per-page progress and cancellation. |
-| Remote backends | `crates/aimd-core/src/remote.rs`, `crates/aimd-process/src/remote.rs` | `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix; ureq + rustls. |
-| Request/result models | `crates/aimd-core/src/model.rs` | `ProcessInput`, `ProcessResult`, `TextContext`, `TaskType`, `SourceKind`; serde names are the wire format. |
-| Errors | `crates/aimd-core/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
-| Cancellation/progress | `crates/aimd-core/src/hooks.rs` | `ProcessHooks` (`is_cancelled`, `progress`, `check_cancelled`), `NoHooks`. |
-| Text shaping | `crates/aimd-core/src/text.rs` | Title extraction and header/paragraph chunking (`MAX_CHUNK_SIZE`). |
-| Source anchors | `crates/aimd-core/src/anchors.rs` | OCR `<!-- aimd:loc -->` comments, sentence split, unit-to-sentence timing, `[hh:mm:ss]` paragraphs, subtitle cues, SRT/VTT write/parse. |
-| Output persistence + help texts | `crates/aimd-core/src/output.rs` | `persist_result_output_if_requested`; `OutputFormat`, `result_payload`/`payload_text` (MCP response, CLI `--format json`), `subtitle_text`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
-| Extension tables | `crates/aimd-core/src/ext.rs` | Audio/video/image/OCR/asset extensions and the Pandoc reader map. |
+| Input routing | `crates/aimd/src/route.rs` | `get_input_route` / `ensure_supported_input` map source kind + task into an `InputRoute`; `parse_task`. |
+| Orchestration | `crates/aimd/src/runtime.rs` | `process_input` / `process_input_with(request, hooks, &dyn Runtime)`; local-file dispatch, MarkItDown-style normalization, `TextContext` wrapping. |
+| System seam | `crates/aimd/src/sys.rs`, `runtime.rs`, `native.rs` | `System` handles env, `PATH` and subprocesses. `Runtime` extends it with preflight, model loading and PDF probing. |
+| PDF/OCR routing | `crates/aimd/src/native.rs` | pdf-inspector probe: scanned or `has_encoding_issues` PDFs route to OCR. |
+| Model + precision resolution | `crates/aimd/src/models.rs` | Alias/precision to model keys; `ocr_family` decodes them for `NativeRuntime::load_ocr`; native gates; 8-bit fallback; ASR language codes. |
+| Precision parsing | `crates/aimd/src/precision.rs` | Normalizes `4bit`/`6bit`/`8bit`/`bf16` and dash/space/case variants. |
+| HF checkpoints | `crates/aimd/src/hf.rs` | Cache lookup (`HF_HUB_CACHE` > `HF_HOME/hub` > `~/.cache/huggingface/hub`), HTTPS snapshot download, `HF_TOKEN`, `HF_ENDPOINT`, `HF_HUB_OFFLINE`. |
+| Local ASR | `crates/aimd/src/asr.rs`, `audio.rs` | ffmpeg decode to 16 kHz mono, >600 s segmenting, context, 4-bit -> 8-bit repetition retry. |
+| Local OCR | `crates/aimd/src/ocr.rs` | Images and `mutool draw` PDF pages rendered in the background (`PdfRenderJob`); per-page progress and cancellation. |
+| Remote backends | `crates/aimd/src/remote_config.rs`, `crates/aimd/src/remote.rs` | `AIMD_{ASR,OCR}_{BASE_URL,MODEL,API_KEY}`, `/v1` suffix; ureq + rustls. |
+| Request/result models | `crates/aimd/src/model.rs` | `ProcessInput`, `ProcessResult`, `TextContext`, `TaskType`, `SourceKind`; serde names are the wire format. |
+| Errors | `crates/aimd/src/error.rs` | `AimdError { kind, message }`, `ErrorKind` with a stable snake_case name. |
+| Cancellation/progress | `crates/aimd/src/hooks.rs` | `ProcessHooks` (`is_cancelled`, `progress`, `check_cancelled`), `NoHooks`. |
+| Text shaping | `crates/aimd/src/text.rs` | Title extraction and header/paragraph chunking (`MAX_CHUNK_SIZE`). |
+| Source anchors | `crates/aimd/src/anchors.rs` | OCR `<!-- aimd:loc -->` comments, sentence split, unit-to-sentence timing, `[hh:mm:ss]` paragraphs, subtitle cues, SRT/VTT write/parse. |
+| Output persistence + help texts | `crates/aimd/src/output.rs` | `persist_result_output_if_requested`; `OutputFormat`, `result_payload`/`payload_text` (MCP response, CLI `--format json`), `subtitle_text`; `MODEL_HELP_TEXT`, `PRECISION_HELP_TEXT`, `CONTEXT_HELP_TEXT`. |
+| Extension tables | `crates/aimd/src/ext.rs` | Audio/video/image/OCR/asset extensions and the Pandoc reader map. |
 | CLI | `crates/aimd-cli/src/args.rs`, `app.rs` | Hand-written parser over the frozen flag surface; output naming; `.env` loading. |
 | MCP server | `crates/aimd-mcp/src/lib.rs` | Tool schemas, argument validation, `spawn_blocking` processing. |
-| Document conversion | `crates/aimd-doc/src/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
-| URL conversion | `crates/aimd-url/src/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
+| Document conversion | `crates/aimd/src/doc/` | `pandoc.rs`, `epub.rs` + `zip.rs` (hand-written), `clean.rs`, `pdf.rs` (pdf-inspector). |
+| URL conversion | `crates/aimd/src/url/` | `ytdlp.rs`, `subtitles.rs`, `cookies.rs`, `metadata.rs` (`build_metadata_context`, 2000 chars), `audio.rs`, `readable.rs`. |
 | Model graphs | `crates/aimd-engine/src/models/{qwen3_asr,qwen3_aligner,unlimited_ocr,pp_ocrv6}/` | `unlimited_ocr` also holds v2 (`dash.rs`, `markdown2.rs`). MLX graphs, generation loops, n-gram guard, `test_support.rs` shared fixtures. PP-OCRv6 host ops (cv2-exact resize, contours, min-area rect, unclip, perspective crop, CTC) are hand-written in `pp_ocrv6/{image_ops,db,ctc}.rs`. |
 | MLX shim | `crates/aimd-mlx/{build.rs,shim/,src/lib.rs}` | Links brew mlx (`MLX_PREFIX` override); `AIMD_MLX_DEVICE`. `src/dash.rs`: DASH router/prefill/decode ops. |
 | Golden corpus | `scripts/corpus/`, `scripts/{build_corpus,corpus_baseline,corpus_baseline_paddle}.py`, `crates/aimd-engine/examples/corpus_gate.rs` | Labeled ASR/OCR accuracy gate vs the mlx-audio / mlx-vlm / mlx4ocr reference; `--ocr-model` picks the OCR family. `scripts/omnidoc_{build,score}.py`: OmniDocBench subset for comparing OCR models against ground truth (`docs/performance.md`). |
@@ -128,19 +108,19 @@ flowchart TD
 
 ## CONVENTIONS
 
-- **Core is interface-independent**: `aimd-core`, `aimd-doc`, `aimd-url`, `aimd-process`,
-  and `aimd-engine` never depend on `aimd-cli` or `aimd-mcp`. Interfaces build
-  a `ProcessInput` and call `aimd_process::process_input`. Request/response shaping
-  stays in the interface crate.
+- **Module boundaries**: Interfaces call the public `aimd` API. Contract modules
+  (`model`, `error`, `hooks`, `output`, `log`, `text`, `anchors`) use other contract
+  modules, and `text` shares `util::pytext`. `sys` and `util` use the contract.
+  `doc` and `url` can also use `sys`, `util` and `ext`. Orchestration can import
+  any module. `cargo xtask check-modules` checks the import rules.
 - **Route model**: classify inputs with `InputRoute { source_kind, task_type }`.
   `source_kind` is the supplied input kind, and `task_type` (`transcript`, `convert`,
   `ocr`, `readable`) selects processing logic. `readable` is opt-in only (URLs and
   `.html`/`.htm` files); URLs auto-route to `transcript`.
-- **Runtime seam**: everything that touches the system (env, `PATH`, subprocesses, model
-  loading, device preflight, PDF probing) goes through `aimd_process::Runtime`, so
-  hermetic tests can substitute fakes. Interfaces receive an `Arc<dyn Runtime>` or a
-  `Processor`.
-- **Typed errors**: return `aimd_core::AimdError` with the right `ErrorKind`.
+- **System and runtime seams**: Source adapters use `System` for env, `PATH` and
+  subprocesses. `Runtime: System` adds model loading, GPU preflight and PDF probes.
+  Production uses `NativeRuntime`; adapter tests fake tools through `System`.
+- **Typed errors**: return `aimd::AimdError` with the right `ErrorKind`.
   Missing tools, models, or device (`pandoc`, `yt-dlp`, `ffmpeg`, `mutool`, MLX GPU) ->
   `BackendUnavailable`. Missing inputs -> `InputNotFound`. Unsupported inputs or options
   -> `UnsupportedInput`. Conversion failures -> `ProcessingFailed`. Cancellation ->
@@ -150,7 +130,7 @@ flowchart TD
   chapters), never inside uninterruptible model calls or subprocesses. Work that
   finishes during a late cancellation stays a completed artifact, never discarded.
 - **Output ownership**: `output_file` belongs to the CLI/MCP, not to `ProcessInput`
-  or `ProcessResult`. Persist through `aimd_core::output`. Asset conversions
+  or `ProcessResult`. Persist through `aimd::output`. Asset conversions
   (`output_dir` set) ignore `output_file`. Persisted files are `markdown`
   byte-for-byte, never rebuilt from `chunk_list`.
 - **Stable output contract**: `ProcessResult` keeps the lossless `markdown`, an optional
@@ -196,7 +176,7 @@ flowchart TD
   (`docs/performance.md`).
 - **Precision separation**: model family/size goes through `model`; quantization goes
   through the separate `precision` option. The parser accepts `4bit`, `6bit`, `8bit`, and
-  `bf16` (dash/space/case variants normalized in `aimd_core::precision`). The native
+  `bf16` (dash/space/case variants normalized in `aimd::normalize_precision`). The native
   engine runs Qwen3-ASR and Unlimited-OCR (1 and 2) at `4bit` (default), `6bit`, and `8bit`;
   `bf16` is rejected for them as `BackendUnavailable`. PP-OCRv6 ignores precision
   with one warning. A precision that conflicts
@@ -205,7 +185,7 @@ flowchart TD
   MCP, URL audio fallback, local ASR, and OCR.
 - **ASR context biasing**: `ProcessInput.context` (explicit text) and
   `ProcessInput.metadata_context` (default `true`) are forwarded by CLI
-  (`--context`/`--no-context`) and MCP. `aimd-url` builds context from page
+  (`--context`/`--no-context`) and MCP. `aimd::url` builds context from page
   metadata (title/author/description/tags/chapters, capped at 2000 chars) and merges it
   into the audio fallback. Qwen3-ASR consumes it as the system message. Never feed
   first-pass ASR output back as context.
@@ -247,7 +227,7 @@ flowchart TD
   buffer holds (mlx's CUDA default held a whole vision tower: 11 GB per
   Unlimited-OCR page, 4 GB at 30 MB, same speed), the shim
   caps the cache at 1 GB on every device (`set_cache_limit` at device
-  selection), and `aimd-process` wraps every native model in `Released`,
+  selection), and `aimd::native` wraps every native model in `Released`,
   which clears the cache after each call so a long-lived MCP process keeps
   only the weights between requests (Metal hands the pages back a few
   seconds later). `aimd_mlx::memory_stats()` reads the counters,
@@ -267,8 +247,7 @@ flowchart TD
   Pandoc 3.12 rejects xlsx workbooks whose rels use absolute targets (openpyxl
   output); Excel-style relative targets convert.
 - **Readable HTML**: `TaskType::Readable` (CLI `--task readable`, MCP
-  `task_type: "readable"`) goes through `Runtime::readable_html` ->
-  `aimd_url::convert_readable_html`. URLs run `firecrawl-local scrape <url> --format
+  `task_type: "readable"`) goes through `aimd::url` via `System`. URLs run `firecrawl-local scrape <url> --format
   markdown` (`AIMD_FIRECRAWL` override) and parse its JSON envelope; `success: false` or
   empty markdown (blocked pages carry a `warning`) is `ProcessingFailed`, a missing binary
   `BackendUnavailable`. Firecrawl Local does not read files, so local HTML uses
@@ -425,8 +404,7 @@ Tests are lean by rule; weights are the expensive resource.
   or reloads the same weights. Delete tests made redundant by a backend or
   API change in the same change.
 - **Golden fixtures**: live in the owning crate's `tests/golden/<set>/`, located via
-  `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-weights` (`aimd-mlx` reads it
-  via `../aimd-weights/tests/golden/quant`). `mel`, `tokenizer`, `asr_encoder`,
+  `env!("CARGO_MANIFEST_DIR")`. `quant` is owned by `aimd-mlx` at `crates/aimd-mlx/tests/golden/quant`. `mel`, `tokenizer`, `asr_encoder`,
   `asr_decoder`, `aligner`, `ocr_vision`, `ocr_decoder`, `ocr_e2e`, `ocr2_decoder`,
   `ocr2_markdown`, and `ppocrv6` belong to `aimd-engine`.
   `ocr2_decoder` comes from the shuuul/mlx-vlm port (`export_ocr2_decoder_reference.py`).
@@ -435,7 +413,7 @@ Tests are lean by rule; weights are the expensive resource.
   baseline calls `reference_unlimited_ocr.patch_mlx_vlm_to_baidu`, which fixes mlx-vlm
   0.7.x where it diverges from Baidu (CLIP `quick_gelu` and LN eps 1e-5, spatial CLIP
   pos resample, half-pixel SAM rel pos, R-SWA keeping the whole prompt).
-  `aimd-url/tests/golden/subtitles` is frozen: its Python oracle was deleted, so update it
+  `crates/aimd/tests/golden/subtitles` is frozen: its Python oracle was deleted, so update it
   only with a reviewed, intentional behavior change. Regenerate the others with
   `uv run scripts/export_*_reference.py` (PEP 723 standalone scripts). Never hand-edit
   them.
@@ -465,13 +443,10 @@ Tests are lean by rule; weights are the expensive resource.
 
 ## ANTI-PATTERNS
 
-- Embedding routing/orchestration in `aimd-cli` or `aimd-mcp` instead of
-  `aimd-process`.
-- Depending on an interface crate from `aimd-core`, `aimd-doc`, `aimd-url`,
-  `aimd-process`, or `aimd-engine`; adding a direct `aimd-url` -> `aimd-process` edge
-  instead of using `AudioTranscriber`.
-- Calling `std::env`, `PATH` lookups, or subprocesses directly in `aimd-process` code
-  paths instead of going through `Runtime`.
+- Embedding routing or orchestration in `aimd-cli` or `aimd-mcp`.
+- Importing orchestration from a source adapter, or adding dependencies between
+  `doc` and `url`.
+- Calling env, `PATH` lookups, or subprocesses directly instead of using `System`.
 - Returning ad-hoc string errors or panicking where an `AimdError` kind exists.
 - Checking cancellation inside uninterruptible model calls, or discarding a completed
   artifact because cancellation arrived late.
@@ -503,11 +478,13 @@ prek run --all-files
 cargo test --workspace                       # Metal when available
 AIMD_MLX_DEVICE=cpu cargo test --workspace   # hermetic tier (pre-commit gate)
 AIMD_E2E=1 cargo test -p aimd-engine --lib   # tier 3, needs the HF cache
-AIMD_E2E=1 cargo test -p aimd-process --test e2e
-AIMD_E2E=1 cargo test -p aimd-url --test e2e
+AIMD_E2E=1 cargo test -p aimd --test e2e
+AIMD_E2E=1 cargo test -p aimd --lib url::e2e
+cargo check -p aimd --no-default-features
 
-# Specs
+# Specs and module boundaries
 cargo xtask check-specs
+cargo xtask check-modules
 
 # Build and run
 cargo build --release -p aimd-cli -p aimd-mcp

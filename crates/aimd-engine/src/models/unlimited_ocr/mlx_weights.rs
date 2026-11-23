@@ -9,8 +9,8 @@
 //! `nn.QuantizedLinear` / `QuantizedSwitchLinear` do — no eager
 //! dequantization.
 
+use crate::weights::{WeightStore, WeightsError};
 use aimd_mlx::{MlxArray, MlxDtype, MlxError};
-use aimd_weights::{WeightStore, WeightsError};
 
 /// Weight-import failures.
 #[derive(Debug, thiserror::Error)]

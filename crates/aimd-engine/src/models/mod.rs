@@ -2,6 +2,7 @@
 //! backend: [`qwen3_asr`] (speech), [`qwen3_aligner`] (forced alignment), [`unlimited_ocr`]
 //! (documents), and [`pp_ocrv6`] (det + rec line OCR).
 
+#[cfg(feature = "mlx")]
 pub(crate) mod kv_cache;
 pub mod pp_ocrv6;
 pub mod qwen3_aligner;

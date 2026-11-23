@@ -1,13 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/aimd-weights",
     "crates/aimd-engine",
     "crates/aimd-mlx",
-    "crates/aimd-core",
-    "crates/aimd-doc",
-    "crates/aimd-url",
-    "crates/aimd-process",
+    "crates/aimd",
     "crates/aimd-cli",
     "crates/aimd-mcp",
     "crates/xtask",
@@ -32,13 +28,9 @@ tokenizers = "0.22"
 cc = "1"
 image = "0.25"
 
-aimd-weights = { path = "crates/aimd-weights" }
 aimd-mlx = { path = "crates/aimd-mlx" }
-aimd-engine = { path = "crates/aimd-engine" }
-aimd-core = { path = "crates/aimd-core" }
-aimd-doc = { path = "crates/aimd-doc" }
-aimd-url = { path = "crates/aimd-url" }
-aimd-process = { path = "crates/aimd-process" }
+aimd-engine = { path = "crates/aimd-engine", default-features = false }
+aimd = { path = "crates/aimd" }
 
 [profile.release]
 debug = true
@@ -46,8 +38,6 @@ debug = true
 # Checkpoint tests run real 1.7B-parameter graphs; unoptimized first-party
 # kernels make them 10-30x slower. Optimize only our crates in dev/test
 # builds (dependencies stay at opt-level 0, keeping compile times low).
-[profile.dev.package.aimd-weights]
-opt-level = 3
 [profile.dev.package.aimd-engine]
 opt-level = 3
 [profile.dev.package.aimd-mlx]

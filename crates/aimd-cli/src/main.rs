@@ -11,7 +11,7 @@ fn main() {
     let code = app::run(
         &args,
         &|key| std::env::var(key).ok(),
-        &aimd_process::NativeRuntime,
+        &aimd::NativeRuntime,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
     );

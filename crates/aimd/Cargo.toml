@@ -1,0 +1,22 @@
+[package]
+name = "aimd"
+description = "Document, URL, audio, and image conversion to Markdown"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["native"]
+native = ["aimd-engine/mlx", "dep:aimd-mlx"]
+
+[dependencies]
+aimd-engine = { workspace = true }
+aimd-mlx = { workspace = true, optional = true }
+dom_smoothie = "0.18"
+miniz_oxide = "0.9"
+pdf-inspector = "1.25"
+regex = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }

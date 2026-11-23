@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use aimd_core::{AimdError, ProcessHooks, ProcessInput};
-use aimd_process::{AsrModel, LocalModality, OcrFailure, OcrModel, Runtime, UrlOutput};
+use aimd::{AimdError, ProcessHooks, ProcessInput};
+use aimd::{AsrModel, LocalModality, OcrFailure, OcrModel, Runtime, UrlOutput};
 use rmcp::ServiceExt;
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -26,21 +26,23 @@ impl OcrModel for MockOcr {
     }
 }
 
+impl aimd::System for MockRuntime {}
+
 impl Runtime for MockRuntime {
-    fn preflight_local(&self, _modality: LocalModality) -> aimd_core::Result<()> {
+    fn preflight_local(&self, _modality: LocalModality) -> aimd::Result<()> {
         Ok(())
     }
-    fn load_asr(&self, _model_id: &str) -> aimd_core::Result<Arc<dyn AsrModel>> {
+    fn load_asr(&self, _model_id: &str) -> aimd::Result<Arc<dyn AsrModel>> {
         Err(AimdError::backend_unavailable("no asr in tests"))
     }
-    fn load_ocr(&self, _model_id: &str) -> aimd_core::Result<Arc<dyn OcrModel>> {
+    fn load_ocr(&self, _model_id: &str) -> aimd::Result<Arc<dyn OcrModel>> {
         Ok(Arc::new(MockOcr))
     }
     fn url_transcript(
         &self,
         request: &ProcessInput,
         _hooks: &dyn ProcessHooks,
-    ) -> aimd_core::Result<UrlOutput> {
+    ) -> aimd::Result<UrlOutput> {
         self.seen.lock().unwrap().push(request.clone());
         Ok(UrlOutput {
             markdown: self.url_markdown.clone(),
@@ -264,9 +266,9 @@ fn schema_exposes_precision_and_task_enum() {
 #[test]
 fn text_content_keeps_python_key_order() {
     let value = result_payload(
-        &aimd_core::ProcessResult {
-            task_type: aimd_core::TaskType::Ocr,
-            text_context: aimd_core::TextContext {
+        &aimd::ProcessResult {
+            task_type: aimd::TaskType::Ocr,
+            text_context: aimd::TextContext {
                 title: "t".into(),
                 chunk_list: vec!["a".into()],
                 split_header_level: None,
@@ -281,8 +283,8 @@ fn text_content_keeps_python_key_order() {
         None,
         true,
     );
-    let text = aimd_core::output::payload_text(&value);
-    let positions: Vec<usize> = aimd_core::output::PAYLOAD_KEY_ORDER
+    let text = aimd::output::payload_text(&value);
+    let positions: Vec<usize> = aimd::output::PAYLOAD_KEY_ORDER
         .iter()
         .map(|k| text.find(&format!("\"{k}\"")).unwrap())
         .collect();

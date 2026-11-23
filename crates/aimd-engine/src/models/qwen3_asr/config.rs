@@ -103,7 +103,7 @@ pub struct Qwen3AsrCheckpointConfig {
     pub quantization: Option<QuantizationInfo>,
 }
 
-/// Affine quantization descriptor (consumed by `aimd-weights`).
+/// Affine quantization descriptor (consumed by the weight store).
 #[derive(Clone, Debug, Deserialize)]
 pub struct QuantizationInfo {
     pub group_size: u32,

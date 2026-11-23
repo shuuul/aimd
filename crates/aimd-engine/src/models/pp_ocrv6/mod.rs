@@ -9,8 +9,8 @@
 //! - `layers`: Paddle -> MLX weight import (OIHW -> OHWI on the host,
 //!   batch norms folded at load with mlx4ocr's MLX ops), `Conv`/`Linear`,
 //!   the LCNetV4 block and the branch stem shared by det and rec.
-//! - [`det`]: PPLCNetV4 backbone -> RepLKPAN + IntraCL neck -> DB head.
-//! - [`rec`]: PPLCNetV4 backbone + AvgPool -> LightSVTR encoder -> CTC
+//! - `det`: PPLCNetV4 backbone -> RepLKPAN + IntraCL neck -> DB head.
+//! - `rec`: PPLCNetV4 backbone + AvgPool -> LightSVTR encoder -> CTC
 //!   head + softmax; swaps the HF export's `head.encoder.conv_block.0/.1`
 //!   back into place (the fix mlx4ocr applies from the Paddle pickle).
 //! - [`image_ops`]: host image ops bit-exact with OpenCV 4.13 (BGR decode,
@@ -21,7 +21,7 @@
 //!   pyclipper round offset; reading-order sort.
 //! - [`ctc`]: greedy CTC decode, numpy `argsort` (introsort) and the
 //!   pairwise f32 mean used for line scores.
-//! - [`pipeline`]: [`pipeline::PpOcrV6Pipeline`] (decode -> det -> boxes ->
+//! - `pipeline`: `pipeline::PpOcrV6Pipeline` (decode -> det -> boxes ->
 //!   crops -> batched rec -> drop < 0.5 -> markdown).
 //!
 //! # Reference implementations
@@ -37,12 +37,16 @@
 pub mod config;
 pub mod ctc;
 pub mod db;
+#[cfg(feature = "mlx")]
 pub mod det;
 pub mod image_ops;
+#[cfg(feature = "mlx")]
 pub(crate) mod layers;
+#[cfg(feature = "mlx")]
 pub mod pipeline;
+#[cfg(feature = "mlx")]
 pub mod rec;
-#[cfg(test)]
+#[cfg(all(test, feature = "mlx"))]
 pub(crate) mod test_support;
-#[cfg(test)]
+#[cfg(all(test, feature = "mlx"))]
 mod tests;

@@ -34,8 +34,8 @@
 //! Parity expectations: MLX runs fp16/bf16 on Metal (or the MLX CPU device,
 //! see [`device_is_cpu`]) — results match an f32-accumulate reference within
 //! fp16 tolerance, NOT bit-exactly. Parity tests reuse the committed golden
-//! quant fixtures (`aimd-weights/tests/golden/quant/`): shim `quantized_matmul` vs
-//! `aimd-weights::dequantize_affine` + a naive f32-accumulate matmul.
+//! quant fixtures (`tests/golden/quant/`): shim `quantized_matmul` vs
+//! the test oracle and a naive f32-accumulate matmul.
 //!
 //! # Device selection
 //!

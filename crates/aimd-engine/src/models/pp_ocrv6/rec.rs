@@ -8,8 +8,8 @@
 //! tensors from the official Paddle checkpoint; swapping the two blocks
 //! reproduces that patch exactly, without the pickle download).
 
+use crate::weights::WeightStore;
 use aimd_mlx::{MlxArray, MlxError, SdpaMask};
-use aimd_weights::WeightStore;
 
 use super::config::RecConfig;
 use super::layers::{

@@ -3,7 +3,7 @@
 //! The engine is MLX-only (2026-10-25 decision): there is no
 //! hand-written CPU compute path. The graph runs on Metal (macOS, or the MLX
 //! CPU device as a fallback) or the `mlx` CUDA backend (Linux) through the
-//! [`aimd_mlx`] shim, op-for-op against mlx-audio.
+//! `aimd_mlx` shim, op-for-op against mlx-audio.
 //!
 //! # Module layout
 //!
@@ -15,10 +15,10 @@
 //! - [`generate`]: backend-agnostic generation pieces: settings/outcome
 //!   types, EOS resolution, repetition-loop detection, and the
 //!   `parse_qwen_output` port.
-//! - [`pipeline`]: the public entry point. [`pipeline::Qwen3AsrPipeline`]
+//! - `pipeline`: the public entry point. `pipeline::Qwen3AsrPipeline`
 //!   loads a checkpoint (mel -> 24-layer windowed audio tower -> Qwen3 dense
 //!   decoder over 4-bit/8-bit affine weights -> greedy loop) and
-//!   [`pipeline::transcribe_with_retry`] adds the 4-bit -> 8-bit retry when
+//!   `pipeline::transcribe_with_retry` adds the 4-bit -> 8-bit retry when
 //!   the repetition-loop detector trips.
 //!
 //! # Reference implementations
@@ -35,4 +35,5 @@
 pub mod config;
 pub mod generate;
 pub mod layout;
+#[cfg(feature = "mlx")]
 pub mod pipeline;

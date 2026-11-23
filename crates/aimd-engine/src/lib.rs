@@ -1,11 +1,9 @@
 //! aimd native engine: tokenizer, audio front-end, and MLX model graphs.
 //!
-//! The engine is MLX-only: every model graph runs through the `aimd-mlx`
-//! shim (Metal on macOS, the `mlx` CUDA backend on Linux). There is no
-//! hand-written CPU model path; the only CPU execution is MLX's own CPU
-//! device, selected with `AIMD_MLX_DEVICE=cpu` or automatically when no
-//! Metal device exists (see `aimd_mlx::device_is_cpu`). The `mlx` cargo feature is an empty alias kept so
-//! `--features mlx` invocations keep building.
+//! The default `mlx` feature enables model graphs through `aimd-mlx`
+//! (Metal on macOS and MLX CUDA on Linux). MLX also provides its own CPU
+//! device for testing with `AIMD_MLX_DEVICE=cpu`. Audio loading, tokenizer
+//! helpers, and model-output parsing are available without the feature.
 //!
 //! # Layout
 //!
@@ -21,3 +19,4 @@ pub mod audio;
 pub mod models;
 pub mod parallel;
 pub mod tokenizer;
+pub mod weights;

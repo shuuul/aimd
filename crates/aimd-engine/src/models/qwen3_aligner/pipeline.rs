@@ -17,46 +17,21 @@
 
 use std::path::Path;
 
+use crate::weights::{WeightsError, load_checkpoint};
 use aimd_mlx::{MlxArray, MlxError};
-use aimd_weights::{WeightsError, load_checkpoint};
 
+pub use super::units::{ALIGNER_LANGUAGES, AlignedUnit};
+use super::units::{build_aligner_prompt, decode_timestamps, split_units};
 use crate::audio::{AudioError, MelConfig, load_wav, mel_spectrogram};
 use crate::models::qwen3_aligner::config::{AlignerCheckpointConfig, parse_config};
-use crate::models::qwen3_aligner::units::{build_aligner_prompt, decode_timestamps, split_units};
 use crate::models::qwen3_asr::pipeline::{MlxDecoder, MlxQuantWeights, MlxTower, PipelineError};
 use crate::tokenizer::{Tokenizer, TokenizerError, resolve_language};
 
 /// Longest clip the aligner accepts (the model card's 5 minutes).
 pub const ALIGNER_MAX_SECONDS: f32 = 300.0;
 
-/// Languages the native aligner supports, as canonical
-/// [`crate::tokenizer::ASR_LANGUAGES`] names: the checkpoint's
-/// `support_languages` minus Japanese, whose reference unit splitting needs
-/// the nagisa neural tagger.
-pub const ALIGNER_LANGUAGES: &[&str] = &[
-    "Chinese",
-    "Cantonese",
-    "English",
-    "German",
-    "Spanish",
-    "French",
-    "Italian",
-    "Portuguese",
-    "Russian",
-    "Korean",
-];
-
 /// Sample rate of the accepted wav input.
 const SAMPLE_RATE: f32 = 16_000.0;
-
-/// One aligned unit (a CJK character or a word, punctuation dropped);
-/// `start` / `end` in seconds from the start of the clip.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AlignedUnit {
-    pub text: String,
-    pub start: f32,
-    pub end: f32,
-}
 
 /// Aligner failures.
 #[derive(Debug, thiserror::Error)]

@@ -7,6 +7,101 @@
 
 use serde::Deserialize;
 
+/// `sparse_attention_config` keys read at inference (defaults as in
+/// `DashParams.from_config`).
+#[derive(Clone, Debug, Deserialize)]
+pub struct SparseAttentionConfig {
+    #[serde(default)]
+    pub training_stage: String,
+    #[serde(default)]
+    pub use_sparse_attention: bool,
+    pub sparse_index_dim: Option<usize>,
+    pub sparse_attention_freq: Option<Vec<u32>>,
+    #[serde(default = "two")]
+    pub dash_scaling_factor: f32,
+    #[serde(default = "floor_default")]
+    pub dash_prior_floor: f32,
+    pub dash_scale_per_layer: Option<Vec<f32>>,
+    pub dash_floor_per_layer: Option<Vec<f32>>,
+    #[serde(default = "rope_1d")]
+    pub sparse_main_rope_mode: String,
+    #[serde(default = "stage0_default")]
+    pub dash_stage0: String,
+    #[serde(default = "block_default")]
+    pub sparse_block_size: usize,
+    #[serde(default = "one")]
+    pub sparse_local_block: usize,
+    pub dash_topk_blocks: Option<usize>,
+    #[serde(default = "one_f")]
+    pub dash_sigma: f32,
+    #[serde(default = "yes")]
+    pub dash_image_only: bool,
+    #[serde(default = "image_token_default")]
+    pub image_token_id: u32,
+    pub page_token_id: Option<u32>,
+    #[serde(default = "per_page_default")]
+    pub per_page_image_tokens: usize,
+    #[serde(default = "tok_theta_default")]
+    pub sparse_rope_tok_theta: f32,
+    #[serde(default = "page_theta_default")]
+    pub sparse_rope_page_theta: f32,
+    #[serde(default = "page_pairs_default")]
+    pub sparse_rope_page_pairs: usize,
+    #[serde(default = "truncate")]
+    pub sparse_main_rope_tok_freq_mode: String,
+    pub sparse_rope_page_mod: Option<i32>,
+}
+
+fn two() -> f32 {
+    2.0
+}
+fn floor_default() -> f32 {
+    1e-2
+}
+fn rope_1d() -> String {
+    "1d".into()
+}
+fn stage0_default() -> String {
+    "indexer".into()
+}
+fn block_default() -> usize {
+    128
+}
+fn one() -> usize {
+    1
+}
+fn one_f() -> f32 {
+    1.0
+}
+fn yes() -> bool {
+    true
+}
+fn image_token_default() -> u32 {
+    128_815
+}
+fn per_page_default() -> usize {
+    273
+}
+fn tok_theta_default() -> f32 {
+    10_000.0
+}
+fn page_theta_default() -> f32 {
+    256.0
+}
+fn page_pairs_default() -> usize {
+    8
+}
+fn truncate() -> String {
+    "truncate".into()
+}
+
+impl SparseAttentionConfig {
+    /// `is_dash_config`.
+    pub fn is_dash(&self) -> bool {
+        self.training_stage == "dash" && self.use_sparse_attention
+    }
+}
+
 /// Per-variant geometry spec under `vision_config.width` — fields are
 /// optional because the `clip-l-14-224` sibling variant lacks the SAM
 /// keys; `deeplip_b_l` uses the `sam_vit_b` entry.
@@ -179,7 +274,7 @@ pub struct UnlimitedOcrConfig {
     pub quantization: Option<QuantizationInfo>,
     /// Unlimited-OCR-2 DASH sparse attention (absent on v1 checkpoints).
     #[serde(default)]
-    pub sparse_attention_config: Option<super::dash::SparseAttentionConfig>,
+    pub sparse_attention_config: Option<SparseAttentionConfig>,
 }
 
 impl UnlimitedOcrConfig {
@@ -187,7 +282,7 @@ impl UnlimitedOcrConfig {
     pub fn is_dash(&self) -> bool {
         self.sparse_attention_config
             .as_ref()
-            .is_some_and(super::dash::SparseAttentionConfig::is_dash)
+            .is_some_and(SparseAttentionConfig::is_dash)
     }
 }
 

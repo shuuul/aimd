@@ -4,7 +4,7 @@
 //! - [`find_contours`]: `cv2.findContours(RETR_LIST, CHAIN_APPROX_SIMPLE)`
 //!   (OpenCV 4.13 `contours_new.cpp`, Suzuki border following), including
 //!   hole borders and OpenCV's output order (reverse discovery order).
-//! - [`min_area_rect`] / [`box_points`]: `cv2.minAreaRect` (Sklansky
+//! - [`min_area_rect_i32`] / [`box_points`]: `cv2.minAreaRect` (Sklansky
 //!   convex hull + rotating calipers, `convhull.cpp` / `rotcalipers.cpp`)
 //!   and `cv2.boxPoints`, with clang's FMA contraction mirrored.
 //! - [`box_score_fast`]: `cv2.fillPoly` (`drawing.cpp` edge collection plus

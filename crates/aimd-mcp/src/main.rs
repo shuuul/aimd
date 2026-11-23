@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
+use aimd::NativeRuntime;
 use aimd_mcp::AimdMcp;
-use aimd_process::NativeRuntime;
 use rmcp::{ServiceExt, transport::stdio};
 
 #[tokio::main]

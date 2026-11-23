@@ -37,8 +37,8 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use crate::weights::{WeightsError, load_checkpoint};
 use aimd_mlx::{MlxArray, MlxDtype, MlxError};
-use aimd_weights::{WeightsError, load_checkpoint};
 
 use super::config::{UnlimitedOcrConfig, parse_config};
 pub use super::generate::LayoutBlock;

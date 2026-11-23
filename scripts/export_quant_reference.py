@@ -8,14 +8,14 @@
 # ///
 """Export MLX affine-quantization golden reference fixtures (WS-02).
 
-Deterministic exporter for `crates/aimd-weights/tests/golden/quant/`. Every case stores:
+Deterministic exporter for `crates/aimd-mlx/tests/golden/quant/`. Every case stores:
 
 - ``payload.bin``  raw packed-quant bytes (MLX stores them as little-endian
   ``uint32`` words; saved as the exact file bytes, i.e. little-endian).
 - ``scales.bin``   per-group scale bytes (f16 or bf16 bit patterns, LE).
 - ``biases.bin``   per-group bias bytes (same dtype as scales).
 - ``dequant.bin``  ``mx.dequantize`` output bytes (same dtype as scales),
-  row-major, the bit-exact ground truth for ``aimd-weights``.
+  row-major, the bit-exact ground truth for the Rust dequantization oracle.
 
 Cases:
 
@@ -44,7 +44,7 @@ import mlx.core as mx
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = REPO_ROOT / "crates" / "aimd-weights" / "tests" / "golden" / "quant"
+OUT_DIR = REPO_ROOT / "crates" / "aimd-mlx" / "tests" / "golden" / "quant"
 GROUP_SIZE = 64
 
 HF_SNAPSHOTS = {

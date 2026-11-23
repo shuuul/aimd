@@ -27,8 +27,8 @@
 
 use std::path::Path;
 
+use crate::weights::{WeightsError, load_checkpoint};
 use aimd_mlx::{MlxArray, MlxError};
-use aimd_weights::{WeightsError, load_checkpoint};
 
 use super::config::{ConfigError, DetConfig, RecConfig, load_det_config, load_rec_config};
 use super::ctc::{Decoded, ctc_decode, np_argsort};

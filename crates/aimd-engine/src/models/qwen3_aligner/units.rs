@@ -22,7 +22,31 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use super::pipeline::AlignedUnit;
+/// Languages the native aligner supports, as canonical
+/// [`crate::tokenizer::ASR_LANGUAGES`] names: the checkpoint's
+/// `support_languages` minus Japanese, whose reference unit splitting needs
+/// the nagisa neural tagger.
+pub const ALIGNER_LANGUAGES: &[&str] = &[
+    "Chinese",
+    "Cantonese",
+    "English",
+    "German",
+    "Spanish",
+    "French",
+    "Italian",
+    "Portuguese",
+    "Russian",
+    "Korean",
+];
+
+/// One aligned unit (a CJK character or a word, punctuation dropped);
+/// `start` / `end` in seconds from the start of the clip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlignedUnit {
+    pub text: String,
+    pub start: f32,
+    pub end: f32,
+}
 
 const KOREAN_DICT: &str = include_str!("korean_dict.txt");
 
@@ -121,7 +145,7 @@ fn tokenize_korean(text: &str) -> Vec<String> {
 }
 
 /// Split `text` into alignment units for `language` (a canonical name from
-/// [`super::pipeline::ALIGNER_LANGUAGES`]; anything but `Korean` takes the
+/// [`ALIGNER_LANGUAGES`]; anything but `Korean` takes the
 /// whitespace path).
 pub fn split_units(text: &str, language: &str) -> Vec<String> {
     if language.eq_ignore_ascii_case("korean") {

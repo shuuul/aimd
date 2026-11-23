@@ -8,8 +8,8 @@
 //! (`scale = gamma * rsqrt(var + 1e-5)`, `W * scale`, `beta + scale * (b -
 //! mean)`), so the fused parameters are bit-identical to the reference.
 
+use crate::weights::{WeightStore, WeightsError};
 use aimd_mlx::{Activation, MlxArray, MlxDtype, MlxError, UnaryOp};
-use aimd_weights::{WeightStore, WeightsError};
 
 use super::config::BlockSpec;
 

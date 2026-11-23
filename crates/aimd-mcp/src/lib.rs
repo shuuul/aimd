@@ -9,12 +9,11 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aimd_core::output::{
-    PersistError, get_request_temp_dir, payload_text, persist_result_output_if_requested,
-    result_payload,
+use aimd::output::{
+    PersistError, payload_text, persist_result_output_if_requested, result_payload,
 };
-use aimd_core::{NoHooks, ProcessInput, TaskType};
-use aimd_process::{Runtime, process_input_with};
+use aimd::{NoHooks, ProcessInput, TaskType, get_request_temp_dir};
+use aimd::{Runtime, process_input_with};
 use rmcp::ErrorData;
 use rmcp::RoleServer;
 use rmcp::handler::server::ServerHandler;
@@ -257,8 +256,8 @@ fn run_process_input(args: ProcessArgs, runtime: &dyn Runtime) -> Result<Value, 
                 PersistError::Io(e) => e.to_string(),
             })?;
     if persisted.ignored_output_file {
-        aimd_core::log::emit(
-            aimd_core::log::Level::Warning,
+        aimd::log::emit(
+            aimd::log::Level::Warning,
             module_path!(),
             "Ignoring output_file for document asset conversions; output is a directory.",
         );

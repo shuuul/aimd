@@ -2,8 +2,8 @@
 //! with IntraCL blocks -> DB head (binarize branch), NHWC f32, op-for-op
 //! with mlx4ocr `models/det/{backbone,neck,intracl,head}.py`.
 
+use crate::weights::WeightStore;
 use aimd_mlx::{Activation, MlxArray, MlxError};
-use aimd_weights::WeightStore;
 
 use super::config::DetConfig;
 use super::layers::{Conv, ConvKind, LcNetBlock, LoadError, Stem, load_stages};
